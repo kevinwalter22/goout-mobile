@@ -9,7 +9,11 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Euda needs access to your camera to take photos when you check in at events.",
+        "NSLocationWhenInUseUsageDescription": "Euda needs your location to verify you are at the event before you can check in."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -27,6 +31,18 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Euda needs your location to verify you are at the event before you can check in."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Euda needs access to your camera to take photos when you check in at events."
+        }
+      ],
       [
         "expo-splash-screen",
         {

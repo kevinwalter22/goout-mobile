@@ -1,26 +1,24 @@
-import { Link } from "expo-router";
-import { Pressable, Text, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
+import { router } from "expo-router";
+import { useEffect } from "react";
+import { useAuth } from "../src/hooks/useAuth";
 
 export default function Home() {
-  return (
-    <View style={{ flex: 1, padding: 24, justifyContent: "center", gap: 16 }}>
-      <Text style={{ fontSize: 28, fontWeight: "700" }}>GoOut</Text>
-      <Text style={{ fontSize: 16 }}>
-        Presence &gt; content. Let’s get you off the couch.
-      </Text>
+  const { user, loading } = useAuth();
 
-      <Link href="/events" asChild>
-        <Pressable
-          style={{
-            padding: 14,
-            borderRadius: 12,
-            borderWidth: 1,
-            alignItems: "center",
-          }}
-        >
-          <Text style={{ fontSize: 16, fontWeight: "600" }}>See Today</Text>
-        </Pressable>
-      </Link>
+  useEffect(() => {
+    if (!loading) {
+      if (user) {
+        router.replace("/(tabs)/feed" as any);
+      } else {
+        router.replace("/(auth)/signin" as any);
+      }
+    }
+  }, [user, loading]);
+
+  return (
+    <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+      <ActivityIndicator size="large" />
     </View>
   );
 }
