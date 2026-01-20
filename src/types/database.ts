@@ -38,6 +38,22 @@ export type Post = {
   created_at: string;
 };
 
+export type PostReaction = {
+  id: string;
+  post_id: string;
+  user_id: string;
+  emoji: "❤️" | "😂" | "🔥" | "👏" | "😮" | "😢";
+  created_at: string;
+};
+
+export type PostComment = {
+  id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -59,6 +75,16 @@ export type Database = {
       posts: {
         Row: Post;
         Insert: Omit<Post, "created_at"> & { id?: string };
+        Update: never;
+      };
+      post_reactions: {
+        Row: PostReaction;
+        Insert: Omit<PostReaction, "id" | "created_at">;
+        Update: never;
+      };
+      post_comments: {
+        Row: PostComment;
+        Insert: Omit<PostComment, "id" | "created_at">;
         Update: never;
       };
     };

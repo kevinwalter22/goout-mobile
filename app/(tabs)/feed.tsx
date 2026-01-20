@@ -1,6 +1,8 @@
+import { useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Pressable,
   RefreshControl,
   Text,
   View,
@@ -8,9 +10,12 @@ import {
 import { usePosts } from "../../src/hooks/usePosts";
 import { PostImage } from "../../src/components/PostImage";
 import { DualCameraPost } from "../../src/components/DualCameraPost";
+import { ReactionBar } from "../../src/components/ReactionBar";
+import { CommentSheet } from "../../src/components/CommentSheet";
 
 export default function Feed() {
   const { posts, loading, error, refresh } = usePosts();
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
 
   if (loading && posts.length === 0) {
     return (
@@ -125,9 +130,29 @@ export default function Feed() {
             {item.caption && (
               <Text style={{ fontSize: 14 }}>{item.caption}</Text>
             )}
+
+            {/* Engagement Row */}
+            <View style={{ flexDirection: "row", gap: 16, marginTop: 8 }}>
+              {/* Reactions */}
+              <ReactionBar postId={item.id} />
+
+              {/* Comments Button */}
+              <Pressable onPress={() => setSelectedPostId(item.id)}>
+                <Text style={{ fontSize: 14, color: "#666" }}>💬 Comment</Text>
+              </Pressable>
+            </View>
           </View>
         )}
       />
+
+      {/* Comment Sheet Modal */}
+      {selectedPostId && (
+        <CommentSheet
+          postId={selectedPostId}
+          visible={!!selectedPostId}
+          onClose={() => setSelectedPostId(null)}
+        />
+      )}
     </View>
   );
 }
