@@ -33,7 +33,7 @@ export default function CheckInModeSelector() {
         <Text style={{ fontSize: 18, fontWeight: "600", marginBottom: 4 }}>
           Back Camera
         </Text>
-        <Text style={{ opacity: 0.7 }}>Capture what you're seeing</Text>
+        <Text style={{ opacity: 0.7 }}>Capture what you&apos;re seeing</Text>
       </Pressable>
 
       <Pressable

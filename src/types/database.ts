@@ -58,7 +58,7 @@ export type Database = {
       };
       posts: {
         Row: Post;
-        Insert: Omit<Post, "id" | "created_at">;
+        Insert: Omit<Post, "created_at"> & { id?: string };
         Update: never;
       };
     };

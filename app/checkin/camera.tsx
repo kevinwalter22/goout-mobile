@@ -37,7 +37,7 @@ export default function CameraCapture() {
     if (permission && !permission.granted) {
       requestPermission();
     }
-  }, [permission]);
+  }, [permission, requestPermission]);
 
   const isDualMode = mode === CAMERA_MODES.DUAL;
   const needsBackPhoto = isDualMode && photos.length === 0;
@@ -111,10 +111,10 @@ export default function CameraCapture() {
         caption: caption.trim() || null,
         photo_path: backPath,
         front_photo_path: frontPath,
-        camera_mode: mode,
+        camera_mode: mode as "front" | "back" | "dual",
         latitude: null,
         longitude: null,
-      });
+      } as any);
 
       if (postError) {
         console.error("[Post] DB insert failed:", postError);

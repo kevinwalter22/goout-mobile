@@ -120,7 +120,7 @@ export default function SignIn() {
               gap: 6,
             }}
           >
-            <Text style={{ opacity: 0.7 }}>Don't have an account?</Text>
+            <Text style={{ opacity: 0.7 }}>Don&apos;t have an account?</Text>
             <Link href="/(auth)/signup" asChild>
               <Pressable>
                 <Text style={{ fontWeight: "600" }}>Sign Up</Text>

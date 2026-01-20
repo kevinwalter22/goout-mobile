@@ -42,7 +42,7 @@ export async function requestLocationPermission(): Promise<{
           ? "Location permission is required to check in"
           : undefined,
     };
-  } catch (error) {
+  } catch (_error) {
     return {
       granted: false,
       error: "Failed to request location permission",
@@ -67,7 +67,7 @@ export async function getCurrentLocation(): Promise<{
       latitude: location.coords.latitude,
       longitude: location.coords.longitude,
     };
-  } catch (error) {
+  } catch (_error) {
     return {
       latitude: 0,
       longitude: 0,

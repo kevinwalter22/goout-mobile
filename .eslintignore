@@ -1,0 +1,5 @@
+# GSD toolkit - external dependency
+gsd/
+
+# Expo generated files
+.expo/

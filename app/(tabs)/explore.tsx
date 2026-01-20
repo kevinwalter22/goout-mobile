@@ -54,7 +54,7 @@ export default function Explore() {
 
       // For each event, get RSVP count and user status
       const eventsWithRSVP = await Promise.all(
-        (eventsData ?? []).map(async (event) => {
+        (eventsData ?? []).map(async (event: EventRow) => {
           // Get total RSVP count
           const { count } = await supabase
             .from("event_rsvps")
@@ -92,7 +92,7 @@ export default function Explore() {
     return () => {
       alive = false;
     };
-  }, [user?.id]);
+  }, [user]);
 
   return (
     <View style={{ flex: 1, padding: 16 }}>
@@ -184,7 +184,7 @@ export default function Explore() {
                           color: "#fff",
                         }}
                       >
-                        ✓ I'm Going
+                        ✓ I&apos;m Going
                       </Text>
                     </View>
                   )}

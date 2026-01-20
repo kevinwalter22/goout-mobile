@@ -36,7 +36,7 @@ export async function compositeDualCameraImages(
     console.log("[Composite] Overlay dimensions:", { overlayWidth, overlayHeight });
 
     // Resize front camera photo to overlay size
-    const resizedFront = await ImageManipulator.manipulateAsync(
+    const _resizedFront = await ImageManipulator.manipulateAsync(
       frontPhotoUri,
       [
         {
@@ -52,8 +52,8 @@ export async function compositeDualCameraImages(
     console.log("[Composite] Resized front camera image");
 
     // Position overlay in top-right corner with 16px padding
-    const overlayX = mainWidth - overlayWidth - 16;
-    const overlayY = 16;
+    const _overlayX = mainWidth - overlayWidth - 16;
+    const _overlayY = 16;
 
     // Composite the images using the back photo as base
     // Unfortunately expo-image-manipulator doesn't support direct compositing

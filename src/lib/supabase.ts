@@ -11,11 +11,13 @@ let storage: any;
 if (typeof window !== "undefined") {
   if (Platform.OS === "web") {
     // Use AsyncStorage for web
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const AsyncStorage = require("@react-native-async-storage/async-storage")
       .default;
     storage = AsyncStorage;
   } else {
     // Use SecureStore for native
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const SecureStore = require("expo-secure-store");
     storage = {
       getItem: (key: string) => {

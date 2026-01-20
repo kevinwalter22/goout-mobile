@@ -56,7 +56,7 @@ export function useEventRSVP(eventId: string) {
       // Add RSVP
       const { error } = await supabase
         .from("event_rsvps")
-        .insert({ event_id: eventId, user_id: user.id });
+        .insert({ event_id: eventId, user_id: user.id } as any);
 
       if (!error) {
         setIsGoing(true);
@@ -67,7 +67,7 @@ export function useEventRSVP(eventId: string) {
 
   useEffect(() => {
     loadRSVPStatus();
-  }, [eventId, user?.id]);
+  }, [eventId, user?.id, loadRSVPStatus]);
 
   return {
     isGoing,

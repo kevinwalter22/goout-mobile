@@ -47,7 +47,7 @@ export default function EventDetail() {
     setCheckingIn(true);
 
     try {
-      const { allowed, distance, error } = await verifyCheckInLocation(
+      const { allowed, error } = await verifyCheckInLocation(
         event.latitude,
         event.longitude,
       );

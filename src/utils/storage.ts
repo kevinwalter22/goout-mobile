@@ -1,7 +1,6 @@
 import { supabase } from "../lib/supabase";
 
 const BUCKET_NAME = "posts";
-const SIGNED_URL_EXPIRY = 3600; // 1 hour in seconds
 
 // In-memory cache for signed URLs
 const signedUrlCache = new Map<

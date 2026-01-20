@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  ImageStyle,
   StyleProp,
   Text,
   View,
@@ -11,7 +12,7 @@ import { getPostImageUrl } from "../utils/storage";
 
 type PostImageProps = {
   photoPath: string;
-  style?: StyleProp<ViewStyle>;
+  style?: StyleProp<ImageStyle | ViewStyle>;
 };
 
 export function PostImage({ photoPath, style }: PostImageProps) {
@@ -94,7 +95,7 @@ export function PostImage({ photoPath, style }: PostImageProps) {
   return (
     <Image
       source={{ uri: imageUrl }}
-      style={style}
+      style={style as StyleProp<ImageStyle>}
       resizeMode="cover"
       onError={() => {
         setError(true);

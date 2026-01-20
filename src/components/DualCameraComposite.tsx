@@ -31,10 +31,12 @@ export function DualCameraComposite({
 
     try {
       console.log("[Composite] Capturing composite view");
-      const uri = await viewShotRef.current.capture();
-      console.log("[Composite] Composite captured:", uri);
-      setCaptured(true);
-      onCapture(uri);
+      const uri = await viewShotRef.current.capture?.();
+      if (uri) {
+        console.log("[Composite] Composite captured:", uri);
+        setCaptured(true);
+        onCapture(uri);
+      }
     } catch (error) {
       console.error("[Composite] Error capturing:", error);
       // Fallback to back camera photo
@@ -51,7 +53,7 @@ export function DualCameraComposite({
       const timer = setTimeout(() => captureComposite(), 500);
       return () => clearTimeout(timer);
     }
-  }, [backLoaded, frontLoaded, captured]);
+  }, [backLoaded, frontLoaded, captured, captureComposite]);
 
   return (
     <ViewShot

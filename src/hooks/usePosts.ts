@@ -38,9 +38,9 @@ export function usePosts() {
       }
 
       // Get unique user IDs and event IDs
-      const userIds = [...new Set(postsData.map((p) => p.user_id))];
+      const userIds = [...new Set(postsData.map((p: Post) => p.user_id))];
       const eventIds = [
-        ...new Set(postsData.map((p) => p.event_id).filter(Boolean)),
+        ...new Set(postsData.map((p: Post) => p.event_id).filter(Boolean) as string[]),
       ];
 
       // Fetch profiles for these users
@@ -57,12 +57,12 @@ export function usePosts() {
 
       // Create lookup maps
       const profilesMap = new Map(
-        profilesData?.map((p) => [p.id, p]) || [],
+        profilesData?.map((p: any) => [p.id, p]) || [],
       );
-      const eventsMap = new Map(eventsData?.map((e) => [e.id, e]) || []);
+      const eventsMap = new Map(eventsData?.map((e: any) => [e.id, e]) || []);
 
       // Combine data
-      const postsWithDetails: PostWithDetails[] = postsData.map((post) => ({
+      const postsWithDetails: PostWithDetails[] = postsData.map((post: Post) => ({
         ...post,
         profile: profilesMap.get(post.user_id) || null,
         event: post.event_id ? eventsMap.get(post.event_id) || null : null,
