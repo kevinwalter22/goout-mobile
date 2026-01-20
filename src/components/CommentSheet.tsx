@@ -78,15 +78,20 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
         `)
         .single();
 
-      if (!error && data) {
+      if (error) {
+        console.error("[Comment] Insert error:", error);
+        Alert.alert("Error", `Failed to post comment: ${error.message}`);
+        return;
+      }
+
+      if (data) {
+        console.log("[Comment] Posted successfully:", data);
         setComments((prev) => [...prev, data as any]);
         setCommentText("");
-      } else {
-        Alert.alert("Error", "Failed to post comment");
       }
     } catch (error) {
-      console.error("Error posting comment:", error);
-      Alert.alert("Error", "Failed to post comment");
+      console.error("[Comment] Exception:", error);
+      Alert.alert("Error", `Failed to post comment: ${error}`);
     } finally {
       setSubmitting(false);
     }
