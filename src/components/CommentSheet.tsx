@@ -42,18 +42,38 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
 
   async function loadComments() {
     setLoading(true);
-    const { data, error } = await supabase
+
+    // Fetch comments
+    const { data: commentsData, error: commentsError } = await supabase
       .from("post_comments")
-      .select(`
-        *,
-        profile:profiles(username)
-      `)
+      .select("*")
       .eq("post_id", postId)
       .order("created_at", { ascending: true });
 
-    if (!error && data) {
-      setComments(data as any);
+    if (commentsError || !commentsData) {
+      setLoading(false);
+      return;
     }
+
+    // Fetch profiles for all unique user IDs
+    const userIds = [...new Set(commentsData.map((c: any) => c.user_id))];
+    const { data: profilesData } = await supabase
+      .from("profiles")
+      .select("id, username")
+      .in("id", userIds);
+
+    // Create a map of user_id -> profile
+    const profileMap = new Map(
+      (profilesData || []).map((p: any) => [p.id, p])
+    );
+
+    // Combine comments with profiles
+    const commentsWithProfiles = commentsData.map((comment: any) => ({
+      ...comment,
+      profile: profileMap.get(comment.user_id) || null,
+    }));
+
+    setComments(commentsWithProfiles as any);
     setLoading(false);
   }
 
@@ -69,24 +89,34 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
     setSubmitting(true);
 
     try {
-      const { data, error } = await supabase
+      // Insert the comment first
+      const { data: commentData, error: insertError } = await supabase
         .from("post_comments")
         .insert({ post_id: postId, user_id: user.id, content } as any)
-        .select(`
-          *,
-          profile:profiles(username)
-        `)
+        .select()
         .single();
 
-      if (error) {
-        console.error("[Comment] Insert error:", error);
-        Alert.alert("Error", `Failed to post comment: ${error.message}`);
+      if (insertError) {
+        console.error("[Comment] Insert error:", insertError);
+        Alert.alert("Error", `Failed to post comment: ${insertError.message}`);
         return;
       }
 
-      if (data) {
-        console.log("[Comment] Posted successfully:", data);
-        setComments((prev) => [...prev, data as any]);
+      // Then fetch the profile separately
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("username")
+        .eq("id", user.id)
+        .single();
+
+      // Combine the data
+      if (commentData) {
+        const commentWithProfile = {
+          ...(commentData as any),
+          profile: profileData || null,
+        };
+        console.log("[Comment] Posted successfully:", commentWithProfile);
+        setComments((prev) => [...prev, commentWithProfile as any]);
         setCommentText("");
       }
     } catch (error) {

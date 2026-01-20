@@ -59,7 +59,7 @@ export default function Feed() {
       <View
         style={{
           padding: 16,
-          paddingTop: 8,
+          paddingTop: 60,
           borderBottomWidth: 1,
           borderBottomColor: "#e0e0e0",
         }}
@@ -132,13 +132,24 @@ export default function Feed() {
             )}
 
             {/* Engagement Row */}
-            <View style={{ flexDirection: "row", gap: 16, marginTop: 8 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 16, marginTop: 8 }}>
               {/* Reactions */}
               <ReactionBar postId={item.id} />
 
               {/* Comments Button */}
-              <Pressable onPress={() => setSelectedPostId(item.id)}>
-                <Text style={{ fontSize: 14, color: "#666" }}>💬 Comment</Text>
+              <Pressable
+                onPress={() => setSelectedPostId(item.id)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 4,
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                }}
+              >
+                <Text style={{ fontSize: 14, color: "#666" }}>
+                  💬 {item.comment_count > 0 ? item.comment_count : "Comment"}
+                </Text>
               </Pressable>
             </View>
           </View>

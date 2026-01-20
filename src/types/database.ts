@@ -54,6 +54,13 @@ export type PostComment = {
   created_at: string;
 };
 
+export type Friendship = {
+  id: string;
+  user_id: string;
+  friend_id: string;
+  created_at: string;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -85,6 +92,11 @@ export type Database = {
       post_comments: {
         Row: PostComment;
         Insert: Omit<PostComment, "id" | "created_at">;
+        Update: never;
+      };
+      friendships: {
+        Row: Friendship;
+        Insert: Omit<Friendship, "id" | "created_at">;
         Update: never;
       };
     };

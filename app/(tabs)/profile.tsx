@@ -1,9 +1,16 @@
+import { useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useAuth } from "../../src/hooks/useAuth";
+import { useFriendsList } from "../../src/hooks/useFriendsList";
+import { UserSearchSheet } from "../../src/components/UserSearchSheet";
+import { FriendsSheet } from "../../src/components/FriendsSheet";
 
 export default function Profile() {
   const { profile, loading, signOut } = useAuth();
+  const { friends } = useFriendsList();
+  const [showUserSearch, setShowUserSearch] = useState(false);
+  const [showFriends, setShowFriends] = useState(false);
 
   async function handleSignOut() {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -43,7 +50,7 @@ export default function Profile() {
   }
 
   return (
-    <View style={{ flex: 1, padding: 24 }}>
+    <View style={{ flex: 1, padding: 24, paddingTop: 60 }}>
       <View style={{ marginTop: 24, gap: 24 }}>
         <View
           style={{
@@ -84,9 +91,44 @@ export default function Profile() {
             <Text style={{ fontSize: 14, opacity: 0.7 }}>Streak</Text>
           </View>
           <View style={{ alignItems: "center", gap: 4 }}>
-            <Text style={{ fontSize: 20, fontWeight: "700" }}>0</Text>
+            <Text style={{ fontSize: 20, fontWeight: "700" }}>
+              {friends.length}
+            </Text>
             <Text style={{ fontSize: 14, opacity: 0.7 }}>Friends</Text>
           </View>
+        </View>
+
+        {/* Friend Management Buttons */}
+        <View style={{ gap: 12, marginTop: 16 }}>
+          <Pressable
+            onPress={() => setShowUserSearch(true)}
+            style={{
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: 20,
+              backgroundColor: "#007AFF",
+              alignItems: "center",
+            }}
+          >
+            <Text style={{ fontSize: 16, fontWeight: "600", color: "#fff" }}>
+              Add Friends
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => setShowFriends(true)}
+            style={{
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: 20,
+              backgroundColor: "#f5f5f5",
+              alignItems: "center",
+            }}
+          >
+            <Text style={{ fontSize: 16, fontWeight: "600", color: "#000" }}>
+              View Friends
+            </Text>
+          </Pressable>
         </View>
 
         <View style={{ gap: 12, marginTop: 8 }}>
@@ -105,6 +147,16 @@ export default function Profile() {
           </Pressable>
         </View>
       </View>
+
+      {/* Modals */}
+      <UserSearchSheet
+        visible={showUserSearch}
+        onClose={() => setShowUserSearch(false)}
+      />
+      <FriendsSheet
+        visible={showFriends}
+        onClose={() => setShowFriends(false)}
+      />
     </View>
   );
 }

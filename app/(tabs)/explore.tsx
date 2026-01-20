@@ -95,13 +95,12 @@ export default function Explore() {
   }, [user]);
 
   return (
-    <View style={{ flex: 1, padding: 16 }}>
+    <View style={{ flex: 1, padding: 16, paddingTop: 60 }}>
       <Text
         style={{
           fontSize: 24,
           fontWeight: "700",
           marginBottom: 16,
-          marginTop: 8,
         }}
       >
         Explore
