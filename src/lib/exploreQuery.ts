@@ -258,6 +258,11 @@ export async function queryExploreItems(
     // ========================================
     const offset = filters.page * filters.pageSize;
 
+    // Distance sort requires client-side ordering (no PostGIS).
+    // Overfetch all matching rows so we can sort by distance and slice to the correct page.
+    const DISTANCE_OVERFETCH_CAP = 500;
+    const isDistanceSort = filters.sort === "distance" && !!userLocation;
+
     // Attempt RPC query when date range or tags are active
     if (dateRange || dbTags) {
       try {
@@ -270,8 +275,8 @@ export async function queryExploreItems(
             p_price_bucket: effectivePriceBucket !== "all" ? effectivePriceBucket : null,
             p_time_of_day: null, // TODO: Add time of day filtering
             p_tags: dbTags,
-            p_limit: filters.pageSize,
-            p_offset: offset,
+            p_limit: isDistanceSort ? DISTANCE_OVERFETCH_CAP : filters.pageSize,
+            p_offset: isDistanceSort ? 0 : offset,
           }
         );
 
@@ -294,19 +299,27 @@ export async function queryExploreItems(
             dataLength: rpcData.length,
           });
 
-          const filteredData = applyDistanceFilter(rpcData, userLocation, filters);
-          const dbTotalCount = countData || rpcData.length;
+          // Apply distance filter/sort on all fetched rows
+          const sortedData = applyDistanceFilter(rpcData, userLocation, filters);
 
-          // When distance filtering is active, we can't know exact total without fetching all
-          // Use conservative hasMore: true if we got a full page from DB (more might exist)
+          if (isDistanceSort) {
+            // Slice to the correct page from the fully-sorted window
+            const page = sortedData.slice(offset, offset + filters.pageSize);
+            return {
+              data: page,
+              count: sortedData.length,
+              hasMore: offset + filters.pageSize < sortedData.length,
+              error: null,
+            };
+          }
+
+          const dbTotalCount = countData || rpcData.length;
           const isDistanceFiltering = userLocation && filters.distance !== "any";
           const gotFullPage = rpcData.length >= filters.pageSize;
 
           return {
-            data: filteredData,
-            // Show filtered count to user (accurate for what they see)
-            count: isDistanceFiltering ? filteredData.length : dbTotalCount,
-            // Conservative: show "load more" if DB returned full page (more might pass filter)
+            data: sortedData,
+            count: isDistanceFiltering ? sortedData.length : dbTotalCount,
             hasMore: isDistanceFiltering ? gotFullPage : offset + rpcData.length < dbTotalCount,
             error: null,
           };
@@ -367,8 +380,12 @@ export async function queryExploreItems(
         break;
     }
 
-    // Apply pagination
-    query = query.range(offset, offset + filters.pageSize - 1);
+    // Apply pagination (overfetch when distance sorting for stable client-side order)
+    if (isDistanceSort) {
+      query = query.range(0, DISTANCE_OVERFETCH_CAP - 1);
+    } else {
+      query = query.range(offset, offset + filters.pageSize - 1);
+    }
 
     // Execute query
     const { data, error, count } = await query;
@@ -389,19 +406,26 @@ export async function queryExploreItems(
       };
     }
 
-    const dbTotalCount = count || 0;
-    const filteredData = applyDistanceFilter(data || [], userLocation, filters);
+    const sortedData = applyDistanceFilter(data || [], userLocation, filters);
 
-    // When distance filtering is active, we can't know exact total without fetching all
-    // Use conservative hasMore: true if we got a full page from DB (more might exist)
+    if (isDistanceSort) {
+      // Slice to correct page from the fully-sorted window
+      const page = sortedData.slice(offset, offset + filters.pageSize);
+      return {
+        data: page,
+        count: sortedData.length,
+        hasMore: offset + filters.pageSize < sortedData.length,
+        error: null,
+      };
+    }
+
+    const dbTotalCount = count || 0;
     const isDistanceFiltering = userLocation && filters.distance !== "any";
     const gotFullPage = (data?.length || 0) >= filters.pageSize;
 
     return {
-      data: filteredData,
-      // Show filtered count to user (accurate for what they see)
-      count: isDistanceFiltering ? filteredData.length : dbTotalCount,
-      // Conservative: show "load more" if DB returned full page (more might pass filter)
+      data: sortedData,
+      count: isDistanceFiltering ? sortedData.length : dbTotalCount,
       hasMore: isDistanceFiltering ? gotFullPage : offset + (data?.length || 0) < dbTotalCount,
       error: null,
     };
@@ -477,13 +501,23 @@ function applyDistanceFilter(
   }
 
   // Step 2: Apply distance sorting (whenever sort is "distance", regardless of filter)
+  // Uses deterministic tie-breaker (starts_at, then id) for stable pagination
   if (filters.sort === "distance") {
     result.sort((a, b) => {
       if (!a.lat || !a.lng) return 1;
       if (!b.lat || !b.lng) return -1;
       const distA = getDistanceInMiles(userLocation.lat, userLocation.lng, a.lat, a.lng);
       const distB = getDistanceInMiles(userLocation.lat, userLocation.lng, b.lat, b.lng);
-      return distA - distB;
+      if (distA !== distB) return distA - distB;
+      // Tie-breaker 1: starts_at (nulls last)
+      if (a.starts_at && b.starts_at) {
+        const timeDiff = new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
+        if (timeDiff !== 0) return timeDiff;
+      }
+      if (a.starts_at && !b.starts_at) return -1;
+      if (!a.starts_at && b.starts_at) return 1;
+      // Tie-breaker 2: id (guaranteed unique)
+      return (a.id || "").localeCompare(b.id || "");
     });
   }
 
