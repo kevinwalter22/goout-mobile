@@ -338,7 +338,8 @@ export async function queryExploreItems(
     // ========================================
     let query = supabase
       .from("explore_items")
-      .select("*", { count: "exact" });
+      .select("*", { count: "exact" })
+      .gte("priority", 0); // Exclude stale/demoted items (priority = -1)
 
     // Apply time filter (simple version - includes all activities)
     if (dateRange) {
