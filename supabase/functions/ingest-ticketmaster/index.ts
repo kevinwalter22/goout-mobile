@@ -1,23 +1,19 @@
 /**
- * Eventbrite API v3 Ingestion
+ * Ticketmaster Discovery API Ingestion
  *
- * Fetches events from Eventbrite near a given location and stores raw data.
+ * Fetches events from Ticketmaster near a given location and stores raw data.
  * Designed for scheduled execution (daily or every 6 hours).
  *
  * Features:
  * - Configurable lat/lng, radius, and date window
- * - Idempotent — uses external_id for deduplication
+ * - Idempotent - uses external_id for deduplication
  * - Stores raw JSON for debugging
  * - Auto-enqueues normalization jobs via database trigger
  *
  * Required secrets:
- * - EVENTBRITE_API_KEY: Private OAuth token from Eventbrite
+ * - TICKETMASTER_API_KEY: Your Ticketmaster Discovery API key
  *
- * API Reference: https://www.eventbrite.com/platform/api
- *
- * Eventbrite search endpoint:
- *   GET /v3/events/search/?location.latitude=X&location.longitude=Y&location.within=Xmi
- *   Returns paginated list of public events with pagination object.
+ * API Reference: https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -28,12 +24,14 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const EVENTBRITE_BASE_URL = "https://www.eventbriteapi.com/v3";
+const TICKETMASTER_BASE_URL =
+  "https://app.ticketmaster.com/discovery/v2/events.json";
 
 interface IngestConfig {
   lat?: number;
   lng?: number;
   radius?: number; // miles
+  radius_unit?: "miles" | "km";
   days_ahead?: number;
   page_size?: number;
   max_pages?: number;
@@ -52,6 +50,7 @@ const DEFAULT_CONFIG: Required<IngestConfig> = {
   lat: 44.6697,
   lng: -74.9814,
   radius: 50,
+  radius_unit: "miles",
   days_ahead: 90,
   page_size: 50,
   max_pages: 5,
@@ -69,7 +68,7 @@ async function hashJson(obj: unknown): Promise<string> {
 }
 
 /**
- * Format date for Eventbrite API (ISO 8601 without ms)
+ * Format date for Ticketmaster API (ISO 8601 with Z)
  */
 function formatDateForApi(date: Date): string {
   return date.toISOString().split(".")[0] + "Z";
@@ -94,12 +93,12 @@ Deno.serve(async (req) => {
     const cfg = { ...DEFAULT_CONFIG, ...config };
 
     // Get API key
-    const apiKey = Deno.env.get("EVENTBRITE_API_KEY");
+    const apiKey = Deno.env.get("TICKETMASTER_API_KEY");
     if (!apiKey) {
       return new Response(
         JSON.stringify({
-          error: "EVENTBRITE_API_KEY not configured",
-          message: "Add EVENTBRITE_API_KEY (private OAuth token) to your Supabase secrets",
+          error: "TICKETMASTER_API_KEY not configured",
+          message: "Add TICKETMASTER_API_KEY to your Supabase secrets",
         }),
         {
           status: 500,
@@ -113,12 +112,12 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get or create Eventbrite source (idempotent)
+    // Get or create Ticketmaster source
     let sourceId: string;
     const { data: existingSource } = await supabase
       .from("event_sources")
       .select("id")
-      .eq("name", "Eventbrite")
+      .eq("name", "Ticketmaster")
       .single();
 
     if (existingSource) {
@@ -127,8 +126,8 @@ Deno.serve(async (req) => {
       const { data: newSource, error: createError } = await supabase
         .from("event_sources")
         .insert({
-          name: "Eventbrite",
-          type: "api_eventbrite",
+          name: "Ticketmaster",
+          type: "api_ticketmaster",
           is_enabled: true,
           config_json: {
             default_lat: cfg.lat,
@@ -146,7 +145,7 @@ Deno.serve(async (req) => {
     }
 
     console.log(
-      `Ingesting Eventbrite events: lat=${cfg.lat}, lng=${cfg.lng}, radius=${cfg.radius}mi`
+      `Ingesting Ticketmaster events: lat=${cfg.lat}, lng=${cfg.lng}, radius=${cfg.radius}${cfg.radius_unit}`
     );
     console.log(`Looking ahead ${cfg.days_ahead} days, dry_run=${cfg.dry_run}`);
 
@@ -157,68 +156,55 @@ Deno.serve(async (req) => {
 
     const results: IngestResult[] = [];
     let totalFetched = 0;
-    let page = 1; // Eventbrite pages are 1-indexed
+    let page = 0;
 
     // Fetch pages of events
-    while (page <= cfg.max_pages) {
+    while (page < cfg.max_pages) {
       const params = new URLSearchParams({
-        "location.latitude": cfg.lat.toString(),
-        "location.longitude": cfg.lng.toString(),
-        "location.within": `${cfg.radius}mi`,
-        "start_date.range_start": formatDateForApi(startDate),
-        "start_date.range_end": formatDateForApi(endDate),
-        "page": page.toString(),
-        "page_size": cfg.page_size.toString(),
-        "expand": "venue,ticket_classes,category,subcategory",
-        "status": "live",
+        apikey: apiKey,
+        latlong: `${cfg.lat},${cfg.lng}`,
+        radius: cfg.radius.toString(),
+        unit: cfg.radius_unit,
+        startDateTime: formatDateForApi(startDate),
+        endDateTime: formatDateForApi(endDate),
+        size: cfg.page_size.toString(),
+        page: page.toString(),
+        sort: "date,asc",
       });
 
-      console.log(`Fetching page ${page}...`);
+      console.log(`Fetching page ${page + 1}...`);
 
-      const response = await fetch(
-        `${EVENTBRITE_BASE_URL}/events/search/?${params}`,
-        {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-          },
-        }
-      );
+      const response = await fetch(`${TICKETMASTER_BASE_URL}?${params}`);
 
       if (!response.ok) {
         const errorText = await response.text();
-        // 401 = bad token, 429 = rate limited
-        if (response.status === 429) {
-          console.warn("Eventbrite rate limit hit, stopping pagination");
-          break;
-        }
         throw new Error(
-          `Eventbrite API error: ${response.status} - ${errorText}`
+          `Ticketmaster API error: ${response.status} - ${errorText}`
         );
       }
 
       const data = await response.json();
 
       // Check if we have events
-      const events = data.events || [];
-      if (events.length === 0) {
-        console.log(`No more events on page ${page}`);
+      if (!data._embedded?.events || data._embedded.events.length === 0) {
+        console.log(`No more events on page ${page + 1}`);
         break;
       }
 
+      const events = data._embedded.events;
       totalFetched += events.length;
-      console.log(`Processing ${events.length} events from page ${page}...`);
+
+      console.log(`Processing ${events.length} events from page ${page + 1}...`);
 
       // Process each event
       for (const event of events) {
-        const externalId = event.id?.toString();
-        if (!externalId) continue;
-
+        const externalId = event.id;
         const rawHash = await hashJson(event);
 
         if (cfg.dry_run) {
           results.push({
             external_id: externalId,
-            name: event.name?.text || "Untitled",
+            name: event.name,
             status: "unchanged",
           });
           continue;
@@ -234,9 +220,10 @@ Deno.serve(async (req) => {
             .single();
 
           if (existing && existing.raw_hash === rawHash) {
+            // No change
             results.push({
               external_id: externalId,
-              name: event.name?.text || "Untitled",
+              name: event.name,
               status: "unchanged",
             });
             continue;
@@ -265,30 +252,30 @@ Deno.serve(async (req) => {
 
           results.push({
             external_id: externalId,
-            name: event.name?.text || "Untitled",
+            name: event.name,
             status: existing ? "updated" : "inserted",
           });
         } catch (error) {
           results.push({
             external_id: externalId,
-            name: event.name?.text || "Untitled",
+            name: event.name,
             status: "error",
             error: error instanceof Error ? error.message : "Unknown error",
           });
         }
       }
 
-      // Check pagination
-      const pagination = data.pagination;
-      if (!pagination || !pagination.has_more_items) {
-        console.log(`No more pages (total pages: ${pagination?.page_count || page})`);
+      // Check if there are more pages
+      const totalPages = data.page?.totalPages || 1;
+      if (page + 1 >= totalPages) {
+        console.log(`Reached last page (${totalPages} total)`);
         break;
       }
 
       page++;
 
-      // Rate limit: be conservative (Eventbrite has stricter limits than TM)
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Rate limit: 5 requests per second for Discovery API
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
 
     // Update last_fetch_at on source
@@ -314,7 +301,7 @@ Deno.serve(async (req) => {
         success: true,
         summary: {
           total_fetched: totalFetched,
-          pages_processed: page,
+          pages_processed: page + 1,
           inserted,
           updated,
           unchanged,
@@ -324,6 +311,7 @@ Deno.serve(async (req) => {
           lat: cfg.lat,
           lng: cfg.lng,
           radius: cfg.radius,
+          radius_unit: cfg.radius_unit,
           days_ahead: cfg.days_ahead,
           dry_run: cfg.dry_run,
         },
