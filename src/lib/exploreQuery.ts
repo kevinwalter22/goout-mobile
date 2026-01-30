@@ -340,6 +340,7 @@ export async function queryExploreItems(
       .from("explore_items")
       .select("*", { count: "exact" })
       .gte("priority", 0) // Exclude stale/demoted items (priority = -1)
+      .eq("is_duplicate", false) // Exclude cross-source duplicates
       .or("normalized_confidence.is.null,normalized_confidence.gte.40"); // Quality gate
 
     // Apply time filter (simple version - includes all activities)
