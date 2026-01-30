@@ -185,6 +185,22 @@ export function getDateRangeForTimeWindow(timeWindow: TimeWindow): DateRange | n
 }
 
 // ============================================================================
+// SEASON HELPER
+// ============================================================================
+
+/**
+ * Get the current season based on the month.
+ * Matches the Postgres get_current_season() function.
+ */
+function getCurrentSeason(): string {
+  const month = new Date().getMonth() + 1; // 1-12
+  if (month >= 3 && month <= 5) return "spring";
+  if (month >= 6 && month <= 8) return "summer";
+  if (month >= 9 && month <= 11) return "fall";
+  return "winter";
+}
+
+// ============================================================================
 // QUERY BUILDER
 // ============================================================================
 
@@ -194,6 +210,7 @@ export function getDateRangeForTimeWindow(timeWindow: TimeWindow): DateRange | n
  * Uses availability_json for smart filtering:
  * - Events: Filtered by next_occurrence date
  * - Activities: Filtered by available_days pattern
+ * - Season: Auto-filters by current season via availability_json
  *
  * Falls back to starts_at for non-enriched items.
  */
@@ -263,6 +280,9 @@ export async function queryExploreItems(
     const DISTANCE_OVERFETCH_CAP = 500;
     const isDistanceSort = filters.sort === "distance" && !!userLocation;
 
+    // Always pass season for availability-aware filtering
+    const currentSeason = getCurrentSeason();
+
     // Attempt RPC query when date range or tags are active
     if (dateRange || dbTags) {
       try {
@@ -275,6 +295,7 @@ export async function queryExploreItems(
             p_price_bucket: effectivePriceBucket !== "all" ? effectivePriceBucket : null,
             p_time_of_day: null, // TODO: Add time of day filtering
             p_tags: dbTags,
+            p_season: currentSeason,
             p_limit: isDistanceSort ? DISTANCE_OVERFETCH_CAP : filters.pageSize,
             p_offset: isDistanceSort ? 0 : offset,
           }
@@ -290,6 +311,7 @@ export async function queryExploreItems(
             p_price_bucket: effectivePriceBucket !== "all" ? effectivePriceBucket : null,
             p_time_of_day: null,
             p_tags: dbTags,
+            p_season: currentSeason,
           }
         );
 
