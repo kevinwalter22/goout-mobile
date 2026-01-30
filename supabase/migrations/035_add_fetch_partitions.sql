@@ -46,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_fetch_partitions_next
 CREATE OR REPLACE TRIGGER trg_fetch_partitions_updated
   BEFORE UPDATE ON fetch_partitions
   FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at();
+  EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================================
 -- 2. Pick next partition to fetch (round-robin by staleness)
