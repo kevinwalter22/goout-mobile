@@ -76,7 +76,7 @@ BEGIN
     COALESCE(es.config_json, '{}'::JSONB) || fp.config_json AS config_json,
     CASE
       WHEN fp.last_fetched_at IS NOT NULL
-      THEN EXTRACT(EPOCH FROM (NOW() - fp.last_fetched_at)) / 60.0
+      THEN (EXTRACT(EPOCH FROM (NOW() - fp.last_fetched_at)) / 60.0)::FLOAT8
       ELSE NULL  -- Never fetched = highest priority
     END AS minutes_since_fetch
   FROM fetch_partitions fp
