@@ -47,6 +47,7 @@ const DEFAULT_CONFIG: Required<CoordinatorConfig> = {
 const SOURCE_FUNCTION_MAP: Record<string, string> = {
   api_ticketmaster: "ingest-ticketmaster",
   api_eventbrite: "ingest-eventbrite",
+  api_google_places: "ingest-google-places",
 };
 
 Deno.serve(async (req) => {
