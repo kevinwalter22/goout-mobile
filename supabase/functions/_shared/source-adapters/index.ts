@@ -16,6 +16,7 @@ import {
   type NormalizedEvent,
 } from "./ticketmaster.ts";
 import { normalizeEventbriteEvent } from "./eventbrite.ts";
+import { normalizeGooglePlacesEvent } from "./google_places.ts";
 
 export type { NormalizedEvent };
 
@@ -32,8 +33,7 @@ export type NormalizeFunction = (raw: any) => NormalizedEvent;
 export const ADAPTERS: Record<string, NormalizeFunction> = {
   api_ticketmaster: normalizeTicketmasterEvent,
   api_eventbrite: normalizeEventbriteEvent,
-  // Add more adapters here:
-  // api_predicthq: normalizePredicthqEvent,
+  api_google_places: normalizeGooglePlacesEvent,
 };
 
 /**

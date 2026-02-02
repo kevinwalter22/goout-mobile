@@ -189,7 +189,7 @@ Deno.serve(async (req) => {
         const fieldNorm = normalizeFields({
           category: mapped.category,
           price_bucket: mapped.price_bucket,
-          tags: mapped.tags as string[] | undefined,
+          tags: mapped.tags,
           town: mapped.town,
         });
 
