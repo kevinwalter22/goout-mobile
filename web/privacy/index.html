@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — Euda</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="container">
+    <a href="/" class="logo">euda</a>
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: February 2026</p>
+
+    <h2>Overview</h2>
+    <p>Euda ("the App", "we", "our") is a social app that helps you discover local events and activities, check in with photos, and connect with friends. This policy explains what information we collect, how we use it, and the choices you have.</p>
+
+    <h2>1. Information We Collect</h2>
+
+    <h3>Information you provide</h3>
+    <ul>
+      <li><strong>Account information</strong>: Email address, password, and a username you choose when you sign up.</li>
+      <li><strong>Profile information</strong>: Optional avatar photo and bio text.</li>
+      <li><strong>Phone number</strong> (optional): If you choose to add your phone number for friend discovery. We store it in normalized format and as a one-way hash (SHA-256). See Section 5 for details on contacts sync.</li>
+      <li><strong>Posts</strong>: Photos you take and optional captions when you check in at events or activities. Photos are stored in our cloud storage.</li>
+      <li><strong>Social interactions</strong>: RSVPs to events, friend requests, post reactions, and comments.</li>
+    </ul>
+
+    <h3>Information collected automatically</h3>
+    <ul>
+      <li><strong>Usage data</strong>: We record certain actions you take in the App (e.g., opening the Explore tab, starting a post, tapping on an event) to understand how people use Euda and improve the experience. These records contain your user ID, the action name, and a timestamp. They do not contain the content of your posts, messages, or personal details.</li>
+      <li><strong>Interaction preferences</strong>: When you view, RSVP to, share, or post about events and activities, we track which categories and types (events vs. activities) you engage with. This powers personalized recommendations in your Explore feed.</li>
+      <li><strong>Crash reports</strong>: If the App crashes, we send an error report to our crash reporting service (Sentry). These reports include technical information about the crash (stack traces, device model, OS version) but not your email, phone number, contacts, or authentication tokens. Only your anonymous user ID is attached.</li>
+    </ul>
+
+    <h3>Information we do NOT collect</h3>
+    <ul>
+      <li><strong>Device location is not stored.</strong> When you check in at an event, the App verifies your proximity on your device only. Your GPS coordinates are not transmitted to or stored on our servers.</li>
+      <li><strong>No device identifiers.</strong> We do not collect your device's UDID, IMEI, advertising identifier, or hardware serial numbers.</li>
+      <li><strong>No third-party analytics trackers.</strong> We do not use Google Analytics, Facebook Pixel, Mixpanel, or similar services.</li>
+      <li><strong>No audio or video.</strong> The App captures still photos only.</li>
+      <li><strong>No health or biometric data.</strong></li>
+    </ul>
+
+    <h2>2. How We Use Your Information</h2>
+    <table>
+      <thead>
+        <tr><th>Purpose</th><th>Data used</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Provide the App's core features (feed, explore, check-in)</td><td>Account info, posts, social interactions</td></tr>
+        <tr><td>Personalize your Explore feed</td><td>Interaction preferences (categories, tags)</td></tr>
+        <tr><td>Help you find friends from your contacts</td><td>Phone number hash (see Section 5)</td></tr>
+        <tr><td>Diagnose crashes and bugs</td><td>Crash reports (anonymized)</td></tr>
+        <tr><td>Understand usage patterns and improve the App</td><td>Aggregated usage data</td></tr>
+        <tr><td>Prevent abuse and enforce our Terms</td><td>Account info, usage data</td></tr>
+      </tbody>
+    </table>
+    <p>We do not sell your personal information. We do not use your data for advertising.</p>
+
+    <h2>3. How We Share Your Information</h2>
+
+    <h3>With other Euda users</h3>
+    <ul>
+      <li>Your <strong>username</strong>, <strong>avatar</strong>, <strong>bio</strong>, and <strong>posts</strong> are visible to other users of the App.</li>
+      <li>Your <strong>RSVP status</strong> (going/not going) is visible on event detail pages.</li>
+      <li>Your <strong>friend list</strong> is visible to your friends.</li>
+    </ul>
+
+    <h3>With service providers</h3>
+    <table>
+      <thead>
+        <tr><th>Service</th><th>Purpose</th><th>Data shared</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Supabase</strong> (backend)</td><td>Database, authentication, file storage</td><td>All account and content data (they are our primary infrastructure provider)</td></tr>
+        <tr><td><strong>Sentry</strong> (crash reporting)</td><td>Error monitoring</td><td>Crash data with anonymized user ID; PII is scrubbed before transmission</td></tr>
+        <tr><td><strong>Apple / Google</strong> (app distribution)</td><td>App Store and Play Store</td><td>Standard distribution metadata</td></tr>
+      </tbody>
+    </table>
+
+    <h3>With content enrichment services (server-side only)</h3>
+    <p>To populate the Explore feed with local events and activities, our servers communicate with:</p>
+    <ul>
+      <li><strong>Google Places API</strong> — to discover local businesses and activities</li>
+      <li><strong>Ticketmaster API</strong> — to discover local events</li>
+      <li><strong>AI language models</strong> (Anthropic Claude, OpenAI) — to generate event descriptions and tags</li>
+    </ul>
+    <p><strong>No user data is sent to these services.</strong> They receive only event/venue data for enrichment purposes, and these calls are made from our server, not from your device.</p>
+
+    <h3>We do not share your data with</h3>
+    <ul>
+      <li>Advertisers</li>
+      <li>Data brokers</li>
+      <li>Government agencies (unless required by law)</li>
+    </ul>
+
+    <h2>4. Device Permissions</h2>
+    <table>
+      <thead>
+        <tr><th>Permission</th><th>Why</th><th>When prompted</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Camera</strong></td><td>To take photos for check-in posts</td><td>When you first tap "Check In &amp; Post"</td></tr>
+        <tr><td><strong>Location</strong> (when in use)</td><td>To verify you are at an event's location before posting</td><td>When you first tap "Check In &amp; Post"</td></tr>
+        <tr><td><strong>Contacts</strong> (optional)</td><td>To find friends who also use Euda</td><td>When you tap "Find Friends from Contacts" in Settings</td></tr>
+      </tbody>
+    </table>
+    <p>You can revoke any permission at any time in your device's Settings app. The App will continue to work with reduced functionality.</p>
+
+    <h2>5. Contacts Sync and Phone Number Hashing</h2>
+    <p>If you choose to use the "Find Friends from Contacts" feature:</p>
+    <ol>
+      <li>The App reads <strong>phone numbers only</strong> from your device contacts. It does not read names, emails, addresses, or any other contact fields.</li>
+      <li>Each phone number is <strong>hashed on your device</strong> using SHA-256 with a fixed application salt. The raw phone numbers never leave your device.</li>
+      <li>Only the <strong>hashed values</strong> are sent to our server.</li>
+      <li>Our server compares these hashes against the hashed phone numbers of other users who have voluntarily added their phone number to their profile.</li>
+      <li>Matching profiles (username and avatar only) are returned to you.</li>
+      <li>The hashed values sent during sync are <strong>not stored</strong> on our server after the comparison.</li>
+    </ol>
+    <p>You can add your own phone number to your profile in Settings to allow your contacts to find you. This is entirely optional.</p>
+
+    <h2>6. Data Storage and Security</h2>
+    <ul>
+      <li><strong>Database and storage</strong>: Hosted on Supabase (built on AWS infrastructure).</li>
+      <li><strong>Authentication</strong>: Passwords are hashed by Supabase Auth (bcrypt). We never store or see plaintext passwords.</li>
+      <li><strong>Session tokens</strong>: Stored in your device's encrypted secure storage (iOS Keychain / Android Keystore). On web, tokens use browser local storage.</li>
+      <li><strong>Row-level security</strong>: Database access is restricted so users can only read and modify their own data, with limited exceptions for social features (viewing posts, friend profiles).</li>
+      <li><strong>Storage buckets</strong>: Post photos and avatars are stored in cloud buckets that are readable by authenticated users (necessary for the social feed).</li>
+    </ul>
+
+    <h2>7. Data Retention</h2>
+    <ul>
+      <li><strong>Account data</strong>: Retained as long as your account is active.</li>
+      <li><strong>Posts and photos</strong>: Retained until you delete them or delete your account.</li>
+      <li><strong>Interaction data</strong>: Retained as long as your account is active to power recommendations.</li>
+      <li><strong>Crash reports</strong>: Retained by Sentry per their retention policy (typically 90 days).</li>
+    </ul>
+
+    <h2>8. Your Rights and Choices</h2>
+    <h3>Delete your account</h3>
+    <p>You can permanently delete your account from Settings &gt; Delete Account. This will:</p>
+    <ul>
+      <li>Remove your profile, posts, photos, comments, reactions, friendships, RSVPs, interaction history, and analytics data</li>
+      <li>Remove your photos from cloud storage</li>
+      <li>This action is irreversible</li>
+    </ul>
+    <h3>Delete individual posts</h3>
+    <p>You can delete any post you created from the feed.</p>
+    <h3>Manage permissions</h3>
+    <p>You can revoke camera, location, or contacts permissions at any time from your device Settings.</p>
+    <h3>Export your data</h3>
+    <p>Data export is not yet available in the App. Contact us at the email below to request a copy of your data.</p>
+
+    <h2>9. Children's Privacy</h2>
+    <p>Euda is not intended for children under 13. We do not knowingly collect information from children under 13. If you believe a child under 13 has created an account, please contact us and we will delete it.</p>
+
+    <h2>10. Changes to This Policy</h2>
+    <p>We may update this policy from time to time. We will notify you of material changes through the App or via email. The "Last updated" date at the top reflects the most recent revision.</p>
+
+    <h2>11. Contact Us</h2>
+    <p>If you have questions about this policy or your data:</p>
+    <p><strong>Email</strong>: <a href="mailto:support@euda.live">support@euda.live</a></p>
+
+    <div class="nav">
+      <a href="/terms">Terms of Service</a>
+      <a href="/support">Support</a>
+      <a href="/">Home</a>
+    </div>
+  </div>
+</body>
+</html>
