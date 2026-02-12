@@ -321,8 +321,14 @@ export async function queryExploreItems(
             dataLength: rpcData.length,
           });
 
+          // Apply kind filter (client-side since RPC doesn't support it)
+          let filteredData = rpcData;
+          if (filters.kindFilter !== "all") {
+            filteredData = rpcData.filter((item: any) => item.kind === filters.kindFilter);
+          }
+
           // Apply distance filter/sort on all fetched rows
-          const sortedData = applyDistanceFilter(rpcData, userLocation, filters);
+          const sortedData = applyDistanceFilter(filteredData, userLocation, filters);
 
           if (isDistanceSort) {
             // Slice to the correct page from the fully-sorted window
@@ -361,9 +367,19 @@ export async function queryExploreItems(
     let query = supabase
       .from("explore_items")
       .select("*", { count: "exact" })
+      .is("deleted_at", null) // Soft delete gate
       .gte("priority", 0) // Exclude stale/demoted items (priority = -1)
       .eq("is_duplicate", false) // Exclude cross-source duplicates
-      .or("normalized_confidence.is.null,normalized_confidence.gte.40"); // Quality gate
+      .or("normalized_confidence.is.null,normalized_confidence.gte.40") // Quality gate
+      .or("review_status.is.null,review_status.in.(auto_approved,approved)"); // Quarantine gate
+
+    // Hide past events: show activities (no starts_at), events still going
+    // (ends_at >= now), or events within 3h grace window (no ends_at)
+    const pastCutoff = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    const nowIso = new Date().toISOString();
+    query = query.or(
+      `starts_at.is.null,ends_at.gte.${nowIso},and(ends_at.is.null,starts_at.gte.${pastCutoff})`
+    );
 
     // Apply time filter (simple version - includes all activities)
     if (dateRange) {
@@ -386,6 +402,11 @@ export async function queryExploreItems(
     // Apply price filter
     if (effectivePriceBucket !== "all") {
       query = query.eq("price_bucket", effectivePriceBucket);
+    }
+
+    // Apply kind filter (activity vs event)
+    if (filters.kindFilter !== "all") {
+      query = query.eq("kind", filters.kindFilter);
     }
 
     // Apply sorting
@@ -565,6 +586,7 @@ export async function getUpcomingEvents(
   const { data, error, count } = await supabase
     .from("explore_items")
     .select("*", { count: "exact" })
+    .is("deleted_at", null)
     .gte("starts_at", now)
     .order("starts_at", { ascending: true })
     .limit(limit);
@@ -589,6 +611,7 @@ export async function getFeaturedEvents(
   const { data, error, count } = await supabase
     .from("explore_items")
     .select("*", { count: "exact" })
+    .is("deleted_at", null)
     .eq("is_anchor", true)
     .gte("starts_at", now)
     .order("starts_at", { ascending: true })

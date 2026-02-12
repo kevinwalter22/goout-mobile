@@ -1,6 +1,9 @@
 import { createContext, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import { clearExpiredUrlCache } from "../utils/storage";
+import { setSentryUser } from "../lib/sentry";
+import { logAnalyticsEvent } from "../lib/analyticsLogger";
 import type { Profile } from "../types/database";
 
 type AuthContextType = {
@@ -18,6 +21,7 @@ type AuthContextType = {
     password: string,
   ) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 };
 
 export const AuthContext = createContext<AuthContextType>({
@@ -28,6 +32,7 @@ export const AuthContext = createContext<AuthContextType>({
   signUp: async () => ({ error: null }),
   signIn: async () => ({ error: null }),
   signOut: async () => {},
+  refreshProfile: async () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -54,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
+      setSentryUser(session?.user?.id ?? null);
       if (session?.user) {
         loadProfile(session.user.id);
       } else {
@@ -96,6 +102,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (error) throw error;
+
+      // Fire-and-forget: log signup event once we have a user ID
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session?.user?.id) {
+        logAnalyticsEvent(sessionData.session.user.id, "signup_complete");
+      }
+
       return { error: null };
     } catch (error) {
       return { error: error as Error };
@@ -117,7 +130,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signOut() {
+    // Clear cached URLs on logout to prevent stale data
+    clearExpiredUrlCache();
     await supabase.auth.signOut();
+  }
+
+  async function refreshProfile() {
+    if (user) {
+      await loadProfile(user.id);
+    }
   }
 
   return (
@@ -130,6 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signUp,
         signIn,
         signOut,
+        refreshProfile,
       }}
     >
       {children}

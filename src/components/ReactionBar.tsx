@@ -3,10 +3,13 @@ import { View, Text, Pressable, StyleSheet } from "react-native";
 import * as Haptics from "expo-haptics";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../hooks/useAuth";
+import { useTheme } from "../contexts/ThemeContext";
 import type { PostReaction } from "../types/database";
 
 type ReactionBarProps = {
   postId: string;
+  /** Pre-loaded reactions from usePosts batch query — avoids N+1 per-post fetches */
+  initialReactions?: { emoji: string; user_id: string }[];
 };
 
 type ReactionCounts = {
@@ -15,15 +18,26 @@ type ReactionCounts = {
 
 const EMOJI_OPTIONS = ["❤️", "😂", "🔥", "👏", "😮", "😢"] as const;
 
-export function ReactionBar({ postId }: ReactionBarProps) {
+export function ReactionBar({ postId, initialReactions }: ReactionBarProps) {
   const { user } = useAuth();
+  const { colors } = useTheme();
   const [reactions, setReactions] = useState<PostReaction[]>([]);
   const [userReaction, setUserReaction] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Load reactions for this post
+  // Seed from batch-loaded data or fetch individually (fallback for non-feed usage)
   useEffect(() => {
-    loadReactions();
+    if (initialReactions) {
+      const seeded = initialReactions.map((r) => ({
+        post_id: postId,
+        ...r,
+      })) as PostReaction[];
+      setReactions(seeded);
+      const myReaction = seeded.find((r) => r.user_id === user?.id);
+      setUserReaction(myReaction?.emoji || null);
+    } else {
+      loadReactions();
+    }
   }, [postId]);
 
   async function loadReactions() {
@@ -35,7 +49,6 @@ export function ReactionBar({ postId }: ReactionBarProps) {
     if (!error && data) {
       const reactions = data as PostReaction[];
       setReactions(reactions);
-      // Find user's reaction
       const myReaction = reactions.find((r) => r.user_id === user?.id);
       setUserReaction(myReaction?.emoji || null);
     }
@@ -99,9 +112,6 @@ export function ReactionBar({ postId }: ReactionBarProps) {
         const count = counts[emoji] || 0;
         const isActive = userReaction === emoji;
 
-        // Only show if has count or is available to react
-        if (count === 0 && !isActive) return null;
-
         return (
           <Pressable
             key={emoji}
@@ -109,34 +119,25 @@ export function ReactionBar({ postId }: ReactionBarProps) {
             disabled={loading}
             style={[
               styles.reactionButton,
-              isActive && styles.reactionButtonActive,
+              { backgroundColor: colors.surfaceVariant },
+              isActive && [styles.reactionButtonActive, { backgroundColor: colors.text }],
             ]}
           >
             <Text style={styles.emoji}>{emoji}</Text>
             {count > 0 && (
-              <Text style={[styles.count, isActive && styles.countActive]}>
+              <Text
+                style={[
+                  styles.count,
+                  { color: colors.textSecondary },
+                  isActive && [styles.countActive, { color: colors.surface }],
+                ]}
+              >
                 {count}
               </Text>
             )}
           </Pressable>
         );
       })}
-
-      {/* Show all emojis as options if no reactions yet */}
-      {reactions.length === 0 && (
-        <View style={styles.emptyRow}>
-          {EMOJI_OPTIONS.map((emoji) => (
-            <Pressable
-              key={emoji}
-              onPress={() => toggleReaction(emoji)}
-              disabled={loading}
-              style={styles.emojiOption}
-            >
-              <Text style={styles.emoji}>{emoji}</Text>
-            </Pressable>
-          ))}
-        </View>
-      )}
     </View>
   );
 }

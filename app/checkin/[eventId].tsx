@@ -1,22 +1,41 @@
 import { Pressable, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CAMERA_MODES } from "../../src/config/constants";
+import { useTheme } from "../../src/contexts/ThemeContext";
+import { Colors } from "../../src/config/theme";
 
 export default function CheckInModeSelector() {
-  const { eventId } = useLocalSearchParams<{ eventId: string }>();
+  // Note: Route param is named eventId for URL compatibility, but this is actually
+  // an explore_item_id when coming from the Explore flow
+  const { eventId, itemKind } = useLocalSearchParams<{ eventId: string; itemKind?: string }>();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   function selectMode(mode: string) {
+    // Pass as exploreItemId since this flow is from Explore items
     router.push({
       pathname: "/checkin/camera",
-      params: { eventId, mode },
+      params: { exploreItemId: eventId, mode, itemKind },
     } as any);
   }
 
   return (
-    <View style={{ flex: 1, padding: 24, justifyContent: "center", gap: 20 }}>
+    <View
+      style={{
+        flex: 1,
+        padding: 24,
+        paddingTop: insets.top + 24,
+        justifyContent: "center",
+        gap: 20,
+        backgroundColor: colors.background,
+      }}
+    >
       <View style={{ gap: 8, marginBottom: 24 }}>
-        <Text style={{ fontSize: 28, fontWeight: "700" }}>Choose Camera Mode</Text>
-        <Text style={{ fontSize: 16, opacity: 0.7 }}>
+        <Text style={{ fontSize: 28, fontWeight: "700", color: colors.text }}>
+          Choose Camera Mode
+        </Text>
+        <Text style={{ fontSize: 16, color: colors.textSecondary }}>
           How do you want to capture this moment?
         </Text>
       </View>
@@ -27,13 +46,23 @@ export default function CheckInModeSelector() {
           padding: 20,
           borderRadius: 12,
           borderWidth: 2,
-          borderColor: "#000",
+          borderColor: colors.border,
+          backgroundColor: colors.surface,
         }}
       >
-        <Text style={{ fontSize: 18, fontWeight: "600", marginBottom: 4 }}>
+        <Text
+          style={{
+            fontSize: 18,
+            fontWeight: "600",
+            marginBottom: 4,
+            color: colors.text,
+          }}
+        >
           Back Camera
         </Text>
-        <Text style={{ opacity: 0.7 }}>Capture what you&apos;re seeing</Text>
+        <Text style={{ color: colors.textSecondary }}>
+          Capture what you&apos;re seeing
+        </Text>
       </Pressable>
 
       <Pressable
@@ -42,13 +71,21 @@ export default function CheckInModeSelector() {
           padding: 20,
           borderRadius: 12,
           borderWidth: 2,
-          borderColor: "#000",
+          borderColor: colors.border,
+          backgroundColor: colors.surface,
         }}
       >
-        <Text style={{ fontSize: 18, fontWeight: "600", marginBottom: 4 }}>
+        <Text
+          style={{
+            fontSize: 18,
+            fontWeight: "600",
+            marginBottom: 4,
+            color: colors.text,
+          }}
+        >
           Front Camera
         </Text>
-        <Text style={{ opacity: 0.7 }}>Take a selfie</Text>
+        <Text style={{ color: colors.textSecondary }}>Take a selfie</Text>
       </Pressable>
 
       <Pressable
@@ -56,7 +93,7 @@ export default function CheckInModeSelector() {
         style={{
           padding: 20,
           borderRadius: 12,
-          backgroundColor: "#000",
+          backgroundColor: Colors.primary,
         }}
       >
         <Text
@@ -69,7 +106,7 @@ export default function CheckInModeSelector() {
         >
           Dual Camera
         </Text>
-        <Text style={{ opacity: 0.7, color: "#fff" }}>
+        <Text style={{ color: "rgba(255,255,255,0.8)" }}>
           Capture both views (back then front)
         </Text>
       </Pressable>
@@ -82,7 +119,7 @@ export default function CheckInModeSelector() {
           alignItems: "center",
         }}
       >
-        <Text style={{ fontSize: 16, opacity: 0.7 }}>Cancel</Text>
+        <Text style={{ fontSize: 16, color: colors.textSecondary }}>Cancel</Text>
       </Pressable>
     </View>
   );

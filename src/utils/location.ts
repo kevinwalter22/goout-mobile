@@ -1,6 +1,9 @@
 import * as Location from "expo-location";
 import { CHECK_IN_RADIUS_METERS } from "../config/constants";
 
+// Conversion constants
+const METERS_PER_MILE = 1609.344;
+
 /**
  * Calculate distance between two coordinates using Haversine formula
  * Returns distance in meters
@@ -24,6 +27,19 @@ export function getDistanceInMeters(
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return R * c; // Distance in meters
+}
+
+/**
+ * Calculate distance between two coordinates using Haversine formula
+ * Returns distance in miles (for explore filters)
+ */
+export function getDistanceInMiles(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  return getDistanceInMeters(lat1, lon1, lat2, lon2) / METERS_PER_MILE;
 }
 
 /**

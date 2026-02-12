@@ -44,13 +44,37 @@ const TYPE_CATEGORY_MAP: Record<string, string> = {
   movie_theater: "entertainment",
   bowling_alley: "entertainment",
   amusement_park: "entertainment",
+  aquarium: "entertainment",
+  stadium: "entertainment",
 
   // Nightlife
   night_club: "nightlife",
 
+  // Winter / Seasonal
+  ice_skating_rink: "recreation",
+  ski_resort: "recreation",
+
+  // Sport
+  golf_course: "recreation",
+
+  // Water
+  marina: "outdoor",
+
+  // Heritage & Community
+  historical_landmark: "arts",
+  visitor_center: "community",
+  community_center: "community",
+  church: "community",
+
   // Shopping
   shopping_mall: "community",
   book_store: "community",
+  clothing_store: "community",
+  florist: "community",
+  pet_store: "community",
+
+  // Accommodation
+  lodging: "community",
 
   // Attractions
   tourist_attraction: "community",
@@ -86,11 +110,30 @@ const TYPE_TAGS_MAP: Record<string, string[]> = {
   movie_theater: ["indoors"],
   bowling_alley: ["indoors", "group_activity", "family_friendly"],
   amusement_park: ["outdoors", "family_friendly", "adventure"],
+  aquarium: ["educational", "family_friendly", "indoors"],
+  stadium: ["sports", "live_event"],
 
   night_club: ["nightlife", "social", "adults_only"],
 
+  ice_skating_rink: ["winter", "fitness", "family_friendly"],
+  ski_resort: ["winter", "outdoors", "adventure", "fitness"],
+
+  golf_course: ["outdoors", "sports"],
+
+  marina: ["outdoors", "water", "scenic"],
+
+  historical_landmark: ["cultural", "educational", "scenic"],
+  visitor_center: ["educational", "family_friendly"],
+  community_center: ["community", "family_friendly"],
+  church: ["cultural", "community"],
+
   shopping_mall: ["shopping", "indoors"],
   book_store: ["shopping", "indoors"],
+  clothing_store: ["shopping", "indoors"],
+  florist: ["shopping"],
+  pet_store: ["shopping", "family_friendly"],
+
+  lodging: ["travel"],
 
   tourist_attraction: ["scenic", "local_favorite"],
   university: ["educational"],
@@ -113,11 +156,13 @@ const PRICE_LEVEL_MAP: Record<string, "free" | "$" | "$$" | "$$$" | "unknown"> =
 // ============================================================================
 
 /**
- * Extract category from place types, using primaryType first
+ * Extract category from place types, using primaryType first.
+ * Falls back to tag-based inference if no direct mapping exists.
  */
 function mapCategory(
   primaryType: string | undefined,
   types: string[] | undefined,
+  tags?: string[],
 ): { category: string | null; sub_category: string | null } {
   // Try primaryType first
   if (primaryType && TYPE_CATEGORY_MAP[primaryType]) {
@@ -139,7 +184,64 @@ function mapCategory(
     }
   }
 
+  // Fallback: infer category from tags
+  if (tags && tags.length > 0) {
+    const category = inferCategoryFromTags(tags);
+    if (category) {
+      return {
+        category,
+        sub_category: primaryType?.replace(/_/g, " ") || null,
+      };
+    }
+  }
+
+  // Final fallback: use "community" for establishments
+  if (types?.includes("establishment") || types?.includes("point_of_interest")) {
+    return {
+      category: "community",
+      sub_category: primaryType?.replace(/_/g, " ") || "local business",
+    };
+  }
+
   return { category: null, sub_category: null };
+}
+
+/**
+ * Infer category from tags (mirrors DB function infer_category_from_tags)
+ */
+function inferCategoryFromTags(tags: string[]): string | null {
+  const tagSet = new Set(tags);
+
+  // Priority-ordered category inference
+  if (["food", "dining", "coffee", "bar", "drinks"].some((t) => tagSet.has(t))) {
+    return "food";
+  }
+  if (["outdoors", "nature", "parks", "hiking", "trail", "camping", "scenic"].some((t) => tagSet.has(t))) {
+    return "outdoor";
+  }
+  if (["fitness", "wellness", "swimming"].some((t) => tagSet.has(t))) {
+    return "fitness";
+  }
+  if (["sports", "recreation", "adventure", "winter"].some((t) => tagSet.has(t))) {
+    return "recreation";
+  }
+  if (["museum", "cultural", "theater", "educational"].some((t) => tagSet.has(t))) {
+    return "arts";
+  }
+  if (["live_event", "family_friendly", "group_activity"].some((t) => tagSet.has(t))) {
+    return "entertainment";
+  }
+  if (["nightlife", "social", "adults_only"].some((t) => tagSet.has(t))) {
+    return "nightlife";
+  }
+  if (tagSet.has("shopping")) {
+    return "community";
+  }
+  if (["community", "local_favorite", "travel"].some((t) => tagSet.has(t))) {
+    return "community";
+  }
+
+  return null;
 }
 
 /**
@@ -257,13 +359,15 @@ function calculateXp(
 
   // Active places get more XP
   const activePlaces = ["gym", "park", "campground", "hiking_area", "spa",
-    "bowling_alley", "swimming_pool", "yoga_studio"];
+    "bowling_alley", "swimming_pool", "yoga_studio", "ice_skating_rink",
+    "ski_resort", "golf_course", "marina"];
   if (primaryType && activePlaces.includes(primaryType)) {
     xp += 15;
   }
 
   // Cultural places get a boost
-  const culturalPlaces = ["museum", "library", "art_gallery", "tourist_attraction"];
+  const culturalPlaces = ["museum", "library", "art_gallery", "tourist_attraction",
+    "historical_landmark", "aquarium", "performing_arts_theater"];
   if (primaryType && culturalPlaces.includes(primaryType)) {
     xp += 10;
   }
@@ -306,8 +410,16 @@ function calculatePriority(
   }
 
   // Outdoor/active places slightly boosted
-  const outdoorTypes = ["park", "campground", "hiking_area"];
+  const outdoorTypes = ["park", "campground", "hiking_area", "ski_resort",
+    "marina", "golf_course"];
   if (primaryType && outdoorTypes.includes(primaryType)) {
+    priority += 10;
+  }
+
+  // Cultural/historical places boosted
+  const culturalTypes = ["museum", "historical_landmark", "aquarium",
+    "performing_arts_theater"];
+  if (primaryType && culturalTypes.includes(primaryType)) {
     priority += 10;
   }
 
@@ -336,9 +448,10 @@ function isHiddenGem(
 function inferEffort(
   primaryType: string | undefined,
 ): "low" | "medium" | "high" | "unknown" {
-  const highEffort = ["gym", "hiking_area", "campground"];
+  const highEffort = ["gym", "hiking_area", "campground", "ski_resort"];
   const mediumEffort = ["park", "bowling_alley", "spa", "yoga_studio",
-    "swimming_pool", "amusement_park"];
+    "swimming_pool", "amusement_park", "ice_skating_rink", "golf_course",
+    "marina"];
 
   if (primaryType && highEffort.includes(primaryType)) return "high";
   if (primaryType && mediumEffort.includes(primaryType)) return "medium";
@@ -356,12 +469,15 @@ function inferEffort(
 export function normalizeGooglePlacesEvent(raw: any): NormalizedEvent {
   const primaryType = raw.primaryType;
   const types = raw.types as string[] | undefined;
-  const { category, sub_category } = mapCategory(primaryType, types);
 
   const title = raw.displayName?.text || raw.primaryTypeDisplayName?.text || "Unknown Place";
   const description = raw.editorialSummary?.text || null;
 
+  // Collect tags first so we can use them for category inference
   const tags = collectTags(primaryType, types, raw.priceLevel);
+
+  // Map category with fallback to tags-based inference
+  const { category, sub_category } = mapCategory(primaryType, types, tags);
   const priceBucket = raw.priceLevel
     ? (PRICE_LEVEL_MAP[raw.priceLevel] || "unknown")
     : "unknown";

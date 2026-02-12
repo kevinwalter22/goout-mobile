@@ -11,13 +11,23 @@ import {
   StyleSheet,
   Alert,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { router } from "expo-router";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../hooks/useAuth";
+import { useBlockUser } from "../hooks/useBlockUser";
+import { useContentReport } from "../hooks/useContentReport";
+import { Avatar } from "./Avatar";
+import { ReportSheet } from "./ReportSheet";
+import { Colors } from "../config/theme";
+import { useTheme } from "../contexts/ThemeContext";
 import type { PostComment } from "../types/database";
 
 type CommentWithProfile = PostComment & {
   profile: {
     username: string;
+    avatar_url: string | null;
   } | null;
 };
 
@@ -29,10 +39,14 @@ type CommentSheetProps = {
 
 export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
   const { user } = useAuth();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { blockedIds, blockUser } = useBlockUser();
   const [comments, setComments] = useState<CommentWithProfile[]>([]);
   const [commentText, setCommentText] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{ commentId: string; userId: string } | null>(null);
 
   useEffect(() => {
     if (visible) {
@@ -59,7 +73,7 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
     const userIds = [...new Set(commentsData.map((c: any) => c.user_id))];
     const { data: profilesData } = await supabase
       .from("profiles")
-      .select("id, username")
+      .select("id, username, avatar_url")
       .in("id", userIds);
 
     // Create a map of user_id -> profile
@@ -105,7 +119,7 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
       // Then fetch the profile separately
       const { data: profileData } = await supabase
         .from("profiles")
-        .select("username")
+        .select("username, avatar_url")
         .eq("id", user.id)
         .single();
 
@@ -156,66 +170,101 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="pageSheet"
+      presentationStyle="fullScreen"
       onRequestClose={onClose}
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={styles.container}
+        style={[styles.container, { backgroundColor: colors.surface }]}
+        keyboardVerticalOffset={0}
       >
         {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Comments</Text>
-          <Pressable onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeText}>✕</Text>
+        <View style={[styles.header, { paddingTop: insets.top + 16, borderBottomColor: colors.separator }]}>
+          <Text style={[styles.title, { color: colors.text }]}>Comments</Text>
+          <Pressable onPress={onClose} style={styles.closeButton} hitSlop={8}>
+            <Text style={[styles.closeText, { color: colors.textSecondary }]}>✕</Text>
           </Pressable>
         </View>
 
         {/* Comments List */}
         <FlatList
-          data={comments}
+          data={comments.filter((c) => !blockedIds.has(c.user_id))}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyText}>
+              <Text style={[styles.emptyText, { color: colors.textTertiary }]}>
                 {loading ? "Loading comments..." : "No comments yet"}
               </Text>
+              {!loading && (
+                <Text style={[styles.emptyHint, { color: colors.textTertiary }]}>
+                  Be the first to comment!
+                </Text>
+              )}
             </View>
           }
           renderItem={({ item }) => (
-            <View style={styles.commentItem}>
-              <View style={styles.commentHeader}>
-                <Text style={styles.username}>
-                  {item.profile?.username || "Unknown"}
-                </Text>
-                <Text style={styles.timestamp}>
-                  {new Date(item.created_at).toLocaleDateString()}
-                </Text>
-              </View>
-              <Text style={styles.commentText}>{item.content}</Text>
-              {item.user_id === user?.id && (
-                <Pressable
-                  onPress={() => handleDelete(item.id)}
-                  style={styles.deleteButton}
-                >
-                  <Text style={styles.deleteText}>Delete</Text>
+            <View style={[styles.commentItem, { borderBottomColor: colors.borderLight }]}>
+              <View style={{ flexDirection: "row", gap: 12 }}>
+                <Pressable onPress={() => router.push(`/user/${item.user_id}` as any)}>
+                  <Avatar
+                    avatarUrl={item.profile?.avatar_url || null}
+                    size={32}
+                  />
                 </Pressable>
-              )}
+                <View style={{ flex: 1 }}>
+                  <View style={styles.commentHeader}>
+                    <Pressable onPress={() => router.push(`/user/${item.user_id}` as any)}>
+                      <Text style={[styles.username, { color: colors.text }]}>
+                        {item.profile?.username || "Unknown"}
+                      </Text>
+                    </Pressable>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Text style={[styles.timestamp, { color: colors.textTertiary }]}>
+                        {new Date(item.created_at).toLocaleDateString()}
+                      </Text>
+                      {item.user_id !== user?.id && (
+                        <Pressable
+                          onPress={() => setReportTarget({ commentId: item.id, userId: item.user_id })}
+                          hitSlop={8}
+                        >
+                          <Ionicons name="ellipsis-horizontal" size={16} color={colors.textTertiary} />
+                        </Pressable>
+                      )}
+                    </View>
+                  </View>
+                  <Text style={[styles.commentText, { color: colors.text }]}>{item.content}</Text>
+                  {item.user_id === user?.id && (
+                    <Pressable
+                      onPress={() => handleDelete(item.id)}
+                      style={styles.deleteButton}
+                    >
+                      <Text style={[styles.deleteText, { color: Colors.error }]}>Delete</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
             </View>
           )}
         />
 
         {/* Input Box */}
-        <View style={styles.inputContainer}>
-          <TextInput
-            value={commentText}
-            onChangeText={setCommentText}
-            placeholder="Add a comment..."
-            multiline
-            maxLength={500}
-            style={styles.input}
-          />
+        <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 16), borderTopColor: colors.separator }]}>
+          <View style={{ flex: 1 }}>
+            <TextInput
+              value={commentText}
+              onChangeText={setCommentText}
+              placeholder="Add a comment..."
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              maxLength={500}
+              style={[styles.input, { backgroundColor: colors.inputBg, color: colors.text }]}
+            />
+            <Text style={[styles.charCounter, { color: colors.textTertiary }]}>
+              {commentText.length}/500
+            </Text>
+          </View>
           <Pressable
             onPress={handleSubmit}
             disabled={!commentText.trim() || submitting}
@@ -227,13 +276,30 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
             <Text
               style={[
                 styles.submitText,
-                (!commentText.trim() || submitting) && styles.submitTextDisabled,
+                (!commentText.trim() || submitting) && [styles.submitTextDisabled, { color: colors.textTertiary }],
               ]}
             >
               {submitting ? "..." : "Post"}
             </Text>
           </Pressable>
         </View>
+        {/* Report Sheet for comments */}
+        {reportTarget && (
+          <ReportSheet
+            visible={!!reportTarget}
+            onClose={() => setReportTarget(null)}
+            targetType="comment"
+            targetId={reportTarget.commentId}
+            targetUserId={reportTarget.userId}
+            onBlockUser={async (userId) => {
+              const ok = await blockUser(userId);
+              if (ok) {
+                Alert.alert("User Blocked", "Their comments will no longer appear.");
+              }
+              setReportTarget(null);
+            }}
+          />
+        )}
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -269,10 +335,15 @@ const styles = StyleSheet.create({
   empty: {
     padding: 32,
     alignItems: "center",
+    gap: 8,
   },
   emptyText: {
     fontSize: 16,
     color: "#999",
+  },
+  emptyHint: {
+    fontSize: 14,
+    color: "#ccc",
   },
   commentItem: {
     marginBottom: 16,
@@ -314,12 +385,17 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   input: {
-    flex: 1,
     padding: 12,
     borderRadius: 20,
     backgroundColor: "#f5f5f5",
     fontSize: 14,
     maxHeight: 100,
+  },
+  charCounter: {
+    fontSize: 12,
+    opacity: 0.5,
+    marginTop: 4,
+    marginLeft: 12,
   },
   submitButton: {
     justifyContent: "center",
@@ -331,7 +407,7 @@ const styles = StyleSheet.create({
   submitText: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#007AFF",
+    color: Colors.primary,
   },
   submitTextDisabled: {
     color: "#999",

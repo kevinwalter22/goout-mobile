@@ -148,6 +148,8 @@ export interface EnrichmentResponse {
   tags?: string[];
   availability?: Availability;
   price_bucket?: ValidPriceBucket;
+  description?: string | null;
+  short_schedule?: string | null;
 
   // Legacy fields (still supported for backwards compat)
   recurrence?: ValidRecurrence;
@@ -230,6 +232,36 @@ export function validateEnrichmentResponse(raw: unknown): ValidationResult {
       } else {
         result.price_bucket = "unknown";
         errors.push(`Invalid price_bucket "${response.price_bucket}", defaulting to unknown`);
+      }
+    }
+  }
+
+  // Validate description
+  if ("description" in response) {
+    if (response.description === null) {
+      result.description = null;
+    } else if (typeof response.description === "string") {
+      const desc = response.description.trim();
+      if (desc.length > 0 && desc.length <= 300) {
+        result.description = desc;
+      } else if (desc.length > 300) {
+        result.description = desc.substring(0, 297) + "...";
+        errors.push("description truncated to 300 chars");
+      }
+    }
+  }
+
+  // Validate short_schedule
+  if ("short_schedule" in response) {
+    if (response.short_schedule === null) {
+      result.short_schedule = null;
+    } else if (typeof response.short_schedule === "string") {
+      const sched = response.short_schedule.trim();
+      if (sched.length > 0 && sched.length <= 100) {
+        result.short_schedule = sched;
+      } else if (sched.length > 100) {
+        result.short_schedule = sched.substring(0, 97) + "...";
+        errors.push("short_schedule truncated to 100 chars");
       }
     }
   }
@@ -422,6 +454,8 @@ TASK:
 3. If hook_line is missing or weak, generate a compelling 10-20 word hook
 4. Suggest relevant tags (be generous - assign all that apply)
 5. Infer price_bucket from the title, description, and category
+6. If description is "none", write a concise 1-2 sentence description of the place or event
+7. If schedule info is verbose (long weekday listings), generate a condensed "short_schedule" (e.g., "Mon-Fri 8AM-8PM" or "Daily 10AM-6PM, Sun closed")
 
 PRICING RULES:
 - Public parks, trails, scenic overlooks, playgrounds = "free"
@@ -452,6 +486,8 @@ RESPOND WITH VALID JSON ONLY:
   "hook_line": "string or null if current one is good",
   "tags": ["tag1", "tag2"],
   "price_bucket": "free" or "$" or "$$" or "$$$" or "unknown",
+  "description": "1-2 sentence description (or null if description already exists)",
+  "short_schedule": "Mon-Fri 8AM-5PM" (condensed from verbose schedule, or null if not needed),
   "availability": {
     "type": "event" or "activity",
     "available_days": ["daily"] or ["mon", "wed", "fri"] etc,

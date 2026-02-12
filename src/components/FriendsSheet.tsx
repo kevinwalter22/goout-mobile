@@ -5,18 +5,24 @@ import {
   FlatList,
   Pressable,
   ActivityIndicator,
+  Alert,
   StyleSheet,
 } from "react-native";
 import { useFriendsList } from "../hooks/useFriendsList";
 import { useFriendship } from "../hooks/useFriendship";
+import { Avatar } from "./Avatar";
+import { Colors } from "../config/theme";
+import { useTheme } from "../contexts/ThemeContext";
 
 type FriendsSheetProps = {
   visible: boolean;
   onClose: () => void;
+  onFriendTap?: (friendId: string) => void;
 };
 
-export function FriendsSheet({ visible, onClose }: FriendsSheetProps) {
+export function FriendsSheet({ visible, onClose, onFriendTap }: FriendsSheetProps) {
   const { friends, loading, refresh } = useFriendsList();
+  const { colors } = useTheme();
 
   return (
     <Modal
@@ -25,12 +31,12 @@ export function FriendsSheet({ visible, onClose }: FriendsSheetProps) {
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.surface }]}>
         {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Friends ({friends.length})</Text>
+        <View style={[styles.header, { borderBottomColor: colors.separator }]}>
+          <Text style={[styles.title, { color: colors.text }]}>Friends ({friends.length})</Text>
           <Pressable onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeText}>✕</Text>
+            <Text style={[styles.closeText, { color: colors.textSecondary }]}>✕</Text>
           </Pressable>
         </View>
 
@@ -43,8 +49,8 @@ export function FriendsSheet({ visible, onClose }: FriendsSheetProps) {
 
         {!loading && friends.length === 0 && (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No friends yet</Text>
-            <Text style={styles.emptyHint}>
+            <Text style={[styles.emptyText, { color: colors.text }]}>No friends yet</Text>
+            <Text style={[styles.emptyHint, { color: colors.textTertiary }]}>
               Add friends to see their posts in your feed!
             </Text>
           </View>
@@ -54,7 +60,7 @@ export function FriendsSheet({ visible, onClose }: FriendsSheetProps) {
           data={friends}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <FriendListItem friend={item} onRemove={refresh} />
+            <FriendListItem friend={item} onRemove={refresh} onTap={onFriendTap} />
           )}
         />
       </View>
@@ -66,31 +72,51 @@ export function FriendsSheet({ visible, onClose }: FriendsSheetProps) {
 function FriendListItem({
   friend,
   onRemove,
+  onTap,
 }: {
-  friend: { id: string; username: string };
+  friend: { id: string; username: string; avatar_url: string | null };
   onRemove: () => void;
+  onTap?: (friendId: string) => void;
 }) {
-  const { toggleFriendship, loading } = useFriendship(friend.id);
+  const { removeFriend, loading } = useFriendship(friend.id);
+  const { colors } = useTheme();
 
   async function handleRemove() {
-    await toggleFriendship();
-    onRemove();
+    Alert.alert(
+      "Remove Friend?",
+      `Remove ${friend.username} from your friends list?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            await removeFriend();
+            onRemove();
+          },
+        },
+      ]
+    );
   }
 
   return (
-    <View style={styles.friendItem}>
-      <View style={styles.friendAvatar} />
-      <Text style={styles.friendUsername}>{friend.username}</Text>
+    <Pressable
+      style={[styles.friendItem, { borderBottomColor: colors.borderLight }]}
+      onPress={() => onTap?.(friend.id)}
+      disabled={!onTap}
+    >
+      <Avatar avatarUrl={friend.avatar_url} size={40} />
+      <Text style={[styles.friendUsername, { color: colors.text }]}>{friend.username}</Text>
       <Pressable
         onPress={handleRemove}
         disabled={loading}
         style={styles.removeButton}
       >
-        <Text style={styles.removeButtonText}>
+        <Text style={[styles.removeButtonText, { color: Colors.error }]}>
           {loading ? "..." : "Remove"}
         </Text>
       </Pressable>
-    </View>
+    </Pressable>
   );
 }
 

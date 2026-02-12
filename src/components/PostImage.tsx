@@ -9,6 +9,7 @@ import {
   ViewStyle,
 } from "react-native";
 import { getPostImageUrl } from "../utils/storage";
+import { useTheme } from "../contexts/ThemeContext";
 
 type PostImageProps = {
   photoPath: string;
@@ -16,6 +17,7 @@ type PostImageProps = {
 };
 
 export function PostImage({ photoPath, style }: PostImageProps) {
+  const { colors } = useTheme();
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -33,14 +35,13 @@ export function PostImage({ photoPath, style }: PostImageProps) {
         if (!mounted) return;
 
         if (url) {
-          console.log("[PostImage] URL loaded for:", photoPath);
           setImageUrl(url);
         } else {
-          console.error("[PostImage] Failed to get URL for:", photoPath);
+          if (__DEV__) console.warn("[PostImage] Failed to get URL for:", photoPath);
           setError(true);
         }
       } catch (err) {
-        console.error("[PostImage] Error loading URL:", err);
+        if (__DEV__) console.warn("[PostImage] Error loading URL:", err);
         if (mounted) {
           setError(true);
         }
@@ -66,11 +67,11 @@ export function PostImage({ photoPath, style }: PostImageProps) {
           {
             justifyContent: "center",
             alignItems: "center",
-            backgroundColor: "#f0f0f0",
+            backgroundColor: colors.surfaceVariant,
           },
         ]}
       >
-        <ActivityIndicator />
+        <ActivityIndicator color={colors.textTertiary} />
       </View>
     );
   }
@@ -83,11 +84,11 @@ export function PostImage({ photoPath, style }: PostImageProps) {
           {
             justifyContent: "center",
             alignItems: "center",
-            backgroundColor: "#f0f0f0",
+            backgroundColor: colors.surfaceVariant,
           },
         ]}
       >
-        <Text style={{ opacity: 0.5 }}>Image unavailable</Text>
+        <Text style={{ color: colors.textTertiary }}>Image unavailable</Text>
       </View>
     );
   }

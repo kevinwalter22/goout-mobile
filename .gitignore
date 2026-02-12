@@ -43,3 +43,12 @@ app-example
 /android
 
 .env
+supabase/functions/.env
+
+.env.local
+
+# Windows reserved device names
+nul
+
+# Build artifacts
+dist-check/

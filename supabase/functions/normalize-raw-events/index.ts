@@ -78,6 +78,8 @@ Deno.serve(async (req) => {
 
     const results: ProcessResult[] = [];
     let processedCount = 0;
+    let autoApprovedCount = 0;
+    let quarantinedCount = 0;
 
     // Process in batches
     while (processedCount < maxItems) {
@@ -203,7 +205,11 @@ Deno.serve(async (req) => {
           normalized_confidence: fieldNorm.normalized_confidence,
         };
 
-        console.log(`  Normalized: "${normalized.title}" (confidence: ${fieldNorm.normalized_confidence})`);
+        // Track review status counters (web collector items only)
+        if (normalized.review_status === "quarantined") quarantinedCount++;
+        else if (normalized.review_status === "auto_approved") autoApprovedCount++;
+
+        console.log(`  Normalized: "${normalized.title}" (confidence: ${fieldNorm.normalized_confidence}${normalized.review_status ? `, review: ${normalized.review_status}` : ""})`);
 
         if (dryRun) {
           console.log(`  [DRY RUN] Would upsert:`, {
@@ -232,15 +238,25 @@ Deno.serve(async (req) => {
           continue;
         }
 
+        // Strip null image fields to avoid overwriting existing cached images
+        // during re-normalization (e.g., Google Places items already have images)
+        const upsertPayload: Record<string, any> = {
+          source_id: rawData.source_id,
+          external_id: rawData.external_id,
+          ...normalized,
+          last_refreshed_at: new Date().toISOString(),
+        };
+        if (!upsertPayload.image_url) {
+          delete upsertPayload.image_url;
+          delete upsertPayload.image_thumb_url;
+          delete upsertPayload.image_source;
+        }
+
         // Upsert into explore_items
         const { data: upserted, error: upsertError } = await supabase
           .from("explore_items")
           .upsert(
-            {
-              source_id: rawData.source_id,
-              external_id: rawData.external_id,
-              ...normalized,
-            },
+            upsertPayload,
             {
               onConflict: "source_id,external_id",
             }
@@ -343,7 +359,8 @@ Deno.serve(async (req) => {
     const errorCount = results.filter((r) => r.status === "error").length;
 
     console.log(
-      `\nNormalization complete: ${normalizedCount} normalized, ${skipped} skipped, ${errorCount} errors`
+      `\nNormalization complete: ${normalizedCount} normalized, ${skipped} skipped, ${errorCount} errors` +
+      (autoApprovedCount + quarantinedCount > 0 ? `, ${autoApprovedCount} auto_approved, ${quarantinedCount} quarantined` : "")
     );
 
     // Log health event (non-blocking)
@@ -351,7 +368,7 @@ Deno.serve(async (req) => {
       stage: "normalize",
       items_processed: normalizedCount,
       items_failed: errorCount,
-      details_json: { skipped, processed: processedCount },
+      details_json: { skipped, processed: processedCount, auto_approved: autoApprovedCount, quarantined: quarantinedCount },
     });
 
     return new Response(
@@ -362,6 +379,8 @@ Deno.serve(async (req) => {
           normalized: normalizedCount,
           skipped,
           errors: errorCount,
+          auto_approved: autoApprovedCount,
+          quarantined: quarantinedCount,
         },
         supported_adapters: getSupportedSourceTypes(),
         results,

@@ -1,20 +1,23 @@
 /**
- * Google Places API (New) — Nearby Search Ingestion
+ * Google Places API (New) — Nearby Search + Text Search Ingestion
  *
- * Fetches local activities (restaurants, cafes, parks, gyms, museums, etc.)
- * from Google Places API and stores raw data in event_ingest_raw.
+ * Fetches local activities from Google Places API and stores raw data
+ * in event_ingest_raw.
  *
  * Strategy:
- * - One Nearby Search request per includedType for comprehensive coverage
- * - Max 20 results per type (API limit, no pagination)
- * - Deduplication via place ID (same place may appear in multiple type searches)
- * - SHA256 hash for change detection
+ * - Phase 1: Nearby Search — one request per includedType (max 20 results each)
+ * - Phase 2: Text Search — one request per keyword + up to 2 pagination pages
+ * - Multi-region: supports multiple search centers with rotation
+ * - Deduplication via place ID (same place may appear in multiple searches)
+ * - SHA256 hash for change detection (stable sorted-key serialization)
+ * - Budget guardrail: respects api_usage_counters monthly limit
  *
  * Required secrets:
  * - GOOGLE_PLACES_API_KEY: Google Cloud API key with Places API (New) enabled
  *
  * API Reference:
  * https://developers.google.com/maps/documentation/places/web-service/nearby-search
+ * https://developers.google.com/maps/documentation/places/web-service/text-search
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -26,8 +29,10 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const PLACES_API_URL =
+const NEARBY_SEARCH_URL =
   "https://places.googleapis.com/v1/places:searchNearby";
+const TEXT_SEARCH_URL =
+  "https://places.googleapis.com/v1/places:searchText";
 
 const FIELD_MASK = [
   "places.id",
@@ -46,68 +51,152 @@ const FIELD_MASK = [
   "places.googleMapsUri",
 ].join(",");
 
+// ============================================================================
+// Config
+// ============================================================================
+
+interface Region {
+  name: string;
+  lat: number;
+  lng: number;
+  radius_m: number;
+}
+
 interface IngestConfig {
+  // Legacy single-center (still supported)
   lat?: number;
   lng?: number;
   radius_meters?: number;
+
+  // Multi-center
+  regions?: Region[];
+
+  // Coverage
   included_types?: string[];
+  keywords?: string[];
+  max_pages_per_keyword?: number; // Text Search pagination (1-3)
+
+  // Limits
   max_results_per_type?: number;
+  max_total_requests?: number; // Hard ceiling per run
   delay_between_requests_ms?: number;
+
   dry_run?: boolean;
 }
 
 interface IngestResult {
   external_id: string;
   name: string;
-  type_searched: string;
+  search_label: string; // "type:restaurant" or "keyword:hiking trail"
+  region?: string;
   status: "inserted" | "updated" | "unchanged" | "error";
   error?: string;
 }
 
-// Default: Potsdam, NY area — evergreen activity types
-const DEFAULT_CONFIG: Required<IngestConfig> = {
-  lat: 44.6697,
-  lng: -74.9814,
-  radius_meters: 50000, // 50km (~31 miles)
-  included_types: [
-    "restaurant", "cafe", "bar", "bakery",
-    "gym", "spa",
-    "park", "campground",
-    "museum", "library", "art_gallery",
-    "movie_theater", "bowling_alley",
-    "night_club",
-    "shopping_mall", "book_store",
-    "tourist_attraction",
-  ],
-  max_results_per_type: 20,
-  delay_between_requests_ms: 200, // Be polite to the API
-  dry_run: false,
-};
+// Expanded types list for comprehensive coverage
+const DEFAULT_TYPES = [
+  // Food & Drink
+  "restaurant", "cafe", "bar", "bakery", "meal_takeaway",
+  // Fitness & Wellness
+  "gym", "spa",
+  // Outdoor & Nature
+  "park", "campground",
+  // Arts & Culture
+  "museum", "library", "art_gallery",
+  // Entertainment
+  "movie_theater", "bowling_alley",
+  // Nightlife
+  "night_club",
+  // Shopping & Community
+  "shopping_mall", "book_store",
+  // Attractions
+  "tourist_attraction",
+  // Additional coverage
+  "stadium",
+  "performing_arts_theater",
+  "amusement_park",
+  "aquarium",
+  "yoga_studio",
+  "swimming_pool",
+  "ice_skating_rink",
+  "ski_resort",
+  "golf_course",
+  "marina",
+  "historical_landmark",
+  "visitor_center",
+  "community_center",
+  "church",
+  "clothing_store",
+  "florist",
+  "pet_store",
+  "lodging",
+];
 
-/**
- * Compute SHA256 hash of JSON for change detection
- */
+// Text Search keywords for discovery gaps
+const DEFAULT_KEYWORDS = [
+  "hiking trail",
+  "trailhead",
+  "brewery",
+  "winery",
+  "farm stand",
+  "farmers market",
+  "scenic overlook",
+  "swimming hole",
+  "canoe kayak launch",
+  "disc golf",
+  "mini golf",
+  "escape room",
+  "axe throwing",
+  "thrift store",
+  "antique shop",
+];
+
+const DEFAULT_REGIONS: Region[] = [
+  { name: "potsdam", lat: 44.6697, lng: -74.9814, radius_m: 25000 },
+  { name: "canton", lat: 44.5956, lng: -75.1690, radius_m: 25000 },
+];
+
+// ============================================================================
+// Hashing
+// ============================================================================
+
+function stableStringify(obj: unknown): string {
+  if (obj === null || obj === undefined) return JSON.stringify(obj);
+  if (typeof obj !== "object") return JSON.stringify(obj);
+  if (Array.isArray(obj)) {
+    return "[" + obj.map((v) => stableStringify(v)).join(",") + "]";
+  }
+  const keys = Object.keys(obj as Record<string, unknown>).sort();
+  const parts = keys.map(
+    (k) =>
+      JSON.stringify(k) +
+      ":" +
+      stableStringify((obj as Record<string, unknown>)[k]),
+  );
+  return "{" + parts.join(",") + "}";
+}
+
 async function hashJson(obj: unknown): Promise<string> {
-  const data = new TextEncoder().encode(JSON.stringify(obj));
+  const data = new TextEncoder().encode(stableStringify(obj));
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/**
- * Fetch places for a single type from Google Places API (New)
- */
+// ============================================================================
+// API Callers
+// ============================================================================
+
 async function fetchPlacesByType(
   apiKey: string,
   lat: number,
   lng: number,
   radiusMeters: number,
   placeType: string,
-  maxResults: number,
 ): Promise<{ places: any[]; error?: string }> {
   const body = {
     includedTypes: [placeType],
-    maxResultCount: Math.min(maxResults, 20), // API max is 20
+    maxResultCount: 20,
     locationRestriction: {
       circle: {
         center: { latitude: lat, longitude: lng },
@@ -116,7 +205,7 @@ async function fetchPlacesByType(
     },
   };
 
-  const response = await fetch(PLACES_API_URL, {
+  const response = await fetch(NEARBY_SEARCH_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -138,6 +227,80 @@ async function fetchPlacesByType(
   return { places: data.places || [] };
 }
 
+/**
+ * Text Search with optional pagination. Returns up to maxPages * 20 results.
+ * Each page costs 1 API request.
+ */
+async function fetchPlacesByTextSearch(
+  apiKey: string,
+  keyword: string,
+  lat: number,
+  lng: number,
+  radiusMeters: number,
+  maxPages: number,
+): Promise<{ places: any[]; pages_used: number; error?: string }> {
+  const allPlaces: any[] = [];
+  let pageToken: string | undefined;
+  let pagesUsed = 0;
+
+  for (let page = 0; page < maxPages; page++) {
+    const body: Record<string, unknown> = {
+      textQuery: keyword,
+      pageSize: 20,
+      locationBias: {
+        circle: {
+          center: { latitude: lat, longitude: lng },
+          radius: radiusMeters,
+        },
+      },
+    };
+
+    if (pageToken) {
+      body.pageToken = pageToken;
+    }
+
+    const response = await fetch(TEXT_SEARCH_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": FIELD_MASK,
+      },
+      body: JSON.stringify(body),
+    });
+
+    pagesUsed++;
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return {
+        places: allPlaces,
+        pages_used: pagesUsed,
+        error: `HTTP ${response.status}: ${errorText.substring(0, 500)}`,
+      };
+    }
+
+    const data = await response.json();
+    const places = data.places || [];
+    allPlaces.push(...places);
+
+    // Check for more pages
+    if (!data.nextPageToken || places.length === 0) {
+      break;
+    }
+    pageToken = data.nextPageToken;
+
+    // Small delay before next page
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  return { places: allPlaces, pages_used: pagesUsed };
+}
+
+// ============================================================================
+// Main Handler
+// ============================================================================
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -156,7 +319,26 @@ Deno.serve(async (req) => {
       }
     }
 
-    const cfg = { ...DEFAULT_CONFIG, ...config };
+    // Resolve regions: prefer explicit regions, fall back to single lat/lng
+    const regions: Region[] =
+      config.regions ||
+      (config.lat && config.lng
+        ? [
+            {
+              name: "custom",
+              lat: config.lat,
+              lng: config.lng,
+              radius_m: config.radius_meters || 25000,
+            },
+          ]
+        : DEFAULT_REGIONS);
+
+    const includedTypes = config.included_types || DEFAULT_TYPES;
+    const keywords = config.keywords || DEFAULT_KEYWORDS;
+    const maxPagesPerKeyword = Math.min(config.max_pages_per_keyword || 2, 3);
+    const maxTotalRequests = config.max_total_requests || 200;
+    const delayMs = config.delay_between_requests_ms ?? 200;
+    const dryRun = config.dry_run || false;
 
     // Get API key
     const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY");
@@ -180,6 +362,38 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // ── Budget check ──
+    const { data: budgetRows } = await supabase.rpc("get_api_budget", {
+      p_service: "google_places",
+    });
+    const budget = budgetRows?.[0];
+    if (budget && budget.requests_remaining <= 0) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          status: "budget_exceeded",
+          requests_used: budget.requests_used,
+          requests_limit: budget.requests_limit,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Estimate planned requests
+    const plannedNearby = regions.length * includedTypes.length;
+    const plannedText = regions.length * keywords.length;
+    const estimatedRequests = plannedNearby + plannedText;
+    const effectiveMax = budget
+      ? Math.min(maxTotalRequests, budget.requests_remaining)
+      : maxTotalRequests;
+
+    console.log(
+      `Plan: ${regions.length} regions x (${includedTypes.length} types + ${keywords.length} keywords)`,
+    );
+    console.log(
+      `Estimated requests: ${estimatedRequests}, max allowed: ${effectiveMax}`,
+    );
+
     // Get or create Google Places source
     let sourceId: string;
     const { data: existingSource } = await supabase
@@ -197,11 +411,7 @@ Deno.serve(async (req) => {
           name: "Google Places",
           type: "api_google_places",
           is_enabled: true,
-          config_json: {
-            default_lat: cfg.lat,
-            default_lng: cfg.lng,
-            default_radius_meters: cfg.radius_meters,
-          },
+          config_json: { regions },
         })
         .select("id")
         .single();
@@ -212,90 +422,52 @@ Deno.serve(async (req) => {
       sourceId = newSource.id;
     }
 
-    console.log(
-      `Ingesting Google Places: lat=${cfg.lat}, lng=${cfg.lng}, ` +
-      `radius=${cfg.radius_meters}m, types=${cfg.included_types.length}`,
-    );
-    console.log(`Types: ${cfg.included_types.join(", ")}`);
-    console.log(`dry_run=${cfg.dry_run}`);
+    // Batch-load existing hashes
+    const existingHashes = new Map<string, string>();
+    {
+      const { data: rows } = await supabase
+        .from("event_ingest_raw")
+        .select("external_id, raw_hash")
+        .eq("source_id", sourceId);
+      for (const row of rows || []) {
+        existingHashes.set(row.external_id, row.raw_hash);
+      }
+      console.log(
+        `Loaded ${existingHashes.size} existing hashes for change detection`,
+      );
+    }
 
     const results: IngestResult[] = [];
     const seenPlaceIds = new Set<string>();
     let totalFetched = 0;
     let totalApiCalls = 0;
     let consecutiveErrors = 0;
-    const MAX_CONSECUTIVE_ERRORS = 3; // Circuit breaker
+    let budgetExceeded = false;
+    const MAX_CONSECUTIVE_ERRORS = 3;
 
-    // Iterate over each included type
-    for (const placeType of cfg.included_types) {
-      // Circuit breaker: stop if too many consecutive API errors
-      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-        console.error(
-          `Circuit breaker: ${consecutiveErrors} consecutive API errors. ` +
-          `Stopping ingestion.`,
-        );
-        break;
-      }
-
-      console.log(`\nFetching type: ${placeType}...`);
-      totalApiCalls++;
-
-      const { places, error: fetchError } = await fetchPlacesByType(
-        apiKey,
-        cfg.lat,
-        cfg.lng,
-        cfg.radius_meters,
-        placeType,
-        cfg.max_results_per_type,
-      );
-
-      if (fetchError) {
-        console.error(`  Error fetching ${placeType}: ${fetchError}`);
-        consecutiveErrors++;
-
-        // Check for fatal errors (auth failures, quota exceeded)
-        if (
-          fetchError.includes("403") ||
-          fetchError.includes("401") ||
-          fetchError.includes("429")
-        ) {
-          console.error(
-            `  Fatal API error (${fetchError.substring(0, 50)}). Stopping.`,
-          );
-          break;
-        }
-
-        continue;
-      }
-
-      // Reset circuit breaker on success
-      consecutiveErrors = 0;
-
-      console.log(`  Found ${places.length} places for ${placeType}`);
-      totalFetched += places.length;
-
-      // Process each place
+    // ── Helper: process a batch of places ──
+    async function processPlaces(
+      places: any[],
+      searchLabel: string,
+      regionName?: string,
+    ) {
       for (const place of places) {
         const externalId = place.id;
-        if (!externalId) {
-          console.warn("  Skipping place with no ID");
-          continue;
-        }
-
-        // Skip if we've already processed this place in a previous type
-        if (seenPlaceIds.has(externalId)) {
-          continue;
-        }
+        if (!externalId) continue;
+        if (seenPlaceIds.has(externalId)) continue;
         seenPlaceIds.add(externalId);
 
         const placeName =
-          place.displayName?.text || place.primaryTypeDisplayName?.text || "Unknown";
+          place.displayName?.text ||
+          place.primaryTypeDisplayName?.text ||
+          "Unknown";
 
-        if (cfg.dry_run) {
+        if (dryRun) {
           results.push({
             external_id: externalId,
             name: placeName,
-            type_searched: placeType,
+            search_label: searchLabel,
+            region: regionName,
             status: "unchanged",
           });
           continue;
@@ -303,26 +475,19 @@ Deno.serve(async (req) => {
 
         try {
           const rawHash = await hashJson(place);
+          const existingHash = existingHashes.get(externalId);
 
-          // Check if this exact version already exists
-          const { data: existing } = await supabase
-            .from("event_ingest_raw")
-            .select("id, raw_hash")
-            .eq("source_id", sourceId)
-            .eq("external_id", externalId)
-            .single();
-
-          if (existing && existing.raw_hash === rawHash) {
+          if (existingHash === rawHash) {
             results.push({
               external_id: externalId,
               name: placeName,
-              type_searched: placeType,
+              search_label: searchLabel,
+              region: regionName,
               status: "unchanged",
             });
             continue;
           }
 
-          // Upsert raw data
           const { error: upsertError } = await supabase
             .from("event_ingest_raw")
             .upsert(
@@ -334,42 +499,185 @@ Deno.serve(async (req) => {
                 raw_hash: rawHash,
                 status: "new",
               },
-              {
-                onConflict: "source_id,external_id",
-              },
+              { onConflict: "source_id,external_id" },
             );
 
-          if (upsertError) {
-            throw upsertError;
-          }
+          if (upsertError) throw upsertError;
 
+          existingHashes.set(externalId, rawHash);
           results.push({
             external_id: externalId,
             name: placeName,
-            type_searched: placeType,
-            status: existing ? "updated" : "inserted",
+            search_label: searchLabel,
+            region: regionName,
+            status: existingHash !== undefined ? "updated" : "inserted",
           });
         } catch (error) {
           results.push({
             external_id: externalId,
             name: placeName,
-            type_searched: placeType,
+            search_label: searchLabel,
+            region: regionName,
             status: "error",
             error: error instanceof Error ? error.message : "Unknown error",
           });
         }
       }
+    }
 
-      // Delay between API requests
-      if (cfg.delay_between_requests_ms > 0) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, cfg.delay_between_requests_ms)
+    // Helper: check if we can still make API calls
+    function canContinue(): boolean {
+      if (budgetExceeded) return false;
+      if (totalApiCalls >= effectiveMax) {
+        budgetExceeded = true;
+        console.log(
+          `Request ceiling reached (${totalApiCalls}/${effectiveMax})`,
         );
+        return false;
+      }
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+        console.error(
+          `Circuit breaker: ${consecutiveErrors} consecutive errors`,
+        );
+        return false;
+      }
+      return true;
+    }
+
+    // Helper: handle API errors
+    function handleApiError(error: string): boolean {
+      consecutiveErrors++;
+      if (
+        error.includes("403") ||
+        error.includes("401") ||
+        error.includes("429")
+      ) {
+        console.error(`Fatal API error: ${error.substring(0, 80)}`);
+        if (error.includes("429")) budgetExceeded = true;
+        return false; // stop
+      }
+      return true; // continue
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Phase 1: Nearby Search — per type per region
+    // ════════════════════════════════════════════════════════════════════
+
+    console.log(
+      `\n-- Phase 1: Nearby Search (${includedTypes.length} types x ${regions.length} regions) --`,
+    );
+
+    for (const region of regions) {
+      if (!canContinue()) break;
+
+      for (const placeType of includedTypes) {
+        if (!canContinue()) break;
+
+        totalApiCalls++;
+        const { places, error: fetchError } = await fetchPlacesByType(
+          apiKey,
+          region.lat,
+          region.lng,
+          region.radius_m,
+          placeType,
+        );
+
+        if (fetchError) {
+          console.error(`  [${region.name}] ${placeType}: ${fetchError}`);
+          if (!handleApiError(fetchError)) break;
+          continue;
+        }
+
+        consecutiveErrors = 0;
+        console.log(
+          `  [${region.name}] ${placeType}: ${places.length} results`,
+        );
+        totalFetched += places.length;
+
+        await processPlaces(places, `type:${placeType}`, region.name);
+
+        // Increment budget
+        await supabase.rpc("increment_api_usage", {
+          p_service: "google_places",
+          p_count: 1,
+        });
+
+        if (delayMs > 0) {
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
       }
     }
 
-    // Update last_fetch_at on source
-    if (!cfg.dry_run) {
+    // ════════════════════════════════════════════════════════════════════
+    // Phase 2: Text Search — per keyword per region (with pagination)
+    // ════════════════════════════════════════════════════════════════════
+
+    if (keywords.length > 0 && canContinue()) {
+      console.log(
+        `\n-- Phase 2: Text Search (${keywords.length} keywords x ${regions.length} regions) --`,
+      );
+
+      for (const region of regions) {
+        if (!canContinue()) break;
+
+        for (const keyword of keywords) {
+          if (!canContinue()) break;
+
+          const pagesAllowed = Math.min(
+            maxPagesPerKeyword,
+            effectiveMax - totalApiCalls,
+          );
+          if (pagesAllowed <= 0) {
+            budgetExceeded = true;
+            break;
+          }
+
+          const {
+            places,
+            pages_used,
+            error: searchError,
+          } = await fetchPlacesByTextSearch(
+            apiKey,
+            keyword,
+            region.lat,
+            region.lng,
+            region.radius_m,
+            pagesAllowed,
+          );
+
+          totalApiCalls += pages_used;
+
+          if (searchError) {
+            console.error(
+              `  [${region.name}] "${keyword}": ${searchError}`,
+            );
+            if (!handleApiError(searchError)) break;
+            continue;
+          }
+
+          consecutiveErrors = 0;
+          console.log(
+            `  [${region.name}] "${keyword}": ${places.length} results (${pages_used} pages)`,
+          );
+          totalFetched += places.length;
+
+          await processPlaces(places, `keyword:${keyword}`, region.name);
+
+          // Increment budget for all pages used
+          await supabase.rpc("increment_api_usage", {
+            p_service: "google_places",
+            p_count: pages_used,
+          });
+
+          if (delayMs > 0) {
+            await new Promise((r) => setTimeout(r, delayMs));
+          }
+        }
+      }
+    }
+
+    // ── Update last_fetch_at ──
+    if (!dryRun) {
       await supabase
         .from("event_sources")
         .update({ last_fetch_at: new Date().toISOString() })
@@ -385,20 +693,32 @@ Deno.serve(async (req) => {
     const errors = results.filter((r) => r.status === "error").length;
     const uniquePlaces = seenPlaceIds.size;
 
+    // Get final budget status
+    const { data: finalBudget } = await supabase.rpc("get_api_budget", {
+      p_service: "google_places",
+    });
+    const budgetStatus = finalBudget?.[0];
+
     console.log(
       `\nIngestion complete: ${inserted} new, ${updated} updated, ` +
-      `${unchanged} unchanged, ${errors} errors`,
+        `${unchanged} unchanged, ${errors} errors`,
     );
     console.log(
       `${totalApiCalls} API calls, ${totalFetched} total results, ` +
-      `${uniquePlaces} unique places (${durationMs}ms)`,
+        `${uniquePlaces} unique places (${durationMs}ms)`,
     );
+    if (budgetStatus) {
+      console.log(
+        `Budget: ${budgetStatus.requests_used}/${budgetStatus.requests_limit} ` +
+          `(${budgetStatus.requests_remaining} remaining)`,
+      );
+    }
 
     // Log health
     await logPipelineHealth(supabase, {
       stage: "ingest",
       source_name: "Google Places",
-      status: errors > 0 ? "warn" : "ok",
+      status: budgetExceeded ? "warn" : errors > 0 ? "warn" : "ok",
       items_processed: inserted + updated,
       items_failed: errors,
       duration_ms: durationMs,
@@ -410,6 +730,9 @@ Deno.serve(async (req) => {
         updated,
         unchanged,
         errors,
+        budget_exceeded: budgetExceeded,
+        budget: budgetStatus || null,
+        regions: regions.map((r) => r.name),
         circuit_breaker_tripped: consecutiveErrors >= MAX_CONSECUTIVE_ERRORS,
       },
     });
@@ -426,15 +749,17 @@ Deno.serve(async (req) => {
           unchanged,
           errors,
           duration_ms: durationMs,
+          budget_exceeded: budgetExceeded,
         },
+        budget: budgetStatus || null,
         config: {
-          lat: cfg.lat,
-          lng: cfg.lng,
-          radius_meters: cfg.radius_meters,
-          included_types: cfg.included_types,
-          dry_run: cfg.dry_run,
+          regions,
+          included_types: includedTypes.length,
+          keywords: keywords.length,
+          max_total_requests: maxTotalRequests,
+          dry_run: dryRun,
         },
-        results: results.slice(0, 200), // Limit response size
+        results: results.slice(0, 300),
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
@@ -442,7 +767,6 @@ Deno.serve(async (req) => {
     const durationMs = Date.now() - startTime;
     console.error("Google Places ingestion error:", error);
 
-    // Try to log the error to health pipeline
     try {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
       const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

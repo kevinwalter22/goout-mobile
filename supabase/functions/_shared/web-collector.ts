@@ -1,61 +1,144 @@
 /**
- * Web Collector Framework
+ * Web Collector Framework (Enhanced for Wave 4)
  *
- * Shared infrastructure for web page collectors with strict compliance:
- * - robots.txt enforcement (blocks fetch if disallowed)
+ * Production-grade web collector with:
+ * - Integration with collector_targets table
+ * - Page caching with content hash change detection
+ * - robots.txt enforcement with caching
  * - Circuit breaker (auto-disables on repeated errors)
- * - DB kill switch (checks event_sources.is_enabled before every fetch)
  * - Rate limiting between requests
  * - Health logging for every collection cycle
  *
  * NON-NEGOTIABLE RULES:
  * - NO captcha bypass or stealth fingerprinting
- * - NO scraping social media or login-required pages
+ * - NO scraping social media or login-required pages (Facebook/Instagram/TikTok)
  * - Respect robots.txt — if disallowed, do not fetch
  * - Every collector MUST be disable-able via DB kill switch
+ * - AI only operates on CACHED content, never live browsing
  *
  * Usage:
- *   import { WebCollector } from "../_shared/web-collector.ts";
+ *   import { WebCollector, CollectorTarget } from "../_shared/web-collector.ts";
  *
- *   const collector = new WebCollector(supabase, {
- *     sourceName: "Potsdam Events",
- *     sourceType: "web_potsdam_events",
- *     userAgent: "EudaBot/1.0 (+https://euda.app/bot)",
- *     maxConsecutiveErrors: 3,
- *     requestDelayMs: 1000,
- *   });
+ *   const collector = new WebCollector(supabase);
+ *   const targets = await collector.getEnabledTargets();
  *
- *   const canProceed = await collector.preflight("https://example.com/events");
- *   if (!canProceed) return collector.disabledResponse();
- *
- *   const html = await collector.fetchPage("https://example.com/events");
+ *   for (const target of targets) {
+ *     const result = await collector.collectTarget(target);
+ *   }
  */
 
 import { logPipelineHealth } from "./health-log.ts";
+import { createHash } from "https://deno.land/std@0.208.0/crypto/mod.ts";
 
 // ============================================================================
-// Configuration
+// Types
 // ============================================================================
 
-export interface WebCollectorConfig {
-  sourceName: string;      // Display name (e.g., "Potsdam Events")
-  sourceType: string;      // event_sources.type value
-  userAgent: string;       // User-Agent header — always identify ourselves
-  maxConsecutiveErrors?: number;  // Circuit breaker threshold (default 3)
-  requestDelayMs?: number;       // Delay between requests (default 1000ms)
-  timeoutMs?: number;            // Request timeout (default 10000ms)
+export type ParsingStrategy = "jsonld" | "ics" | "rss" | "html_dom" | "hybrid";
+export type CircuitBreakerState = "closed" | "open" | "half_open";
+
+export interface CollectorTarget {
+  target_id: string;
+  name: string;
+  base_url: string;
+  discovery_urls: string[];
+  allowed_paths: string[];
+  parsing_strategy: ParsingStrategy;
+  dom_selectors: Record<string, string>;
+  user_agent: string;
+  rate_limit_rpm: number;
+  request_delay_ms: number;
+  max_pages_per_run: number;
+  minutes_since_last_run: number | null;
+  crawl_frequency_minutes: number;
+  source_id: string | null;
+  // Hyperlocal metadata (Phase A)
+  town: string | null;
+  venue_name: string | null;
+  default_category: string | null;
+  content_types: string[];
+  site_config: Record<string, any>;
 }
 
-interface CollectorState {
-  sourceId: string | null;
-  isEnabled: boolean;
-  consecutiveErrors: number;
-  circuitBroken: boolean;
-  robotsCache: Map<string, RobotsResult>;
-  fetchCount: number;
-  errorCount: number;
-  startTime: number;
+export interface PageCacheEntry {
+  id: string;
+  target_id: string;
+  url: string;
+  url_hash: string;
+  content_hash: string;
+  content_type: string | null;
+  raw_html: string | null;
+  http_status: number | null;
+  extracted_candidates: EventCandidate[] | null;
+  extraction_strategy: ParsingStrategy | null;
+  extraction_errors: string[] | null;
+  fetched_at: string;
+  last_changed_at: string;
 }
+
+export interface FetchResult {
+  url: string;
+  status: "fetched" | "cached_hit" | "blocked_by_robots" | "error" | "rate_limited";
+  content_hash?: string;
+  changed: boolean;
+  html?: string;
+  error?: string;
+}
+
+export interface EventCandidate {
+  // Required fields
+  title: string;
+  source_url: string;
+
+  // Temporal (at least one required)
+  starts_at?: string;
+  ends_at?: string;
+  recurrence_text?: string;  // e.g., "Every Tuesday at 7pm"
+
+  // Location
+  location_name?: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+
+  // Content
+  description_snippet?: string;
+  image_url?: string;
+
+  // Extraction metadata
+  evidence: ExtractionEvidence[];
+  extraction_strategy: ParsingStrategy;
+  confidence: number;  // 0-100
+
+  // Validation
+  validation_errors: string[];
+  is_valid: boolean;
+}
+
+export interface ExtractionEvidence {
+  field: string;
+  source: "jsonld" | "ics" | "rss" | "dom" | "meta";
+  value: string;
+  selector?: string;
+  raw_snippet?: string;  // HTML/text snippet used
+}
+
+export interface CollectionResult {
+  target: CollectorTarget;
+  pages_fetched: number;
+  pages_cached_hit: number;
+  pages_blocked: number;
+  pages_error: number;
+  candidates_found: number;
+  valid_candidates: number;
+  duration_ms: number;
+  circuit_tripped: boolean;
+  errors: string[];
+}
+
+// ============================================================================
+// Robots.txt Parser
+// ============================================================================
 
 interface RobotsResult {
   allowed: boolean;
@@ -63,19 +146,10 @@ interface RobotsResult {
   raw?: string;
 }
 
-// ============================================================================
-// Robots.txt Parser (minimal, safe implementation)
-// ============================================================================
-
-/**
- * Parse robots.txt and check if a path is allowed for our user agent.
- * Conservative: if robots.txt can't be fetched, BLOCK the request.
- */
-async function checkRobotsTxt(
+async function fetchRobotsTxt(
   baseUrl: string,
-  path: string,
   userAgent: string,
-  timeoutMs: number,
+  timeoutMs: number = 10000,
 ): Promise<RobotsResult> {
   const robotsUrl = new URL("/robots.txt", baseUrl).href;
 
@@ -104,11 +178,8 @@ async function checkRobotsTxt(
     }
 
     const text = await response.text();
-    const allowed = isPathAllowed(text, path, userAgent);
-
-    return { allowed, fetchedAt: Date.now(), raw: text.substring(0, 2000) };
+    return { allowed: true, fetchedAt: Date.now(), raw: text.substring(0, 5000) };
   } catch (err) {
-    // Network error fetching robots.txt = be conservative, block
     console.warn(`robots.txt fetch failed for ${baseUrl}: ${err}`);
     return {
       allowed: false,
@@ -118,11 +189,7 @@ async function checkRobotsTxt(
   }
 }
 
-/**
- * Minimal robots.txt parser.
- * Checks User-agent: * and our specific agent for Disallow rules.
- */
-function isPathAllowed(
+function isPathAllowedByRobots(
   robotsTxt: string,
   path: string,
   userAgent: string,
@@ -137,7 +204,6 @@ function isPathAllowed(
   const agentName = userAgent.split("/")[0].toLowerCase();
 
   for (const line of lines) {
-    // Skip comments and empty lines
     if (line.startsWith("#") || line === "") continue;
 
     const colonIndex = line.indexOf(":");
@@ -148,26 +214,16 @@ function isPathAllowed(
 
     if (directive === "user-agent") {
       const agent = value.toLowerCase();
-      currentAgentMatches =
-        agent === "*" || agent === agentName;
+      currentAgentMatches = agent === "*" || agent === agentName;
     } else if (directive === "disallow" && currentAgentMatches) {
-      if (value === "" || value === "/") {
-        // Disallow: / blocks everything
-        // Disallow: (empty) allows everything
-        if (value === "/") {
-          if (currentAgentMatches) {
-            // Check if this is our specific agent or wildcard
-            defaultAllowed = false;
-          }
-        }
-      } else if (path.startsWith(value)) {
-        if (currentAgentMatches) {
-          hasSpecificRule = true;
-          specificAllowed = false;
-        }
+      if (value === "/") {
+        defaultAllowed = false;
+      } else if (value && path.startsWith(value)) {
+        hasSpecificRule = true;
+        specificAllowed = false;
       }
     } else if (directive === "allow" && currentAgentMatches) {
-      if (path.startsWith(value)) {
+      if (value && path.startsWith(value)) {
         hasSpecificRule = true;
         specificAllowed = true;
       }
@@ -178,226 +234,493 @@ function isPathAllowed(
 }
 
 // ============================================================================
+// Hash Utilities
+// ============================================================================
+
+async function sha256(text: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(text);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ============================================================================
 // Web Collector Class
 // ============================================================================
 
 export class WebCollector {
   private supabase: any;
-  private config: Required<WebCollectorConfig>;
-  private state: CollectorState;
+  private robotsCache: Map<string, RobotsResult> = new Map();
+  private consecutiveErrors: number = 0;
+  private startTime: number = Date.now();
 
-  constructor(supabase: any, config: WebCollectorConfig) {
+  constructor(supabase: any) {
     this.supabase = supabase;
-    this.config = {
-      sourceName: config.sourceName,
-      sourceType: config.sourceType,
-      userAgent: config.userAgent,
-      maxConsecutiveErrors: config.maxConsecutiveErrors ?? 3,
-      requestDelayMs: config.requestDelayMs ?? 1000,
-      timeoutMs: config.timeoutMs ?? 10000,
-    };
-    this.state = {
-      sourceId: null,
-      isEnabled: false,
-      consecutiveErrors: 0,
-      circuitBroken: false,
-      robotsCache: new Map(),
-      fetchCount: 0,
-      errorCount: 0,
-      startTime: Date.now(),
-    };
   }
 
   /**
-   * Pre-flight check: verify source is enabled and robots.txt allows access.
-   * Returns false if the collector should not proceed.
+   * Get all enabled collector targets that are ready to run
    */
-  async preflight(targetUrl: string): Promise<boolean> {
-    // 1. Check DB kill switch
-    const { data: source } = await this.supabase
-      .from("event_sources")
-      .select("id, is_enabled")
-      .eq("type", this.config.sourceType)
+  async getEnabledTargets(): Promise<CollectorTarget[]> {
+    const { data, error } = await this.supabase.rpc("get_enabled_collector_targets");
+
+    if (error) {
+      console.error("Failed to get enabled targets:", error);
+      return [];
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Collect all pages for a single target
+   */
+  async collectTarget(target: CollectorTarget): Promise<CollectionResult> {
+    const result: CollectionResult = {
+      target,
+      pages_fetched: 0,
+      pages_cached_hit: 0,
+      pages_blocked: 0,
+      pages_error: 0,
+      candidates_found: 0,
+      valid_candidates: 0,
+      duration_ms: 0,
+      circuit_tripped: false,
+      errors: [],
+    };
+
+    const startTime = Date.now();
+    this.consecutiveErrors = 0;
+
+    try {
+      // 1. Check/refresh robots.txt
+      const robotsOk = await this.checkRobotsTxt(target);
+      if (!robotsOk) {
+        result.pages_blocked = target.discovery_urls.length;
+        result.errors.push("robots.txt disallows crawling");
+        await this.completeRun(target, result);
+        return result;
+      }
+
+      // 2. Fetch each discovery URL
+      let pagesFetched = 0;
+      for (const discoveryPath of target.discovery_urls) {
+        if (pagesFetched >= target.max_pages_per_run) {
+          console.log(`Reached max pages per run (${target.max_pages_per_run})`);
+          break;
+        }
+
+        // Check if path is allowed
+        if (!this.isPathAllowed(target, discoveryPath)) {
+          result.pages_blocked++;
+          result.errors.push(`Path not in allowed_paths: ${discoveryPath}`);
+          continue;
+        }
+
+        const fullUrl = new URL(discoveryPath, target.base_url).href;
+
+        // Rate limit delay
+        if (pagesFetched > 0) {
+          await this.delay(target.request_delay_ms);
+        }
+
+        // Fetch with cache check
+        const fetchResult = await this.fetchPageWithCache(target, fullUrl);
+
+        if (fetchResult.status === "fetched") {
+          result.pages_fetched++;
+          pagesFetched++;
+        } else if (fetchResult.status === "cached_hit") {
+          result.pages_cached_hit++;
+        } else if (fetchResult.status === "blocked_by_robots") {
+          result.pages_blocked++;
+        } else if (fetchResult.status === "error") {
+          result.pages_error++;
+          result.errors.push(fetchResult.error || `Failed to fetch ${fullUrl}`);
+        }
+
+        // Check circuit breaker
+        if (this.consecutiveErrors >= target.max_pages_per_run) {
+          result.circuit_tripped = true;
+          await this.tripCircuitBreaker(target, "Too many consecutive errors");
+          break;
+        }
+      }
+
+      // 3. Get candidates from cache
+      const { data: cachedPages } = await this.supabase
+        .from("collector_page_cache")
+        .select("extracted_candidates")
+        .eq("target_id", target.target_id)
+        .not("extracted_candidates", "is", null);
+
+      if (cachedPages) {
+        for (const page of cachedPages) {
+          const candidates = page.extracted_candidates as EventCandidate[] || [];
+          result.candidates_found += candidates.length;
+          result.valid_candidates += candidates.filter((c) => c.is_valid).length;
+        }
+      }
+
+    } catch (err) {
+      result.errors.push(err instanceof Error ? err.message : "Unknown error");
+    }
+
+    result.duration_ms = Date.now() - startTime;
+    await this.completeRun(target, result);
+
+    return result;
+  }
+
+  /**
+   * Check robots.txt for a target (with caching)
+   */
+  private async checkRobotsTxt(target: CollectorTarget): Promise<boolean> {
+    // Check in-memory cache first
+    let robotsResult = this.robotsCache.get(target.base_url);
+
+    // Check DB cache (24 hour TTL)
+    if (!robotsResult) {
+      const { data: targetData } = await this.supabase
+        .from("collector_targets")
+        .select("robots_txt_cache, robots_txt_fetched_at, robots_txt_allows_crawl")
+        .eq("id", target.target_id)
+        .single();
+
+      if (targetData?.robots_txt_fetched_at) {
+        const fetchedAt = new Date(targetData.robots_txt_fetched_at).getTime();
+        const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+
+        if (fetchedAt > dayAgo) {
+          robotsResult = {
+            allowed: targetData.robots_txt_allows_crawl,
+            fetchedAt,
+            raw: targetData.robots_txt_cache,
+          };
+          this.robotsCache.set(target.base_url, robotsResult);
+        }
+      }
+    }
+
+    // Fetch fresh if not cached or expired
+    if (!robotsResult) {
+      robotsResult = await fetchRobotsTxt(target.base_url, target.user_agent);
+      this.robotsCache.set(target.base_url, robotsResult);
+
+      // Store in DB
+      await this.supabase.rpc("update_robots_cache", {
+        p_target_id: target.target_id,
+        p_robots_txt: robotsResult.raw || "",
+        p_allows_crawl: robotsResult.allowed,
+      });
+    }
+
+    return robotsResult.allowed;
+  }
+
+  /**
+   * Check if a path is in the target's allowed_paths
+   */
+  private isPathAllowed(target: CollectorTarget, path: string): boolean {
+    // Empty allowed_paths = allow all (for targets that explicitly want this)
+    if (target.allowed_paths.length === 0) {
+      return true;
+    }
+
+    return target.allowed_paths.some((allowedPath) =>
+      path.startsWith(allowedPath)
+    );
+  }
+
+  /**
+   * Fetch a page with content hash change detection
+   */
+  async fetchPageWithCache(
+    target: CollectorTarget,
+    url: string,
+  ): Promise<FetchResult> {
+    const urlHash = await sha256(url);
+
+    // Check robots.txt for this specific path
+    const robotsResult = this.robotsCache.get(target.base_url);
+    if (robotsResult?.raw) {
+      const urlObj = new URL(url);
+      if (!isPathAllowedByRobots(robotsResult.raw, urlObj.pathname, target.user_agent)) {
+        return {
+          url,
+          status: "blocked_by_robots",
+          changed: false,
+        };
+      }
+    }
+
+    // Check existing cache
+    const { data: existingCache } = await this.supabase
+      .from("collector_page_cache")
+      .select("*")
+      .eq("target_id", target.target_id)
+      .eq("url_hash", urlHash)
       .single();
 
-    if (!source) {
-      console.log(
-        `Source '${this.config.sourceType}' not found in database. Skipping.`,
-      );
-      return false;
+    // Build conditional request headers (ETag / If-Modified-Since)
+    const requestHeaders: Record<string, string> = {
+      "User-Agent": target.user_agent,
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+    };
+    if (existingCache?.etag) {
+      requestHeaders["If-None-Match"] = existingCache.etag;
+    }
+    if (existingCache?.last_modified) {
+      requestHeaders["If-Modified-Since"] = existingCache.last_modified;
     }
 
-    this.state.sourceId = source.id;
-
-    if (!source.is_enabled) {
-      console.log(
-        `Source '${this.config.sourceName}' is disabled (kill switch). Skipping.`,
-      );
-      this.state.isEnabled = false;
-      return false;
-    }
-
-    this.state.isEnabled = true;
-
-    // 2. Check robots.txt
-    const url = new URL(targetUrl);
-    const baseUrl = `${url.protocol}//${url.host}`;
-    const path = url.pathname;
-
-    let robotsResult = this.state.robotsCache.get(baseUrl);
-    if (!robotsResult || Date.now() - robotsResult.fetchedAt > 3600000) {
-      // Cache for 1 hour
-      robotsResult = await checkRobotsTxt(
-        baseUrl,
-        path,
-        this.config.userAgent,
-        this.config.timeoutMs,
-      );
-      this.state.robotsCache.set(baseUrl, robotsResult);
-    }
-
-    if (!robotsResult.allowed) {
-      console.log(
-        `robots.txt DISALLOWS ${path} on ${baseUrl}. Respecting directive.`,
-      );
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Fetch a web page with proper headers, timeout, and error handling.
-   * Returns HTML string or null on error.
-   */
-  async fetchPage(url: string): Promise<string | null> {
-    // Check circuit breaker
-    if (this.state.consecutiveErrors >= this.config.maxConsecutiveErrors) {
-      this.state.circuitBroken = true;
-      console.error(
-        `Circuit breaker OPEN: ${this.state.consecutiveErrors} consecutive errors. ` +
-        `Refusing to fetch ${url}.`,
-      );
-      return null;
-    }
-
-    // Rate limit delay
-    if (this.state.fetchCount > 0) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, this.config.requestDelayMs)
-      );
-    }
-
-    this.state.fetchCount++;
+    // Fetch the page
+    let html: string;
+    let httpStatus: number;
+    let contentType: string | null = null;
+    let responseEtag: string | null = null;
+    let responseLastModified: string | null = null;
 
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        this.config.timeoutMs,
-      );
+      const timeout = setTimeout(() => controller.abort(), 15000);
 
       const response = await fetch(url, {
-        headers: {
-          "User-Agent": this.config.userAgent,
-          Accept: "text/html,application/xhtml+xml",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
+        headers: requestHeaders,
         signal: controller.signal,
       });
 
       clearTimeout(timeout);
+      httpStatus = response.status;
+      contentType = response.headers.get("Content-Type");
+      responseEtag = response.headers.get("ETag");
+      responseLastModified = response.headers.get("Last-Modified");
 
-      // Check for fatal errors → trip circuit breaker
-      if (
-        response.status === 401 ||
-        response.status === 403 ||
-        response.status === 429
-      ) {
-        this.state.consecutiveErrors++;
-        this.state.errorCount++;
-        console.error(
-          `Fatal HTTP ${response.status} from ${url}. ` +
-          `Consecutive errors: ${this.state.consecutiveErrors}/${this.config.maxConsecutiveErrors}`,
-        );
-        return null;
+      // Handle 304 Not Modified — server confirmed content unchanged
+      if (httpStatus === 304 && existingCache) {
+        const unchanged = (existingCache.consecutive_unchanged || 0) + 1;
+        await this.supabase
+          .from("collector_page_cache")
+          .update({
+            last_checked_at: new Date().toISOString(),
+            consecutive_unchanged: unchanged,
+          })
+          .eq("id", existingCache.id);
+        this.consecutiveErrors = 0;
+        return {
+          url,
+          status: "cached_hit",
+          content_hash: existingCache.content_hash,
+          changed: false,
+        };
+      }
+
+      // Check for fatal errors
+      if (httpStatus === 401 || httpStatus === 403 || httpStatus === 429) {
+        this.consecutiveErrors++;
+        return {
+          url,
+          status: "error",
+          changed: false,
+          error: `HTTP ${httpStatus}`,
+        };
       }
 
       if (!response.ok) {
-        this.state.consecutiveErrors++;
-        this.state.errorCount++;
-        console.error(`HTTP ${response.status} from ${url}`);
-        return null;
+        this.consecutiveErrors++;
+        return {
+          url,
+          status: "error",
+          changed: false,
+          error: `HTTP ${httpStatus}`,
+        };
       }
 
-      // Success → reset circuit breaker
-      this.state.consecutiveErrors = 0;
+      html = await response.text();
+      this.consecutiveErrors = 0; // Reset on success
 
-      const html = await response.text();
-      return html;
     } catch (err) {
-      this.state.consecutiveErrors++;
-      this.state.errorCount++;
-      console.error(
-        `Fetch error for ${url}: ${err instanceof Error ? err.message : "unknown"}`,
-      );
-      return null;
+      this.consecutiveErrors++;
+      return {
+        url,
+        status: "error",
+        changed: false,
+        error: err instanceof Error ? err.message : "Fetch failed",
+      };
     }
+
+    // Compute content hash
+    const contentHash = await sha256(html);
+
+    // Check if content changed
+    const changed = !existingCache || existingCache.content_hash !== contentHash;
+
+    if (!changed && existingCache) {
+      // Content hash identical — update last_checked_at + consecutive_unchanged
+      const unchanged = (existingCache.consecutive_unchanged || 0) + 1;
+      await this.supabase
+        .from("collector_page_cache")
+        .update({
+          last_checked_at: new Date().toISOString(),
+          consecutive_unchanged: unchanged,
+          // Save ETag/Last-Modified for future conditional requests
+          ...(responseEtag ? { etag: responseEtag } : {}),
+          ...(responseLastModified ? { last_modified: responseLastModified } : {}),
+        })
+        .eq("id", existingCache.id);
+
+      return {
+        url,
+        status: "cached_hit",
+        content_hash: contentHash,
+        changed: false,
+      };
+    }
+
+    // Store/update cache — content is new or changed
+    const cacheEntry = {
+      target_id: target.target_id,
+      url,
+      url_hash: urlHash,
+      content_hash: contentHash,
+      content_type: contentType,
+      raw_html: html,
+      http_status: httpStatus,
+      fetched_at: new Date().toISOString(),
+      last_checked_at: new Date().toISOString(),
+      last_changed_at: new Date().toISOString(),
+      consecutive_unchanged: 0, // Reset on content change
+      // Save ETag/Last-Modified for conditional requests
+      etag: responseEtag || null,
+      last_modified: responseLastModified || null,
+      // Clear old extraction results since content changed
+      extracted_candidates: null,
+      extraction_strategy: null,
+      extraction_errors: null,
+    };
+
+    if (existingCache) {
+      await this.supabase
+        .from("collector_page_cache")
+        .update(cacheEntry)
+        .eq("id", existingCache.id);
+    } else {
+      await this.supabase
+        .from("collector_page_cache")
+        .insert(cacheEntry);
+    }
+
+    return {
+      url,
+      status: "fetched",
+      content_hash: contentHash,
+      changed: true,
+      html,
+    };
   }
 
   /**
-   * Get the source ID (available after preflight)
+   * Get cached HTML for a URL (for extraction)
    */
-  getSourceId(): string | null {
-    return this.state.sourceId;
+  async getCachedPage(targetId: string, url: string): Promise<PageCacheEntry | null> {
+    const urlHash = await sha256(url);
+
+    const { data } = await this.supabase
+      .from("collector_page_cache")
+      .select("*")
+      .eq("target_id", targetId)
+      .eq("url_hash", urlHash)
+      .single();
+
+    return data;
   }
 
   /**
-   * Check if circuit breaker has tripped
+   * Update extraction results in cache
    */
-  isCircuitBroken(): boolean {
-    return this.state.circuitBroken;
+  async updateExtractionResults(
+    cacheId: string,
+    candidates: EventCandidate[],
+    strategy: ParsingStrategy,
+    errors: string[] = [],
+  ): Promise<void> {
+    await this.supabase
+      .from("collector_page_cache")
+      .update({
+        extracted_candidates: candidates,
+        extraction_strategy: strategy,
+        extraction_errors: errors,
+      })
+      .eq("id", cacheId);
   }
 
   /**
-   * Log health metrics for this collection cycle
+   * Trip the circuit breaker for a target
    */
-  async logHealth(itemsProcessed: number, itemsFailed: number): Promise<void> {
+  private async tripCircuitBreaker(target: CollectorTarget, reason: string): Promise<void> {
+    await this.supabase.rpc("trip_circuit_breaker", {
+      p_target_id: target.target_id,
+      p_reason: reason,
+    });
+    console.error(`Circuit breaker TRIPPED for ${target.name}: ${reason}`);
+  }
+
+  /**
+   * Complete a collection run
+   */
+  private async completeRun(target: CollectorTarget, result: CollectionResult): Promise<void> {
+    await this.supabase.rpc("complete_collector_run", {
+      p_target_id: target.target_id,
+      p_pages_fetched: result.pages_fetched,
+      p_items_found: result.candidates_found,
+      p_errors: result.pages_error,
+      p_circuit_trip: result.circuit_tripped,
+    });
+
+    // Log health
     await logPipelineHealth(this.supabase, {
-      stage: "ingest",
-      source_name: this.config.sourceName,
-      status: this.state.circuitBroken
-        ? "error"
-        : itemsFailed > 0
-          ? "warn"
-          : "ok",
-      items_processed: itemsProcessed,
-      items_failed: itemsFailed,
-      duration_ms: Date.now() - this.state.startTime,
+      stage: "web_collect",
+      source_name: target.name,
+      status: result.circuit_tripped ? "error" : result.pages_error > 0 ? "warn" : "ok",
+      items_processed: result.pages_fetched + result.pages_cached_hit,
+      items_failed: result.pages_error + result.pages_blocked,
+      duration_ms: result.duration_ms,
       details_json: {
-        fetch_count: this.state.fetchCount,
-        error_count: this.state.errorCount,
-        circuit_broken: this.state.circuitBroken,
-        consecutive_errors: this.state.consecutiveErrors,
+        pages_fetched: result.pages_fetched,
+        pages_cached_hit: result.pages_cached_hit,
+        pages_blocked: result.pages_blocked,
+        pages_error: result.pages_error,
+        candidates_found: result.candidates_found,
+        valid_candidates: result.valid_candidates,
+        circuit_tripped: result.circuit_tripped,
+        errors: result.errors.slice(0, 10), // Limit to first 10 errors
       },
     });
   }
 
   /**
-   * Return a standard "disabled" response (for when preflight fails)
+   * Utility: delay for rate limiting
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Return a standard "disabled" response
    */
   disabledResponse(reason?: string): Response {
     return new Response(
       JSON.stringify({
         success: true,
         status: "disabled",
-        reason: reason || "Source disabled or blocked by robots.txt",
-        source: this.config.sourceName,
+        reason: reason || "No enabled targets or blocked by robots.txt",
         summary: {
-          total_fetched: 0,
-          inserted: 0,
-          updated: 0,
-          unchanged: 0,
+          targets_processed: 0,
+          pages_fetched: 0,
+          pages_cached_hit: 0,
+          candidates_found: 0,
           errors: 0,
         },
       }),

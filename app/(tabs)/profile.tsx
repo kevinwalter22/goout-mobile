@@ -1,16 +1,73 @@
-import { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
+import { useState, useRef, useEffect } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  Text,
+  View,
+  ScrollView,
+  TextInput,
+  Modal,
+  Image,
+  useWindowDimensions,
+} from "react-native";
 import { router } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../src/hooks/useAuth";
 import { useFriendsList } from "../../src/hooks/useFriendsList";
+import { useUserPosts } from "../../src/hooks/useUserPosts";
 import { UserSearchSheet } from "../../src/components/UserSearchSheet";
 import { FriendsSheet } from "../../src/components/FriendsSheet";
+import { FriendRequestsSheet } from "../../src/components/FriendRequestsSheet";
+import { Avatar } from "../../src/components/Avatar";
+import { useFriendRequests } from "../../src/hooks/useFriendRequests";
+import { PostImage } from "../../src/components/PostImage";
+import { pickAndUploadAvatar } from "../../src/utils/avatar";
+import { supabase } from "../../src/lib/supabase";
+import { useToast } from "../../src/context/ToastContext";
+import { scrollToTopEmitter } from "../../src/utils/scrollToTop";
+import { useUpcomingPlans } from "../../src/hooks/useUpcomingPlans";
+import { Colors } from "../../src/config/theme";
+import { useTheme } from "../../src/contexts/ThemeContext";
+import { getEffectiveStreak } from "../../src/utils/streak";
+import { useFriendRecommendations } from "../../src/hooks/useFriendRecommendations";
 
 export default function Profile() {
-  const { profile, loading, signOut } = useAuth();
+  const { profile, loading, signOut, user, refreshProfile } = useAuth();
+  const insets = useSafeAreaInsets();
   const { friends } = useFriendsList();
+  const { requests } = useFriendRequests();
+  const { recommendations, loading: recsLoading, sendRequest } = useFriendRecommendations(5);
+  const { posts, loading: postsLoading } = useUserPosts(user?.id || null);
+  const { plans, loading: plansLoading } = useUpcomingPlans(user?.id);
+  const { showToast } = useToast();
+  const { colors } = useTheme();
+  const { width: screenWidth } = useWindowDimensions();
+  const GRID_GAP = 8;
+  const GRID_PADDING = 24;
+  const postSize = Math.floor((screenWidth - GRID_PADDING * 2 - GRID_GAP * 2) / 3);
   const [showUserSearch, setShowUserSearch] = useState(false);
   const [showFriends, setShowFriends] = useState(false);
+  const [showFriendRequests, setShowFriendRequests] = useState(false);
+  const [showBioEdit, setShowBioEdit] = useState(false);
+  const [bio, setBio] = useState("");
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [savingBio, setSavingBio] = useState(false);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  // Listen for scroll-to-top events
+  useEffect(() => {
+    const handleScrollToTop = () => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    };
+
+    scrollToTopEmitter.on("scrollToTop:profile", handleScrollToTop);
+
+    return () => {
+      scrollToTopEmitter.off("scrollToTop:profile", handleScrollToTop);
+    };
+  }, []);
 
   async function handleSignOut() {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -29,11 +86,86 @@ export default function Profile() {
     ]);
   }
 
+  async function handleAvatarUpload() {
+    if (!user) return;
+
+    setUploadingAvatar(true);
+
+    try {
+      const { avatarUrl, error } = await pickAndUploadAvatar(user.id);
+
+      if (error) {
+        if (error !== "Cancelled") {
+          showToast(error, "error");
+        }
+        return;
+      }
+
+      if (!avatarUrl) return;
+
+      // Update profile in database
+      const { error: updateError } = await (supabase
+        .from("profiles")
+        .update as any)({ avatar_url: avatarUrl })
+        .eq("id", user.id);
+
+      if (updateError) {
+        showToast("Failed to update avatar", "error");
+        return;
+      }
+
+      showToast("Avatar updated!", "success");
+      // Refresh profile to show updated avatar
+      await refreshProfile();
+    } catch (error) {
+      console.error("Avatar upload error:", error);
+      showToast("Failed to upload avatar", "error");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
+  function handleEditBio() {
+    setBio(profile?.bio || "");
+    setShowBioEdit(true);
+  }
+
+  async function handleSaveBio() {
+    if (!user) return;
+
+    setSavingBio(true);
+
+    try {
+      const { error } = await (supabase
+        .from("profiles")
+        .update as any)({ bio: bio.trim() || null })
+        .eq("id", user.id);
+
+      if (error) {
+        showToast("Failed to save bio", "error");
+        return;
+      }
+
+      showToast("Bio updated!", "success");
+      setShowBioEdit(false);
+      // Refresh profile to show updated bio
+      await refreshProfile();
+    } catch (error) {
+      console.error("Bio save error:", error);
+      showToast("Failed to save bio", "error");
+    } finally {
+      setSavingBio(false);
+    }
+  }
+
+  function handleFriendTap(friendId: string) {
+    setShowFriends(false);
+    router.push(`/user/${friendId}` as any);
+  }
+
   if (loading) {
     return (
-      <View
-        style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
-      >
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.background }}>
         <ActivityIndicator />
       </View>
     );
@@ -41,110 +173,341 @@ export default function Profile() {
 
   if (!profile) {
     return (
-      <View
-        style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
-      >
-        <Text>No profile found</Text>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.background }}>
+        <Text style={{ color: colors.text }}>No profile found</Text>
       </View>
     );
   }
 
   return (
-    <View style={{ flex: 1, padding: 24, paddingTop: 60 }}>
-      <View style={{ marginTop: 24, gap: 24 }}>
-        <View
-          style={{
-            width: 80,
-            height: 80,
-            borderRadius: 40,
-            backgroundColor: "#e0e0e0",
-            alignSelf: "center",
-          }}
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Header with logo and settings */}
+      <View
+        style={{
+          padding: 16,
+          paddingTop: insets.top + 16,
+          borderBottomWidth: 1,
+          borderBottomColor: colors.border,
+          backgroundColor: colors.background,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <Image
+          source={require("../../assets/images/euda.png")}
+          style={{ width: 120, height: 48, marginLeft: -8 }}
+          resizeMode="contain"
         />
+        <Pressable onPress={() => router.push("/settings" as any)} hitSlop={8}>
+          <Ionicons name="settings-outline" size={24} color={colors.textSecondary} />
+        </Pressable>
+      </View>
 
-        <View style={{ gap: 8, alignItems: "center" }}>
-          <Text style={{ fontSize: 24, fontWeight: "700" }}>
-            {profile.username}
-          </Text>
-        </View>
-
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-around",
-            paddingVertical: 20,
-            borderTopWidth: 1,
-            borderBottomWidth: 1,
-            borderColor: "#e0e0e0",
-          }}
-        >
-          <View style={{ alignItems: "center", gap: 4 }}>
-            <Text style={{ fontSize: 20, fontWeight: "700" }}>
-              {profile.xp}
-            </Text>
-            <Text style={{ fontSize: 14, opacity: 0.7 }}>XP</Text>
-          </View>
-          <View style={{ alignItems: "center", gap: 4 }}>
-            <Text style={{ fontSize: 20, fontWeight: "700" }}>
-              {profile.streak}
-            </Text>
-            <Text style={{ fontSize: 14, opacity: 0.7 }}>Streak</Text>
-          </View>
-          <View style={{ alignItems: "center", gap: 4 }}>
-            <Text style={{ fontSize: 20, fontWeight: "700" }}>
-              {friends.length}
-            </Text>
-            <Text style={{ fontSize: 14, opacity: 0.7 }}>Friends</Text>
-          </View>
-        </View>
-
-        {/* Friend Management Buttons */}
-        <View style={{ gap: 12, marginTop: 16 }}>
-          <Pressable
-            onPress={() => setShowUserSearch(true)}
-            style={{
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              borderRadius: 20,
-              backgroundColor: "#007AFF",
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ fontSize: 16, fontWeight: "600", color: "#fff" }}>
-              Add Friends
-            </Text>
+      <ScrollView ref={scrollViewRef} style={{ flex: 1 }}>
+        <View style={{ padding: 24 }}>
+        <View style={{ gap: 24 }}>
+          {/* Avatar with upload button */}
+          <Pressable onPress={handleAvatarUpload} disabled={uploadingAvatar}>
+            <View style={{ alignSelf: "center", position: "relative" }}>
+              <Avatar avatarUrl={profile.avatar_url} size={80} />
+              {uploadingAvatar && (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: colors.overlay,
+                    borderRadius: 40,
+                    justifyContent: "center",
+                    alignItems: "center",
+                  }}
+                >
+                  <ActivityIndicator color={Colors.white} />
+                </View>
+              )}
+              <View
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  right: 0,
+                  width: 24,
+                  height: 24,
+                  borderRadius: 12,
+                  backgroundColor: Colors.primary,
+                  justifyContent: "center",
+                  alignItems: "center",
+                }}
+              >
+                <Text style={{ color: Colors.white, fontSize: 16 }}>+</Text>
+              </View>
+            </View>
           </Pressable>
 
-          <Pressable
-            onPress={() => setShowFriends(true)}
+          {/* Username and bio */}
+          <View style={{ gap: 8, alignItems: "center" }}>
+            <Text style={{ fontSize: 24, fontWeight: "700", color: colors.text }}>{profile.username}</Text>
+            {profile.bio ? (
+              <Pressable onPress={handleEditBio}>
+                <Text style={{ fontSize: 14, color: colors.textSecondary, textAlign: "center" }}>
+                  {profile.bio}
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable onPress={handleEditBio}>
+                <Text style={{ fontSize: 14, color: colors.textTertiary, textAlign: "center" }}>
+                  Add a bio
+                </Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* Stats - centered and evenly spaced */}
+          <View
             style={{
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              borderRadius: 20,
-              backgroundColor: "#f5f5f5",
-              alignItems: "center",
+              flexDirection: "row",
+              justifyContent: "space-around",
+              paddingVertical: 20,
+              borderTopWidth: 1,
+              borderBottomWidth: 1,
+              borderColor: colors.separator,
             }}
           >
-            <Text style={{ fontSize: 16, fontWeight: "600", color: "#000" }}>
-              View Friends
-            </Text>
-          </Pressable>
-        </View>
+            <View style={{ alignItems: "center", gap: 4, flex: 1 }}>
+              <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>{profile.xp}</Text>
+              <Text style={{ fontSize: 14, color: colors.textSecondary }}>XP</Text>
+            </View>
+            <View style={{ alignItems: "center", gap: 4, flex: 1 }}>
+              <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>
+                {getEffectiveStreak(profile.last_post_date, profile.streak)}
+              </Text>
+              <Text style={{ fontSize: 14, color: colors.textSecondary }}>Streak</Text>
+            </View>
+            <Pressable
+              onPress={() => setShowFriends(true)}
+              style={{ alignItems: "center", gap: 4, flex: 1 }}
+            >
+              <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>{friends.length}</Text>
+              <Text style={{ fontSize: 14, color: colors.textSecondary }}>
+                Friends
+              </Text>
+            </Pressable>
+          </View>
 
-        <View style={{ gap: 12, marginTop: 8 }}>
+          {/* Friend Actions */}
+          <View style={{ gap: 12 }}>
+            {/* Friend Requests Button with Badge */}
+            {requests.length > 0 && (
+              <Pressable
+                onPress={() => setShowFriendRequests(true)}
+                style={{
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 20,
+                  backgroundColor: Colors.error,
+                  alignItems: "center",
+                  flexDirection: "row",
+                  justifyContent: "center",
+                  gap: 8,
+                }}
+              >
+                <Text style={{ fontSize: 16, fontWeight: "600", color: Colors.white }}>
+                  Friend Requests
+                </Text>
+                <View
+                  style={{
+                    backgroundColor: Colors.white,
+                    borderRadius: 12,
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    minWidth: 24,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: Colors.error }}>
+                    {requests.length}
+                  </Text>
+                </View>
+              </Pressable>
+            )}
+
+            {/* People You May Know */}
+            <View style={{ gap: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>
+                People You May Know
+              </Text>
+
+              {recsLoading ? (
+                <ActivityIndicator />
+              ) : recommendations.length > 0 ? (
+                recommendations.map((rec) => (
+                  <View
+                    key={rec.user_id}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
+                  >
+                    <Avatar avatarUrl={rec.avatar_url} size={40} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text }}>
+                        {rec.username}
+                      </Text>
+                      <Text style={{ fontSize: 13, color: colors.textSecondary }}>
+                        {rec.mutual_count} mutual friend{rec.mutual_count !== 1 ? "s" : ""}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={() => sendRequest(rec.user_id)}
+                      style={{
+                        paddingVertical: 6,
+                        paddingHorizontal: 14,
+                        borderRadius: 16,
+                        backgroundColor: Colors.primary,
+                      }}
+                    >
+                      <Text style={{ fontSize: 14, fontWeight: "600", color: Colors.white }}>
+                        Add
+                      </Text>
+                    </Pressable>
+                  </View>
+                ))
+              ) : (
+                <Text style={{ fontSize: 14, color: colors.textSecondary }}>
+                  No suggestions yet — add some friends to get started!
+                </Text>
+              )}
+
+              {/* Search CTA */}
+              <Pressable onPress={() => setShowUserSearch(true)}>
+                <Text
+                  style={{
+                    fontSize: 14,
+                    fontWeight: "600",
+                    color: Colors.primary,
+                    textAlign: "center",
+                  }}
+                >
+                  Search for friends
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Sign Out Button */}
           <Pressable
             onPress={handleSignOut}
             style={{
               padding: 16,
               borderRadius: 12,
-              backgroundColor: "#000",
+              backgroundColor: colors.text,
               alignItems: "center",
             }}
           >
-            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
+            <Text style={{ color: colors.background, fontSize: 16, fontWeight: "600" }}>
               Sign Out
             </Text>
           </Pressable>
+        </View>
+
+        {/* Upcoming Plans */}
+        {!plansLoading && plans.length > 0 && (
+          <View style={{ marginTop: 32 }}>
+            <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 12, color: colors.text }}>
+              Upcoming
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ marginHorizontal: -24 }}
+              contentContainerStyle={{ paddingHorizontal: 24, gap: 12 }}
+            >
+              {plans.map((plan) => (
+                <Pressable
+                  key={plan.id}
+                  onPress={() => router.push(`/event/${plan.id}` as any)}
+                  style={{
+                    width: 200,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    backgroundColor: colors.cardBg,
+                    overflow: "hidden",
+                  }}
+                >
+                  {plan.image_thumb_url ? (
+                    <Image
+                      source={{ uri: plan.image_thumb_url }}
+                      style={{ width: "100%", height: 80, backgroundColor: colors.surfaceVariant }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={{ width: "100%", height: 40, backgroundColor: colors.surfaceVariant }} />
+                  )}
+                  <View style={{ padding: 10, gap: 2 }}>
+                    <Text style={{ fontSize: 14, fontWeight: "600", color: colors.text }} numberOfLines={1}>
+                      {plan.title}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: colors.textSecondary }} numberOfLines={1}>
+                      {plan.starts_at
+                        ? new Date(plan.starts_at).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                        : "Ongoing"}
+                    </Text>
+                    {(plan.location_name || plan.town) && (
+                      <Text style={{ fontSize: 12, color: colors.textTertiary }} numberOfLines={1}>
+                        {[plan.location_name, plan.town].filter(Boolean).join(" · ")}
+                      </Text>
+                    )}
+                  </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Posts grid */}
+        <View style={{ marginTop: 32 }}>
+          <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 16, color: colors.text }}>
+            Your Posts ({posts.length})
+          </Text>
+
+          {postsLoading ? (
+            <ActivityIndicator />
+          ) : posts.length === 0 ? (
+            <Text style={{ textAlign: "center", color: colors.textSecondary, paddingVertical: 32 }}>
+              No posts yet. Check in at an event to create your first post!
+            </Text>
+          ) : (
+            <View
+              style={{
+                flexDirection: "row",
+                flexWrap: "wrap",
+                gap: GRID_GAP,
+              }}
+            >
+              {posts.map((post) => (
+                <Pressable
+                  key={post.id}
+                  onPress={() => router.push(`/post/${post.id}` as any)}
+                  style={{
+                    width: postSize,
+                    height: postSize,
+                    borderRadius: 8,
+                    overflow: "hidden",
+                  }}
+                >
+                  <PostImage
+                    photoPath={post.photo_path}
+                    style={{ width: "100%", height: "100%" }}
+                  />
+                </Pressable>
+              ))}
+            </View>
+          )}
         </View>
       </View>
 
@@ -156,7 +519,76 @@ export default function Profile() {
       <FriendsSheet
         visible={showFriends}
         onClose={() => setShowFriends(false)}
+        onFriendTap={handleFriendTap}
       />
+      <FriendRequestsSheet
+        visible={showFriendRequests}
+        onClose={() => setShowFriendRequests(false)}
+      />
+
+      {/* Bio Edit Modal */}
+      <Modal
+        visible={showBioEdit}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowBioEdit(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: colors.surface }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: 16,
+              paddingTop: insets.top + 16,
+              borderBottomWidth: 1,
+              borderBottomColor: colors.separator,
+            }}
+          >
+            <Pressable onPress={() => setShowBioEdit(false)}>
+              <Text style={{ fontSize: 16, color: Colors.primary }}>Cancel</Text>
+            </Pressable>
+            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>Edit Bio</Text>
+            <Pressable onPress={handleSaveBio} disabled={savingBio}>
+              <Text
+                style={{
+                  fontSize: 16,
+                  fontWeight: "600",
+                  color: savingBio ? colors.textTertiary : Colors.primary,
+                }}
+              >
+                {savingBio ? "..." : "Save"}
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={{ padding: 16 }}>
+            <TextInput
+              value={bio}
+              onChangeText={setBio}
+              placeholder="Tell us about yourself..."
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              maxLength={150}
+              style={{
+                padding: 12,
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: colors.separator,
+                fontSize: 16,
+                minHeight: 100,
+                textAlignVertical: "top",
+                color: colors.text,
+                backgroundColor: colors.inputBg,
+              }}
+            />
+            <Text style={{ marginTop: 8, fontSize: 12, color: colors.textTertiary, textAlign: "right" }}>
+              {bio.length}/150
+            </Text>
+          </View>
+        </View>
+      </Modal>
+      </ScrollView>
     </View>
   );
 }

@@ -17,11 +17,17 @@ export default function SignUp() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleSignUp() {
     if (!username || !email || !password) {
       Alert.alert("Error", "Please fill in all fields");
+      return;
+    }
+
+    if (!ageConfirmed) {
+      Alert.alert("Error", "You must confirm you are 13 or older to create an account");
       return;
     }
 
@@ -134,6 +140,38 @@ export default function SignUp() {
               }}
             />
           </View>
+
+          <Pressable
+            onPress={() => setAgeConfirmed((v) => !v)}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 10,
+              marginTop: 4,
+            }}
+          >
+            <View
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 4,
+                borderWidth: 2,
+                borderColor: ageConfirmed ? "#000" : "#999",
+                backgroundColor: ageConfirmed ? "#000" : "transparent",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {ageConfirmed && (
+                <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700", lineHeight: 16 }}>
+                  ✓
+                </Text>
+              )}
+            </View>
+            <Text style={{ fontSize: 14, color: "#333", flex: 1 }}>
+              I confirm I am 13 years of age or older
+            </Text>
+          </Pressable>
 
           <Pressable
             onPress={handleSignUp}

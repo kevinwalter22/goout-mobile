@@ -48,6 +48,8 @@ const SOURCE_FUNCTION_MAP: Record<string, string> = {
   api_ticketmaster: "ingest-ticketmaster",
   api_eventbrite: "ingest-eventbrite",
   api_google_places: "ingest-google-places",
+  web_collector: "ingest-web-collector",
+  web_community_calendar: "ingest-web-collector", // Legacy type maps to same function
 };
 
 Deno.serve(async (req) => {

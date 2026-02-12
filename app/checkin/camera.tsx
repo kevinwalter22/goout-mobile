@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Image,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   Text,
@@ -11,17 +13,27 @@ import {
 } from "react-native";
 import { CameraView, CameraType, useCameraPermissions } from "expo-camera";
 import { router, useLocalSearchParams } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import * as Crypto from "expo-crypto";
+import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/hooks/useAuth";
+import { useToast } from "../../src/context/ToastContext";
 import { uploadImage, deleteImage } from "../../src/utils/storage";
 import { supabase } from "../../src/lib/supabase";
-import { CAMERA_MODES, MAX_CAPTION_LENGTH } from "../../src/config/constants";
+import { CAMERA_MODES, MAX_CAPTION_LENGTH, XP_REWARDS } from "../../src/config/constants";
+import { useTheme } from "../../src/contexts/ThemeContext";
+import { heavyHaptic, successHaptic, errorHaptic } from "../../src/utils/haptics";
+import { logInteraction } from "../../src/lib/interactionLogger";
 export default function CameraCapture() {
-  const { eventId, mode } = useLocalSearchParams<{
-    eventId: string;
+  const { eventId, exploreItemId, mode, itemKind } = useLocalSearchParams<{
+    eventId?: string;
+    exploreItemId?: string;
     mode: string;
+    itemKind?: string;
   }>();
-  const { user } = useAuth();
+  const { user, refreshProfile } = useAuth();
+  const { showToast } = useToast();
+  const { colors } = useTheme();
 
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>(
@@ -32,6 +44,43 @@ export default function CameraCapture() {
   const [uploading, setUploading] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
+
+  // Handle back/cancel - confirm if photos have been taken
+  const handleCancel = useCallback(() => {
+    if (photos.length > 0) {
+      Alert.alert(
+        "Discard Photo?",
+        "You have unsaved photos. Are you sure you want to leave?",
+        [
+          { text: "Stay", style: "cancel" },
+          {
+            text: "Discard",
+            style: "destructive",
+            onPress: () => router.back(),
+          },
+        ]
+      );
+    } else {
+      router.back();
+    }
+  }, [photos.length]);
+
+  // Handle Android hardware back button
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        if (uploading) {
+          // Don't allow back during upload
+          return true;
+        }
+        handleCancel();
+        return true; // Prevent default back behavior
+      };
+
+      const subscription = BackHandler.addEventListener("hardwareBackPress", onBackPress);
+      return () => subscription.remove();
+    }, [handleCancel, uploading])
+  );
 
   useEffect(() => {
     if (permission && !permission.granted) {
@@ -49,6 +98,7 @@ export default function CameraCapture() {
     if (!cameraRef.current) return;
 
     try {
+      heavyHaptic(); // Haptic feedback on capture
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.8,
       });
@@ -63,6 +113,7 @@ export default function CameraCapture() {
       }
     } catch (error) {
       console.error("Error taking photo:", error);
+      errorHaptic();
       Alert.alert("Error", "Failed to take photo");
     }
   }
@@ -104,32 +155,92 @@ export default function CameraCapture() {
       }
 
       // Step 3: Insert post record
-      const { error: postError } = await supabase.from("posts").insert({
+      // Determine which ID to use: exploreItemId (new flow) or eventId (legacy)
+      const postData: any = {
         id: postId,
         user_id: user.id,
-        event_id: eventId,
         caption: caption.trim() || null,
         photo_path: backPath,
         front_photo_path: frontPath,
         camera_mode: mode as "front" | "back" | "dual",
         latitude: null,
         longitude: null,
-      } as any);
+      };
+
+      // Set the appropriate foreign key
+      if (exploreItemId) {
+        postData.explore_item_id = exploreItemId;
+        postData.event_id = null;
+        console.log("[Post] Creating post for explore_item_id:", exploreItemId);
+      } else if (eventId) {
+        postData.event_id = eventId;
+        postData.explore_item_id = null;
+        console.log("[Post] Creating post for legacy event_id:", eventId);
+      } else {
+        // No event/item - just a standalone post
+        postData.event_id = null;
+        postData.explore_item_id = null;
+        console.log("[Post] Creating standalone post (no event/item)");
+      }
+
+      const { error: postError } = await supabase.from("posts").insert(postData);
 
       if (postError) {
         console.error("[Post] DB insert failed:", postError);
         throw new Error(postError.message || "Failed to save post");
       }
 
-      console.log("[Post] Post created successfully");
+      console.log("[Post] Post created successfully with data:", {
+        explore_item_id: postData.explore_item_id,
+        event_id: postData.event_id,
+      });
 
-      // Navigate to feed
-      Alert.alert("Success", "Post created!", [
-        {
-          text: "OK",
-          onPress: () => router.replace("/(tabs)/feed" as any),
-        },
-      ]);
+      // Step 4: Update XP and streak progression
+      try {
+        // Give event bonus if posting to any event/activity
+        const hasEventContext = !!(eventId || exploreItemId);
+        const xpAmount = hasEventContext ? XP_REWARDS.BASE_POST + XP_REWARDS.EVENT_BONUS : XP_REWARDS.BASE_POST;
+
+        console.log(`[Progression] Calling RPC with xp_amount=${xpAmount}, hasEventContext=${hasEventContext}`);
+
+        const { data: progressionData, error: progressionError } = await (supabase
+          .rpc as any)('update_user_progression', {
+            p_user_id: user.id,
+            p_xp_amount: xpAmount,
+            p_post_date: new Date().toISOString(),
+          });
+
+        if (progressionError) {
+          console.error("[Progression] RPC error:", progressionError);
+          // Don't fail the post if progression fails - just log it
+        } else if (progressionData && Array.isArray(progressionData) && progressionData.length > 0) {
+          const { new_xp, new_streak } = progressionData[0];
+          console.log(`[Progression] Updated! XP: ${new_xp}, Streak: ${new_streak}`);
+
+          // Refresh profile to show updated XP/streak immediately
+          await refreshProfile();
+        }
+      } catch (progressionError) {
+        console.error("[Progression] Error updating progression:", progressionError);
+        // Don't fail the post if progression fails
+      }
+
+      // Log check_in_post interaction (fire and forget)
+      if (exploreItemId && itemKind) {
+        logInteraction({
+          userId: user.id,
+          exploreItemId,
+          eventType: "check_in_post",
+          itemKind: itemKind as "event" | "activity",
+        });
+      }
+
+      // Show success toast and navigate to feed
+      successHaptic();
+      showToast("Post created!", "success");
+      setTimeout(() => {
+        router.replace("/(tabs)/feed" as any);
+      }, 500);
     } catch (error) {
       console.error("[Post] Error:", error);
 
@@ -141,9 +252,10 @@ export default function CameraCapture() {
         await deleteImage(uploadedFrontPath);
       }
 
-      Alert.alert(
-        "Error",
+      errorHaptic();
+      showToast(
         error instanceof Error ? error.message : "Failed to create post",
+        "error"
       );
     } finally {
       setUploading(false);
@@ -151,23 +263,36 @@ export default function CameraCapture() {
   }
 
   function retake() {
-    if (isDualMode && photos.length === 2) {
-      // Retake from beginning
-      setPhotos([]);
-      setFacing("back");
-    } else if (isDualMode && photos.length === 1) {
-      // Retake front photo
-      setPhotos((prev) => prev.slice(0, 1));
-    } else {
-      // Retake single photo
-      setPhotos([]);
-    }
+    Alert.alert(
+      "Retake Photo?",
+      "This will discard your current photo" + (isDualMode && photos.length === 2 ? "s" : "") + ".",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Retake",
+          style: "destructive",
+          onPress: () => {
+            if (isDualMode && photos.length === 2) {
+              // Retake from beginning
+              setPhotos([]);
+              setFacing("back");
+            } else if (isDualMode && photos.length === 1) {
+              // Retake front photo
+              setPhotos((prev) => prev.slice(0, 1));
+            } else {
+              // Retake single photo
+              setPhotos([]);
+            }
+          },
+        },
+      ]
+    );
   }
 
   if (Platform.OS === "web") {
     return (
-      <View style={{ flex: 1, justifyContent: "center", padding: 24 }}>
-        <Text style={{ textAlign: "center", fontSize: 18 }}>
+      <View style={{ flex: 1, justifyContent: "center", padding: 24, backgroundColor: colors.background }}>
+        <Text style={{ textAlign: "center", fontSize: 18, color: colors.text }}>
           Camera is not available on web. Please use the mobile app.
         </Text>
       </View>
@@ -176,31 +301,38 @@ export default function CameraCapture() {
 
   if (!permission) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator />
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.background }}>
+        <ActivityIndicator color={colors.text} />
       </View>
     );
   }
 
   if (!permission.granted) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", padding: 24, gap: 16 }}>
-        <Text style={{ fontSize: 18, textAlign: "center" }}>
-          Camera permission is required to post
+      <View style={{ flex: 1, justifyContent: "center", padding: 24, gap: 16, backgroundColor: colors.background }}>
+        <Text style={{ fontSize: 20, fontWeight: "700", textAlign: "center", color: colors.text }}>
+          Camera Access Required
+        </Text>
+        <Text style={{ fontSize: 16, textAlign: "center", color: colors.textSecondary }}>
+          GoOut needs camera access to let you capture and share moments from events
         </Text>
         <Pressable
           onPress={requestPermission}
           style={{
             padding: 16,
             borderRadius: 12,
-            backgroundColor: "#000",
+            backgroundColor: colors.text,
             alignItems: "center",
+            marginTop: 8,
           }}
         >
-          <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
-            Grant Permission
+          <Text style={{ color: colors.background, fontSize: 16, fontWeight: "600" }}>
+            Grant Camera Permission
           </Text>
         </Pressable>
+        <Text style={{ fontSize: 14, textAlign: "center", color: colors.textTertiary, marginTop: 8 }}>
+          If you previously denied access, please enable it in Settings → GoOut → Camera
+        </Text>
       </View>
     );
   }
@@ -211,7 +343,33 @@ export default function CameraCapture() {
     const previewUri = photos[photos.length - 1];
 
     return (
-      <View style={{ flex: 1, backgroundColor: "#000" }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1, backgroundColor: "#000" }}
+        keyboardVerticalOffset={0}
+      >
+        {/* Back/Cancel button - top left on preview */}
+        <Pressable
+          onPress={handleCancel}
+          disabled={uploading}
+          style={{
+            position: "absolute",
+            top: Platform.OS === "ios" ? 60 : 40,
+            left: 16,
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 10,
+            opacity: uploading ? 0.5 : 1,
+          }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="close" size={24} color="#fff" />
+        </Pressable>
+
         <View style={{ flex: 1, justifyContent: "center" }}>
           <Image
             source={{ uri: previewUri }}
@@ -220,18 +378,27 @@ export default function CameraCapture() {
           />
         </View>
 
-        <View style={{ padding: 24, backgroundColor: "#fff", gap: 16 }}>
-          <Text style={{ fontSize: 18, fontWeight: "600" }}>Add a caption</Text>
+        <View style={{ padding: 24, backgroundColor: colors.surface, gap: 16 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <Text style={{ fontSize: 18, fontWeight: "600", color: colors.text }}>Add a caption</Text>
+            <Text style={{ fontSize: 14, color: colors.textTertiary }}>
+              {caption.length}/{MAX_CAPTION_LENGTH}
+            </Text>
+          </View>
           <TextInput
             value={caption}
             onChangeText={setCaption}
-            placeholder="Optional (max 100 characters)"
+            placeholder="Optional"
+            placeholderTextColor={colors.textTertiary}
             maxLength={MAX_CAPTION_LENGTH}
             style={{
               padding: 12,
               borderRadius: 8,
               borderWidth: 1,
+              borderColor: colors.border,
               fontSize: 16,
+              color: colors.text,
+              backgroundColor: colors.inputBg,
             }}
           />
 
@@ -244,10 +411,12 @@ export default function CameraCapture() {
                 padding: 16,
                 borderRadius: 12,
                 borderWidth: 2,
+                borderColor: colors.border,
                 alignItems: "center",
+                opacity: uploading ? 0.5 : 1,
               }}
             >
-              <Text style={{ fontSize: 16, fontWeight: "600" }}>Retake</Text>
+              <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>Retake</Text>
             </Pressable>
 
             <Pressable
@@ -257,15 +426,15 @@ export default function CameraCapture() {
                 flex: 1,
                 padding: 16,
                 borderRadius: 12,
-                backgroundColor: "#000",
+                backgroundColor: uploading ? colors.textSecondary : colors.text,
                 alignItems: "center",
               }}
             >
               {uploading ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={colors.background} />
               ) : (
                 <Text
-                  style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}
+                  style={{ color: colors.background, fontSize: 16, fontWeight: "600" }}
                 >
                   Post
                 </Text>
@@ -273,7 +442,7 @@ export default function CameraCapture() {
             </Pressable>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -281,6 +450,26 @@ export default function CameraCapture() {
   return (
     <View style={{ flex: 1, backgroundColor: "#000" }}>
       <CameraView ref={cameraRef} style={{ flex: 1 }} facing={facing}>
+        {/* Back/Cancel button - top left */}
+        <Pressable
+          onPress={handleCancel}
+          style={{
+            position: "absolute",
+            top: Platform.OS === "ios" ? 60 : 40,
+            left: 16,
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 10,
+          }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="close" size={24} color="#fff" />
+        </Pressable>
+
         <View style={{ flex: 1, justifyContent: "flex-end", padding: 24 }}>
           {isDualMode && (
             <Text

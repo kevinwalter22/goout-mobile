@@ -247,6 +247,162 @@ DELETE FROM event_ingest_raw
 WHERE source_id IN (SELECT id FROM event_sources WHERE type = 'api_google_places');
 ```
 
+---
+
+## Wave 3.5 — Pipeline Hardening (Migrations 040-043)
+
+### New Migrations
+
+| Migration | Purpose |
+|---|---|
+| **040** | Enrichment updates (description, time_text, fuzzy dedup) |
+| **041** | Fix normalization trigger on UPDATE (idempotent re-ingest) |
+| **042** | API usage counters (budget guardrail) |
+| **043** | Place details cache (lazy detail loading) |
+
+### Additional Edge Functions to Deploy
+
+```bash
+npx supabase functions deploy ingest-google-places    # Rewritten with multi-region + text search
+npx supabase functions deploy fetch-place-details     # New: lazy detail loading
+npx supabase functions deploy enrich-explore-item     # Updated: description + time_text
+npx supabase functions deploy run-enrichment-queue    # Updated: description + time_text
+```
+
+### V9: Idempotent Ingestion (Migration 041)
+
+```bash
+# Run ingestion twice — second run should produce all "unchanged"
+curl -X POST $SUPABASE_URL/functions/v1/ingest-google-places \
+  -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"included_types": ["restaurant"], "max_total_requests": 5}'
+
+# Wait, then run again
+curl -X POST $SUPABASE_URL/functions/v1/ingest-google-places \
+  -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"included_types": ["restaurant"], "max_total_requests": 5}'
+```
+
+**Expected**: Second run shows `"unchanged"` for all items. Zero `"inserted"` on re-run.
+
+### V10: Budget Guardrail (Migration 042)
+
+```sql
+-- Check budget counter exists
+SELECT * FROM get_api_budget('google_places');
+-- Expected: requests_used >= 0, requests_limit = 10000, requests_remaining > 0
+
+-- Test atomic increment
+SELECT increment_api_usage('google_places', 1);
+-- Expected: TRUE (within budget)
+
+-- Verify counter incremented
+SELECT * FROM get_api_budget('google_places');
+```
+
+### V11: Multi-Region (Potsdam + Canton)
+
+```bash
+# Run with default regions
+curl -X POST $SUPABASE_URL/functions/v1/ingest-google-places \
+  -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"included_types": ["park"], "max_total_requests": 10}'
+```
+
+**Expected**: Results include items from both Potsdam and Canton areas. Response includes `region` field per result.
+
+```sql
+-- Check geographic spread of Places items
+SELECT town, COUNT(*) FROM explore_items ei
+JOIN event_sources es ON es.id = ei.source_id
+WHERE es.type = 'api_google_places'
+GROUP BY town ORDER BY COUNT(*) DESC;
+```
+
+### V12: Text Search Coverage
+
+```bash
+curl -X POST $SUPABASE_URL/functions/v1/ingest-google-places \
+  -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"included_types": [], "keywords": ["hiking trail"], "max_total_requests": 10}'
+```
+
+**Expected**: Results include hiking-related places discovered via Text Search.
+
+### V13: Place Details Cache (Migration 043)
+
+```sql
+-- Verify table exists
+SELECT COUNT(*) FROM place_details_cache;
+-- Expected: 0 (empty until users view detail pages)
+
+-- Verify RLS policies
+SELECT policyname, cmd FROM pg_policies WHERE tablename = 'place_details_cache';
+-- Expected: SELECT for authenticated, ALL for service_role
+```
+
+### V14: Expanded Type Coverage
+
+```sql
+-- Check new types are being ingested and normalized
+SELECT sub_category, COUNT(*)
+FROM explore_items ei
+JOIN event_sources es ON es.id = ei.source_id
+WHERE es.type = 'api_google_places'
+GROUP BY sub_category ORDER BY COUNT(*) DESC;
+-- Expected: More categories than before (stadium, ice skating rink, etc.)
+```
+
+### V15: Enrichment with Description + Condensed Schedule
+
+```sql
+-- Check LLM-generated descriptions
+SELECT title, LEFT(description, 80) AS desc_preview
+FROM explore_items
+WHERE description IS NOT NULL
+  AND source_id IN (SELECT id FROM event_sources WHERE type = 'api_google_places')
+LIMIT 10;
+
+-- Check condensed schedules
+SELECT title, time_text, LEFT(schedule_text, 40) AS raw_schedule
+FROM explore_items
+WHERE time_text IS NOT NULL
+LIMIT 10;
+```
+
+### V16: Fuzzy Dedup
+
+```sql
+-- Check fuzzy duplicates detected
+SELECT COUNT(*) FROM explore_items WHERE is_duplicate = TRUE;
+
+-- Inspect specific matches
+SELECT a.title AS duplicate, b.title AS canonical,
+  similarity(LOWER(a.title), LOWER(b.title)) AS sim
+FROM explore_items a
+JOIN explore_items b ON a.canonical_item_id = b.id
+WHERE a.is_duplicate = TRUE
+LIMIT 10;
+```
+
+## Wave 3.5 Acceptance Criteria
+
+- [ ] Re-running ingestion produces zero new inserts (idempotent)
+- [ ] Budget counter tracks API requests accurately
+- [ ] Multi-region returns items from both Potsdam and Canton
+- [ ] Text Search discovers items not found by Nearby Search
+- [ ] Place details cache table is ready (empty until user views)
+- [ ] New types (stadium, ski_resort, etc.) have correct categories and tags
+- [ ] LLM enrichment generates descriptions for Places items missing them
+- [ ] Fuzzy dedup marks cross-source duplicates without false positives on dated events
+- [ ] `fetch-place-details` edge function deploys and returns details for Google Places items
+
+---
+
 ## Files Changed in Wave 3
 
 | File | Action | Phase |
@@ -266,3 +422,24 @@ WHERE source_id IN (SELECT id FROM event_sources WHERE type = 'api_google_places
 | `supabase/migrations/038_add_web_collector_source_types.sql` | New | W3-3 |
 | `docs/web_collectors.md` | New | W3-3 |
 | `docs/wave3_verification.md` | New | W3-4 |
+
+## Files Changed in Wave 3.5
+
+| File | Action | Description |
+|---|---|---|
+| `supabase/migrations/040_enhance_enrichment_and_fuzzy_dedup.sql` | New | Enrichment + fuzzy dedup |
+| `supabase/migrations/041_fix_normalization_on_update.sql` | New | Idempotent re-ingest trigger |
+| `supabase/migrations/042_api_usage_counters.sql` | New | Budget guardrail |
+| `supabase/migrations/043_place_details_cache.sql` | New | Lazy detail caching |
+| `supabase/functions/ingest-google-places/index.ts` | Rewritten | Multi-region, Text Search, budget |
+| `supabase/functions/fetch-place-details/index.ts` | New | Lazy Place Details |
+| `supabase/functions/_shared/source-adapters/google_places.ts` | Modified | Added 14 new type mappings |
+| `supabase/functions/_shared/enrichment-schema.ts` | Modified | description + short_schedule |
+| `supabase/functions/_shared/llm-provider.ts` | Modified | Model config |
+| `supabase/functions/run-enrichment-queue/index.ts` | Modified | New enrichment fields |
+| `supabase/functions/enrich-explore-item/index.ts` | Modified | New enrichment fields |
+| `src/lib/postableNow.ts` | Modified | Fixed date priority over availability_json |
+| `src/hooks/usePlaceDetails.ts` | New | Client hook for lazy details |
+| `app/event/[id].tsx` | Modified | Added Place Details display |
+| `docs/google_places_setup.md` | Updated | Full docs refresh |
+| `docs/wave3_verification.md` | Updated | Added Wave 3.5 verification |

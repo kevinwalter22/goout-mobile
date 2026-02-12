@@ -14,10 +14,14 @@ import {
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../hooks/useAuth";
 import { useFriendship } from "../hooks/useFriendship";
+import { Avatar } from "./Avatar";
+import { Colors } from "../config/theme";
+import { useTheme } from "../contexts/ThemeContext";
 
 type User = {
   id: string;
   username: string;
+  avatar_url: string | null;
 };
 
 type UserSearchSheetProps = {
@@ -27,6 +31,7 @@ type UserSearchSheetProps = {
 
 export function UserSearchSheet({ visible, onClose }: UserSearchSheetProps) {
   const { user: currentUser } = useAuth();
+  const { colors } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
   const [results, setResults] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
@@ -41,11 +46,10 @@ export function UserSearchSheet({ visible, onClose }: UserSearchSheetProps) {
 
     setLoading(true);
 
-    const { data } = await supabase
-      .from("profiles")
-      .select("id, username")
-      .ilike("username", `%${query.trim()}%`)
-      .limit(20);
+    // Use secure RPC that only returns public fields (id, username, avatar_url)
+    const { data } = await supabase.rpc("search_profiles", {
+      query: query.trim(),
+    });
 
     // Filter out current user
     const filtered = (data || []).filter((u: any) => u.id !== currentUser?.id);
@@ -63,13 +67,13 @@ export function UserSearchSheet({ visible, onClose }: UserSearchSheetProps) {
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={styles.container}
+        style={[styles.container, { backgroundColor: colors.surface }]}
       >
         {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Add Friends</Text>
+        <View style={[styles.header, { borderBottomColor: colors.separator }]}>
+          <Text style={[styles.title, { color: colors.text }]}>Add Friends</Text>
           <Pressable onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeText}>✕</Text>
+            <Text style={[styles.closeText, { color: colors.textSecondary }]}>✕</Text>
           </Pressable>
         </View>
 
@@ -79,9 +83,10 @@ export function UserSearchSheet({ visible, onClose }: UserSearchSheetProps) {
             value={searchQuery}
             onChangeText={handleSearch}
             placeholder="Search by username..."
+            placeholderTextColor={colors.textTertiary}
             autoCapitalize="none"
             autoCorrect={false}
-            style={styles.searchInput}
+            style={[styles.searchInput, { backgroundColor: colors.inputBg, color: colors.text }]}
           />
         </View>
 
@@ -94,7 +99,7 @@ export function UserSearchSheet({ visible, onClose }: UserSearchSheetProps) {
 
         {!loading && results.length === 0 && searchQuery.length >= 2 && (
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No users found</Text>
+            <Text style={[styles.emptyText, { color: colors.textTertiary }]}>No users found</Text>
           </View>
         )}
 
@@ -110,27 +115,47 @@ export function UserSearchSheet({ visible, onClose }: UserSearchSheetProps) {
 
 // Sub-component for each search result
 function UserSearchResultItem({ user }: { user: User }) {
-  const { isFriend, loading, toggleFriendship } = useFriendship(user.id);
+  const { status, loading, sendFriendRequest, cancelFriendRequest, removeFriend } = useFriendship(user.id);
+  const { colors } = useTheme();
+
+  function handlePress() {
+    if (status === "none") {
+      sendFriendRequest();
+    } else if (status === "pending_sent") {
+      cancelFriendRequest();
+    } else if (status === "accepted") {
+      removeFriend();
+    }
+  }
+
+  function getButtonText() {
+    if (loading) return "...";
+    if (status === "none") return "Add Friend";
+    if (status === "pending_sent") return "Requested";
+    if (status === "pending_received") return "Accept";
+    if (status === "accepted") return "Friends";
+    return "Add Friend";
+  }
 
   return (
-    <View style={styles.resultItem}>
-      <View style={styles.resultAvatar} />
-      <Text style={styles.resultUsername}>{user.username}</Text>
+    <View style={[styles.resultItem, { borderBottomColor: colors.borderLight }]}>
+      <Avatar avatarUrl={user.avatar_url} size={40} />
+      <Text style={[styles.resultUsername, { color: colors.text }]}>{user.username}</Text>
       <Pressable
-        onPress={toggleFriendship}
-        disabled={loading}
+        onPress={handlePress}
+        disabled={loading || status === "pending_received"}
         style={[
           styles.friendButton,
-          isFriend && styles.friendButtonActive,
+          (status === "accepted" || status === "pending_sent") && [styles.friendButtonActive, { backgroundColor: colors.surfaceVariant }],
         ]}
       >
         <Text
           style={[
             styles.friendButtonText,
-            isFriend && styles.friendButtonTextActive,
+            (status === "accepted" || status === "pending_sent") && [styles.friendButtonTextActive, { color: colors.textSecondary }],
           ]}
         >
-          {loading ? "..." : isFriend ? "Friends" : "Add"}
+          {getButtonText()}
         </Text>
       </Pressable>
     </View>
@@ -206,7 +231,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: "#007AFF",
+    backgroundColor: Colors.primary,
   },
   friendButtonActive: {
     backgroundColor: "#f5f5f5",

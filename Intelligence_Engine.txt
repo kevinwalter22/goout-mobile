@@ -1,0 +1,1706 @@
+Euda Activity Intelligence Engine
+Architecture Specification v1.0
+
+Executive Vision
+This is not a web scraper. This is an autonomous intelligence network that aims to know more about real-world activities in a region than any single human, organization, or existing platform possibly could.
+The system operates on a core principle: no activity should exist in the physical world without Euda knowing about it. Every trail, every weekly pickup game, every community yoga class, every gear rental shop, every cabin booking—all organized, validated, and ready to assemble into flourishing experiences.
+
+System Philosophy
+Why Multi-Layered Architecture?
+Single-layer scrapers fail because they conflate responsibilities:
+Discovery ≠ Extraction ≠ Validation ≠ Enrichment
+When one component tries to do everything, it makes assumptions. Assumptions create errors. Errors compound into garbage data that destroys user trust.
+Each layer in this system has ONE job. Layers communicate through well-defined contracts. If a layer can't complete its job with confidence, it escalates—never guesses.
+The Confidence Threshold Principle
+Every piece of data carries a confidence score (0.0 - 1.0). Data below the threshold doesn't get served to users—it gets routed to resolution. The system would rather show nothing than show wrong information.
+CONFIDENCE THRESHOLDS
+├── 0.95+ → Serve to users immediately
+├── 0.80-0.94 → Serve with soft disclaimer ("hours may vary")
+├── 0.50-0.79 → Queue for automated verification
+├── 0.20-0.49 → Queue for human-assisted resolution
+└── <0.20 → Discard or flag for manual review
+
+Layer Architecture Overview
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           ORCHESTRATION LAYER                                │
+│                    (Workflow Management & State Machine)                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+        ┌─────────────────────────────┼─────────────────────────────┐
+        │                             │                             │
+        ▼                             ▼                             ▼
+┌───────────────┐           ┌───────────────┐           ┌───────────────┐
+│   DISCOVERY   │           │  EXTRACTION   │           │  VALIDATION   │
+│    LAYER      │ ────────► │    LAYER      │ ────────► │    LAYER      │
+│               │           │               │           │               │
+│ Find sources  │           │ Pull data     │           │ Verify truth  │
+└───────────────┘           └───────────────┘           └───────────────┘
+                                                                │
+                                      ┌─────────────────────────┤
+                                      │                         │
+                                      ▼                         ▼
+                            ┌───────────────┐         ┌───────────────┐
+                            │  ENRICHMENT   │         │  RESOLUTION   │
+                            │    LAYER      │         │    LAYER      │
+                            │               │         │               │
+                            │ Add context   │         │ Fill gaps     │
+                            └───────────────┘         │ autonomously  │
+                                      │               └───────────────┘
+                                      │                         │
+                                      └──────────┬──────────────┘
+                                                 │
+                                                 ▼
+                                      ┌───────────────┐
+                                      │   PLANNING    │
+                                      │    LAYER      │
+                                      │               │
+                                      │ Assemble      │
+                                      │ experiences   │
+                                      └───────────────┘
+                                                 │
+                                                 ▼
+                                      ┌───────────────┐
+                                      │   DELIVERY    │
+                                      │    LAYER      │
+                                      │               │
+                                      │ Serve to      │
+                                      │ Euda app      │
+                                      └───────────────┘
+
+Layer 1: Discovery Layer
+Purpose
+Find and catalog every possible source of activity information for a given region. Does NOT extract data—only identifies WHERE data lives.
+Responsibilities
+Identify official sources (government, parks, recreation departments)
+Identify community sources (Facebook groups, local forums, newsletters)
+Identify commercial sources (tour operators, rental shops, event venues)
+Identify aggregator sources (AllTrails, Eventbrite, Meetup)
+Identify social signals (Instagram location tags, local hashtags)
+Maintain source registry with freshness schedules
+Score source reliability based on historical accuracy
+Source Categories
+SOURCE TAXONOMY
+│
+├── OFFICIAL SOURCES (highest trust)
+│   ├── Federal: NPS, USFS, BLM trail databases
+│   ├── State: State park systems, DNR
+│   ├── County: Parks & recreation departments
+│   ├── Municipal: City recreation calendars
+│   └── Universities: Campus events, club sports
+│
+├── AGGREGATOR SOURCES (medium trust, high volume)
+│   ├── AllTrails, Hiking Project, MTB Project
+│   ├── Eventbrite, Meetup, Facebook Events
+│   ├── Yelp, Google Places, TripAdvisor
+│   └── Local news event calendars
+│
+├── COMMERCIAL SOURCES (medium trust)
+│   ├── Tour operators & guides
+│   ├── Gear rental shops
+│   ├── Lodging providers (cabins, campgrounds)
+│   ├── Restaurants with event spaces
+│   └── Gyms, studios, recreation centers
+│
+├── COMMUNITY SOURCES (variable trust, high signal)
+│   ├── Facebook community groups
+│   ├── Reddit local subreddits
+│   ├── Nextdoor neighborhoods
+│   ├── Discord servers
+│   └── Email newsletters (local bloggers, tourism boards)
+│
+└── SOCIAL SIGNALS (low trust, trend detection)
+    ├── Instagram location tags & hashtags
+    ├── TikTok local content
+    └── Twitter/X local chatter
+Output Schema: Source Registry Entry
+{
+  "source_id": "uuid",
+  "source_name": "Adirondack Mountain Club Events Calendar",
+  "source_type": "OFFICIAL",
+  "source_url": "https://adk.org/events",
+  "geographic_coverage": {
+    "regions": ["adirondack_park"],
+    "radius_miles": null
+  },
+  "data_types": ["hiking_events", "workshops", "group_hikes"],
+  "scrape_strategy": "HTML_CALENDAR",
+  "refresh_schedule": "DAILY",
+  "reliability_score": 0.92,
+  "last_successful_scrape": "2025-01-24T08:00:00Z",
+  "extraction_config_id": "adk-events-config-v2",
+  "notes": "Calendar uses custom JS rendering, requires Playwright"
+}
+Discovery Mechanisms
+Seed Expansion: Start with known sources, crawl for links to related sources
+Search Engine Mining: Programmatic queries for "[region] hiking trails", "[town] events calendar", etc.
+Social Listening: Monitor for mentions of activities/events to trace back to sources
+User Reports: Euda users can submit sources they know about
+Competitive Analysis: What sources do other apps use? (reverse engineer their data)
+Anti-Patterns to Avoid
+❌ Assuming a source exists because it "should" (validate everything)
+❌ Over-relying on aggregators (they have gaps and biases)
+❌ Ignoring small/niche sources (often highest signal-to-noise)
+❌ Static source lists (sources appear, disappear, change URLs constantly)
+
+Layer 2: Extraction Layer
+Purpose
+Pull raw data from discovered sources and transform into structured activity records. Does NOT validate accuracy—only extracts what's claimed.
+Responsibilities
+Execute source-specific extraction strategies
+Handle diverse formats (HTML, JSON APIs, PDFs, images)
+Normalize data into unified activity schema
+Preserve provenance (where did each field come from?)
+Handle rate limiting, auth, anti-bot measures gracefully
+Log extraction confidence per field
+Extraction Strategy Matrix
+Source Type
+Primary Method
+Fallback Method
+Modern APIs
+REST/GraphQL client
+-
+Static HTML
+BeautifulSoup + heuristics
+LLM extraction
+Dynamic JS
+Playwright/Puppeteer
+API reverse engineering
+PDFs
+PyMuPDF + layout analysis
+LLM extraction
+Images (flyers)
+Vision model + OCR
+Manual queue
+Social posts
+Platform APIs
+Web scraping
+Email newsletters
+IMAP ingestion + parsing
+-
+
+Activity Schema (Raw Extracted)
+{
+  "extraction_id": "uuid",
+  "source_id": "source-uuid",
+  "extracted_at": "2025-01-25T10:30:00Z",
+  
+  "activity_type": "OUTDOOR_HIKE",
+  
+  "raw_fields": {
+    "name": {
+      "value": "Winter Summit Hike: Cascade Mountain",
+      "confidence": 0.98,
+      "source_element": "h1.event-title"
+    },
+    "description": {
+      "value": "Join us for a winter ascent of Cascade Mountain...",
+      "confidence": 0.95,
+      "source_element": "div.event-description"
+    },
+    "datetime_start": {
+      "value": "2025-02-15T08:00:00-05:00",
+      "confidence": 0.85,
+      "source_element": "span.event-date",
+      "raw_text": "Saturday, February 15th at 8am",
+      "parsing_notes": "Inferred year from context"
+    },
+    "datetime_end": {
+      "value": null,
+      "confidence": 0.0,
+      "source_element": null,
+      "parsing_notes": "Not specified"
+    },
+    "location": {
+      "value": {
+        "name": "Cascade Mountain Trailhead",
+        "address": "Route 73, Keene, NY",
+        "coordinates": null
+      },
+      "confidence": 0.70,
+      "parsing_notes": "Address extracted, coords need geocoding"
+    },
+    "cost": {
+      "value": {"amount": 15, "currency": "USD"},
+      "confidence": 0.90,
+      "raw_text": "$15 for non-members"
+    },
+    "organizer": {
+      "value": "Adirondack Mountain Club",
+      "confidence": 0.95
+    },
+    "registration_url": {
+      "value": "https://adk.org/events/cascade-feb15",
+      "confidence": 0.99
+    },
+    "capacity": {
+      "value": 12,
+      "confidence": 0.88,
+      "raw_text": "Limited to 12 participants"
+    },
+    "requirements": {
+      "value": ["microspikes", "snowshoes", "winter layers"],
+      "confidence": 0.75,
+      "raw_text": "Microspikes or snowshoes required. Dress in layers."
+    }
+  },
+  
+  "extraction_metadata": {
+    "strategy_used": "HTML_CALENDAR",
+    "page_snapshot_id": "snapshot-uuid",
+    "extraction_duration_ms": 450,
+    "fields_missing": ["datetime_end", "coordinates"],
+    "overall_confidence": 0.82
+  }
+}
+LLM-Assisted Extraction
+For complex/unstructured sources, use LLM with structured output:
+EXTRACTION_PROMPT = """
+You are extracting event/activity information from a webpage.
+Extract ONLY what is explicitly stated. Never infer or guess.
+For each field, rate your confidence (0.0-1.0).
+
+Source content:
+{page_content}
+
+Output as JSON matching this schema:
+{schema}
+
+If a field is not present, set value to null and confidence to 0.0.
+"""
+Anti-Patterns to Avoid
+❌ Inferring missing fields (that's Enrichment's job)
+❌ Trusting parsed dates blindly (timezones, year ambiguity are common)
+❌ Ignoring rate limits (gets sources blocked)
+❌ Throwing away raw text (needed for debugging and reprocessing)
+
+Layer 3: Validation Layer
+Purpose
+Verify that extracted data is accurate, current, and internally consistent. Flag discrepancies for resolution.
+Responsibilities
+Cross-reference claims against multiple sources
+Verify temporal validity (is this event in the future? is this trail open?)
+Check geographic consistency (do coords match address?)
+Detect duplicates and merge records
+Identify stale data that needs refresh
+Flag logical impossibilities
+Validation Checks
+VALIDATION PIPELINE
+│
+├── TEMPORAL VALIDATION
+│   ├── Is start_date in the future? (for events)
+│   ├── Does end_date come after start_date?
+│   ├── Is the day-of-week consistent with the date?
+│   ├── Are operating hours plausible?
+│   └── Has this event already passed? (stale detection)
+│
+├── GEOGRAPHIC VALIDATION
+│   ├── Do coordinates fall within stated region?
+│   ├── Does address geocode to stated coordinates (±500m)?
+│   ├── Is the location physically accessible?
+│   └── Does driving time from nearby cities match claims?
+│
+├── CROSS-SOURCE VALIDATION
+│   ├── Do other sources confirm this activity exists?
+│   ├── Do details match across sources?
+│   ├── Is the organizer verified to be legitimate?
+│   └── Are contact details consistent?
+│
+├── SEMANTIC VALIDATION
+│   ├── Does description match activity type?
+│   ├── Are requirements plausible for activity?
+│   ├── Is pricing in reasonable range for category?
+│   └── Are capacity limits realistic?
+│
+└── FRESHNESS VALIDATION
+    ├── When was source last updated?
+    ├── When did we last verify this data?
+    ├── Does the activity show signs of being outdated?
+    └── Are there seasonal considerations?
+Duplicate Detection
+Activities are duplicates if they share enough identity signals:
+DUPLICATE_SIGNALS = {
+    "exact_name_match": 0.3,
+    "similar_name_fuzzy": 0.2,  # Levenshtein > 0.85
+    "same_organizer": 0.2,
+    "same_location_100m": 0.25,
+    "same_datetime_15min": 0.3,
+    "same_url_domain": 0.1,
+    "overlapping_description": 0.15,
+}
+
+# If signals sum > 0.7, likely duplicate
+# Merge strategy: prefer highest confidence source for each field
+Validation Output
+{
+  "activity_id": "uuid",
+  "validation_status": "NEEDS_RESOLUTION",
+  "validation_timestamp": "2025-01-25T11:00:00Z",
+  
+  "checks_passed": [
+    "temporal_future_date",
+    "geographic_region_match",
+    "semantic_type_match"
+  ],
+  
+  "checks_failed": [
+    {
+      "check": "cross_source_confirmation",
+      "severity": "MEDIUM",
+      "details": "Only one source found for this event",
+      "resolution_hint": "VERIFY_WITH_ORGANIZER"
+    },
+    {
+      "check": "geographic_coords_address_match",
+      "severity": "LOW", 
+      "details": "Coordinates 1.2km from geocoded address",
+      "resolution_hint": "GEOCODE_VERIFY"
+    }
+  ],
+  
+  "duplicates_detected": [
+    {
+      "other_activity_id": "uuid-2",
+      "confidence": 0.85,
+      "merge_recommendation": "MERGE_PREFER_THIS"
+    }
+  ],
+  
+  "final_confidence": 0.72,
+  "routed_to": "RESOLUTION_LAYER"
+}
+Anti-Patterns to Avoid
+❌ Assuming single-source data is invalid (some activities ARE only listed once)
+❌ Over-aggressive duplicate merging (similar events can be distinct)
+❌ Ignoring seasonal patterns (ice fishing exists Dec-Mar, not July)
+❌ Validating against stale reference data
+
+Layer 4: Resolution Layer
+Purpose
+Autonomously fill gaps and resolve uncertainties through active outreach. This is the layer that makes Euda's data categorically better than competitors.
+Responsibilities
+Identify what information is missing or uncertain
+Determine appropriate resolution strategy
+Execute automated outreach (email, SMS, phone)
+Parse responses and update activity records
+Escalate to human when automation fails
+Learn from resolution outcomes to improve future extractions
+Resolution Strategies
+RESOLUTION STRATEGY MATRIX
+│
+├── MISSING HOURS/SCHEDULE
+│   ├── Primary: Check Google Places API
+│   ├── Secondary: Email business with template
+│   └── Tertiary: Call during business hours (AI voice)
+│
+├── MISSING COORDINATES
+│   ├── Primary: Geocode address via multiple APIs
+│   ├── Secondary: Search for location on maps
+│   └── Tertiary: Ask organizer for directions
+│
+├── UNCONFIRMED EVENT
+│   ├── Primary: Check organizer's social media
+│   ├── Secondary: Email organizer for confirmation
+│   └── Tertiary: Call organizer
+│
+├── MISSING REQUIREMENTS (gear, skill level)
+│   ├── Primary: Infer from activity type + conditions
+│   ├── Secondary: Check similar activities
+│   └── Tertiary: Email organizer
+│
+├── MISSING PRICING
+│   ├── Primary: Check booking page
+│   ├── Secondary: Email for rate sheet
+│   └── Tertiary: Mark as "contact for pricing"
+│
+├── CONFLICTING INFORMATION
+│   ├── Primary: Prefer most recent source
+│   ├── Secondary: Email to confirm current info
+│   └── Tertiary: Mark all versions with uncertainty
+│
+└── MISSING CONTACT INFO
+    ├── Primary: Search organization website
+    ├── Secondary: Check social profiles
+    └── Tertiary: Use domain WHOIS (businesses only)
+Automated Outreach System
+Email Templates
+templates:
+  event_confirmation:
+    subject: "Quick question about {{event_name}}"
+    body: |
+      Hi there,
+      
+      I'm helping a local app called Euda that connects people with activities in {{region}}. 
+      We want to make sure we have accurate info about {{event_name}}.
+      
+      Could you confirm:
+      - Date/time: {{extracted_datetime}}
+      - Location: {{extracted_location}}
+      - Cost: {{extracted_cost}}
+      
+      Any corrections? Just reply to this email.
+      
+      Thanks!
+      Euda Activity Team
+      
+    followup_days: 3
+    max_attempts: 2
+    
+  hours_inquiry:
+    subject: "Operating hours for {{business_name}}"
+    body: |
+      Hi,
+      
+      I'm updating a local activity guide and want to make sure we have 
+      your current hours listed correctly.
+      
+      What are your hours for {{season}}?
+      
+      Thanks!
+      
+    followup_days: 5
+    max_attempts: 2
+AI Voice Calls (via Twilio + Speech AI)
+CALL_SCRIPT_EVENT_VERIFY = """
+System: You are calling to verify event information for a local activity guide.
+Be polite, brief, and professional. Get the information and end the call.
+
+Opening: "Hi, I'm calling from Euda, a local activity guide. I just had a 
+quick question about {event_name}. Is this still happening on {date}?"
+
+If confirmed: "Great! And it's at {location}, starting at {time}?"
+
+If corrected: "Oh thanks for letting me know. So it's actually [repeat correction]?"
+
+Closing: "Perfect, thank you so much for your time. Have a great day!"
+
+Max duration: 90 seconds
+Record: Yes (with disclosure)
+Fallback: "I'll send an email instead, thanks!"
+SMS for Quick Confirmations
+SMS TEMPLATE (keep under 160 chars):
+"Hi! Euda local guide here. Quick Q: Is [event] still on for [date] at [time]? Reply Y/N or with corrections. Thanks!"
+Response Parsing
+class ResponseParser:
+    """Parse email/SMS responses to update activity records."""
+    
+    def parse_confirmation_response(self, message: str, activity: Activity):
+        """Use LLM to extract structured updates from freeform response."""
+        
+        prompt = f"""
+        Original activity details:
+        {activity.to_summary()}
+        
+        Response from organizer:
+        {message}
+        
+        Extract any corrections or confirmations. Output JSON:
+        {{
+            "status": "CONFIRMED" | "CORRECTED" | "CANCELLED" | "UNCLEAR",
+            "corrections": {{
+                "field_name": "new_value",
+                ...
+            }},
+            "additional_info": "any other relevant details mentioned"
+        }}
+        """
+        
+        return llm.structured_output(prompt, ResponseSchema)
+Resolution Queue Management
+{
+  "queue_entry": {
+    "activity_id": "uuid",
+    "resolution_type": "MISSING_HOURS",
+    "priority": "MEDIUM",
+    "created_at": "2025-01-25T10:00:00Z",
+    "attempts": [
+      {
+        "strategy": "GOOGLE_PLACES_API",
+        "timestamp": "2025-01-25T10:01:00Z",
+        "outcome": "NOT_FOUND"
+      },
+      {
+        "strategy": "EMAIL_BUSINESS",
+        "timestamp": "2025-01-25T10:05:00Z",
+        "outcome": "AWAITING_RESPONSE",
+        "followup_scheduled": "2025-01-28T10:00:00Z"
+      }
+    ],
+    "status": "IN_PROGRESS",
+    "max_attempts": 5,
+    "escalate_to_human_after": 3
+  }
+}
+Human Escalation
+When automation fails:
+Queue for human review with full context
+Human can: manually research, make direct calls, mark as unresolvable
+Learnings from human resolution feed back into automation rules
+Anti-Patterns to Avoid
+❌ Spamming businesses with repeated outreach (rate limit per recipient)
+❌ Calling at inappropriate times (respect business hours, timezone)
+❌ Overly formal/robotic outreach (sounds like spam)
+❌ Not tracking outreach history (leads to duplicate contacts)
+❌ Assuming no response = invalid (they might just be busy)
+
+Layer 5: Enrichment Layer
+Purpose
+Add context and metadata that transforms raw activity data into actionable intelligence. This is where Euda's flourishing philosophy gets embedded.
+Responsibilities
+Calculate flourishing dimension scores
+Identify prerequisite needs (gear, skills, transportation)
+Link to supporting resources (rentals, guides, lodging)
+Generate accessibility assessments
+Compute difficulty/intensity ratings
+Add weather sensitivity flags
+Create optimal timing recommendations
+Flourishing Dimension Scoring
+Every activity gets scored on Euda's five dimensions:
+class FlourishingScorer:
+    """Score activities on Euda's flourishing dimensions."""
+    
+    DIMENSIONS = {
+        "agency": "Does this give the user autonomy and choice?",
+        "growth": "Does this challenge skills or provide learning?",
+        "connection": "Does this involve meaningful human interaction?",
+        "meaning": "Does this contribute to purpose or community?",
+        "engagement": "Does this enable flow states and presence?"
+    }
+    
+    def score_activity(self, activity: Activity) -> FlourishingProfile:
+        prompt = f"""
+        Activity: {activity.name}
+        Type: {activity.type}
+        Description: {activity.description}
+        Group size: {activity.capacity}
+        
+        Score this activity 0-10 on each flourishing dimension:
+        
+        1. AGENCY: How much autonomy/choice does participant have?
+           (solo exploration = high, rigid group tour = low)
+        
+        2. GROWTH: How much skill challenge or learning?
+           (new skill workshop = high, passive spectating = low)
+        
+        3. CONNECTION: Quality of human interaction?
+           (deep small group = high, anonymous crowd = low)
+        
+        4. MEANING: Contribution to purpose/community?
+           (volunteer work = high, pure entertainment = low)
+        
+        5. ENGAGEMENT: Potential for flow state/presence?
+           (active participation = high, passive consumption = low)
+        
+        Output as JSON with scores and brief justifications.
+        """
+        
+        return llm.structured_output(prompt, FlourishingProfile)
+Dependency Mapping
+ACTIVITY DEPENDENCY GRAPH
+│
+├── "Winter Summit Hike: Cascade Mountain"
+│   │
+│   ├── GEAR REQUIRED
+│   │   ├── microspikes OR crampons
+│   │   │   └── RENTAL_OPTIONS: [
+│   │   │       {name: "High Peaks Cyclery", distance: "12mi", price: "$15/day"},
+│   │   │       {name: "Mountaineer Outfitters", distance: "8mi", price: "$12/day"}
+│   │   │   ]
+│   │   ├── snowshoes (if deep snow)
+│   │   │   └── RENTAL_OPTIONS: [...]
+│   │   ├── winter hiking boots
+│   │   │   └── RENTAL_OPTIONS: [...] OR PURCHASE: [...]
+│   │   └── trekking poles (recommended)
+│   │
+│   ├── SKILLS REQUIRED
+│   │   ├── winter hiking experience
+│   │   │   └── PREREQUISITE_ACTIVITIES: [
+│   │   │       "Beginner Winter Hike: Baxter Mountain",
+│   │   │       "Winter Hiking Safety Workshop"
+│   │   │   ]
+│   │   └── navigation basics
+│   │
+│   ├── TRANSPORTATION
+│   │   ├── trailhead_parking: "Limited, arrive early"
+│   │   └── carpool_potential: HIGH (match with other attendees)
+│   │
+│   └── SUPPORTING SERVICES
+│       ├── NEARBY_FOOD: [
+│       │   {name: "Noon Mark Diner", type: "breakfast", distance: "5mi"}
+│       │   ]
+│       ├── NEARBY_LODGING: [
+│       │   {name: "Cascade Lakes Lodge", type: "cabin", distance: "2mi"}
+│       │   ]
+│       └── EMERGENCY: {hospital: "Adirondack Medical Center", distance: "18mi"}
+Enrichment Data Model
+{
+  "activity_id": "uuid",
+  "enrichment_version": 3,
+  "enriched_at": "2025-01-25T12:00:00Z",
+  
+  "flourishing_scores": {
+    "agency": 7,
+    "growth": 8,
+    "connection": 6,
+    "meaning": 5,
+    "engagement": 9,
+    "overall": 7.0,
+    "primary_dimension": "engagement",
+    "justification": "Challenging physical activity with high presence potential"
+  },
+  
+  "difficulty_assessment": {
+    "physical_intensity": "STRENUOUS",
+    "technical_skill": "INTERMEDIATE", 
+    "experience_required": "SOME_WINTER_HIKING",
+    "risk_level": "MODERATE",
+    "fitness_requirements": ["cardio_endurance", "leg_strength"]
+  },
+  
+  "time_requirements": {
+    "activity_duration_hours": 5,
+    "travel_time_from_potsdam_hours": 2.5,
+    "total_commitment_hours": 10,
+    "best_start_time": "07:00",
+    "avoid_times": ["afternoon_in_winter"]
+  },
+  
+  "weather_sensitivity": {
+    "cancellation_conditions": ["severe_wind", "whiteout", "extreme_cold"],
+    "ideal_conditions": ["clear_cold", "light_snow"],
+    "check_forecast_hours_before": 24
+  },
+  
+  "prerequisites": {
+    "gear_required": [
+      {
+        "item": "microspikes",
+        "importance": "REQUIRED",
+        "rental_options": [
+          {
+            "provider_id": "provider-uuid",
+            "provider_name": "High Peaks Cyclery",
+            "distance_miles": 12,
+            "price_per_day": 15,
+            "reservation_required": false
+          }
+        ],
+        "purchase_options": [
+          {
+            "retailer": "REI",
+            "price_range": "$30-70",
+            "url": "https://rei.com/microspikes"
+          }
+        ]
+      }
+    ],
+    "skills_required": [
+      {
+        "skill": "winter_hiking_basics",
+        "level": "INTERMEDIATE",
+        "learning_resources": [
+          {
+            "type": "PREREQUISITE_ACTIVITY",
+            "activity_id": "uuid-beginner-hike",
+            "name": "Beginner Winter Hike: Baxter Mountain"
+          },
+          {
+            "type": "ONLINE_RESOURCE",
+            "title": "Winter Hiking Safety",
+            "url": "https://adk.org/winter-safety"
+          }
+        ]
+      }
+    ]
+  },
+  
+  "supporting_services": {
+    "transportation": {
+      "parking_situation": "LIMITED_ARRIVE_EARLY",
+      "carpool_potential": "HIGH",
+      "public_transit": null
+    },
+    "nearby_food": [...],
+    "nearby_lodging": [...],
+    "emergency_services": {...}
+  },
+  
+  "accessibility": {
+    "wheelchair_accessible": false,
+    "mobility_limitations": "NOT_SUITABLE",
+    "visual_limitations": "GUIDE_REQUIRED",
+    "hearing_limitations": "FULLY_ACCESSIBLE",
+    "family_friendly": "TEENS_ONLY",
+    "dog_friendly": true
+  },
+  
+  "seasonality": {
+    "available_months": [12, 1, 2, 3],
+    "peak_season": [1, 2],
+    "conditions_vary_by": "snowpack"
+  }
+}
+Enrichment Sources
+Internal Knowledge Base: Curated data about gear, skills, trails
+External APIs: Weather services, mapping, business directories
+LLM Inference: Reasoning about requirements from descriptions
+User Feedback: Corrections and additions from Euda users
+Resolution Layer: Confirmed details from organizer outreach
+Anti-Patterns to Avoid
+❌ Over-inferring requirements (better to say "unknown" than guess wrong)
+❌ Static enrichment (recalculate when source data changes)
+❌ Ignoring edge cases (not everyone drives, has gear, etc.)
+❌ Generic flourishing scores (tailor to activity specifics)
+
+Layer 6: Planning Layer
+Purpose
+Assemble individual activities into coherent, optimized experiences. This is where "take a hike" becomes "your perfect weekend in the Adirondacks."
+Responsibilities
+Generate multi-activity itineraries
+Optimize for logistics (distance, timing, energy)
+Balance flourishing dimensions across a trip
+Handle booking coordination
+Create contingency plans (weather, availability)
+Personalize based on user flourishing profile
+Trip Assembly Engine
+class TripPlanner:
+    """Assemble activities into optimized multi-day experiences."""
+    
+    def plan_trip(
+        self,
+        user: UserProfile,
+        constraints: TripConstraints,
+        preferences: TripPreferences
+    ) -> Trip:
+        """
+        Generate an optimal trip plan.
+        
+        Args:
+            user: User's flourishing profile, skill levels, gear owned
+            constraints: Dates, budget, party size, base location
+            preferences: Activity types, intensity, must-dos
+            
+        Returns:
+            Complete trip with daily itineraries, bookings, packing list
+        """
+        
+        # 1. Candidate activity retrieval
+        candidates = self.get_candidates(
+            region=constraints.region,
+            dates=constraints.dates,
+            types=preferences.activity_types
+        )
+        
+        # 2. Filter by hard constraints
+        viable = self.filter_viable(
+            candidates,
+            skill_level=user.skill_levels,
+            budget=constraints.budget,
+            party_size=constraints.party_size
+        )
+        
+        # 3. Score by flourishing fit
+        scored = self.score_flourishing_fit(
+            viable,
+            user_profile=user.flourishing_profile,
+            growth_edges=user.growth_edges
+        )
+        
+        # 4. Optimize daily schedules
+        schedule = self.optimize_schedule(
+            scored,
+            dates=constraints.dates,
+            base_location=constraints.lodging or constraints.home,
+            energy_model=user.energy_model
+        )
+        
+        # 5. Add logistics
+        trip = self.add_logistics(
+            schedule,
+            gear_owned=user.gear_inventory,
+            transportation=user.transportation
+        )
+        
+        # 6. Generate contingencies
+        trip.contingencies = self.generate_contingencies(
+            trip,
+            weather_forecast=self.get_forecast(constraints.region, constraints.dates)
+        )
+        
+        return trip
+Trip Schema
+{
+  "trip_id": "uuid",
+  "created_at": "2025-01-25T14:00:00Z",
+  "created_for_user": "user-uuid",
+  
+  "overview": {
+    "title": "Winter Adirondack Adventure",
+    "dates": {
+      "start": "2025-02-14",
+      "end": "2025-02-16"
+    },
+    "region": "adirondack_high_peaks",
+    "party_size": 2,
+    "total_budget_estimate": {
+      "low": 450,
+      "high": 600,
+      "currency": "USD"
+    },
+    "flourishing_focus": ["engagement", "growth", "connection"]
+  },
+  
+  "lodging": {
+    "name": "Cascade Lakes Lodge",
+    "type": "cabin",
+    "booking_url": "https://cascadelakeslodge.com/book",
+    "price_per_night": 150,
+    "check_in": "2025-02-14T15:00",
+    "check_out": "2025-02-16T11:00",
+    "amenities": ["kitchen", "fireplace", "hot_tub"],
+    "booking_status": "SUGGESTED"  // or RESERVED, CONFIRMED
+  },
+  
+  "daily_itineraries": [
+    {
+      "date": "2025-02-14",
+      "day_label": "Day 1: Arrival & Sunset Snowshoe",
+      
+      "activities": [
+        {
+          "time_slot": "15:00-16:00",
+          "type": "LOGISTICS",
+          "description": "Check in at Cascade Lakes Lodge"
+        },
+        {
+          "time_slot": "16:30-18:30",
+          "activity_id": "uuid-sunset-snowshoe",
+          "activity_name": "Sunset Snowshoe: Heart Lake",
+          "why_included": "Gentle introduction, beautiful light, builds anticipation",
+          "gear_needed": ["snowshoes", "headlamp"],
+          "notes": "Trailhead 5 min from lodge"
+        },
+        {
+          "time_slot": "19:30-21:00",
+          "type": "MEAL",
+          "suggestion": {
+            "name": "Lake Placid Pub & Brewery",
+            "cuisine": "American",
+            "price_range": "$$",
+            "reservation_recommended": true
+          }
+        }
+      ],
+      
+      "energy_level": "EASY",
+      "flourishing_dimensions": {
+        "engagement": 6,
+        "connection": 7,
+        "meaning": 3
+      }
+    },
+    {
+      "date": "2025-02-15",
+      "day_label": "Day 2: Summit Day",
+      
+      "activities": [
+        {
+          "time_slot": "06:00-06:45",
+          "type": "MEAL",
+          "suggestion": {
+            "name": "Cabin breakfast",
+            "notes": "Make eggs & coffee, eat hearty"
+          }
+        },
+        {
+          "time_slot": "07:30-14:00",
+          "activity_id": "uuid-cascade-hike",
+          "activity_name": "Winter Summit: Cascade Mountain",
+          "why_included": "Core challenge, peak experience, growth opportunity",
+          "gear_needed": ["microspikes", "trekking poles", "layers"],
+          "notes": "Start early for best conditions. Pack lunch."
+        },
+        {
+          "time_slot": "15:00-16:30",
+          "type": "RECOVERY",
+          "description": "Hot tub at cabin, rest"
+        },
+        {
+          "time_slot": "18:00-20:00",
+          "type": "MEAL",
+          "suggestion": {
+            "name": "Cabin dinner",
+            "notes": "Cook steaks, celebrate the summit"
+          }
+        }
+      ],
+      
+      "energy_level": "HIGH",
+      "flourishing_dimensions": {
+        "engagement": 9,
+        "growth": 8,
+        "connection": 6
+      }
+    },
+    {
+      "date": "2025-02-16",
+      "day_label": "Day 3: Recovery & Departure",
+      
+      "activities": [
+        {
+          "time_slot": "09:00-10:30",
+          "activity_id": "uuid-ice-fishing",
+          "activity_name": "Morning Ice Fishing: Mirror Lake",
+          "why_included": "Low-key activity, novel experience, local tradition",
+          "gear_needed": "PROVIDED",
+          "gear_provider": {
+            "name": "Jones Outfitters",
+            "included_in_activity": true
+          }
+        },
+        {
+          "time_slot": "11:00-12:00",
+          "type": "LOGISTICS",
+          "description": "Check out, pack car"
+        },
+        {
+          "time_slot": "12:30-13:30",
+          "type": "MEAL",
+          "suggestion": {
+            "name": "Noon Mark Diner",
+            "notes": "Classic Adirondack breakfast spot"
+          }
+        },
+        {
+          "time_slot": "14:00",
+          "type": "LOGISTICS",
+          "description": "Depart for home (~2.5hr drive)"
+        }
+      ],
+      
+      "energy_level": "LOW",
+      "flourishing_dimensions": {
+        "engagement": 5,
+        "connection": 7,
+        "meaning": 4
+      }
+    }
+  ],
+  
+  "packing_list": {
+    "gear_to_bring": [
+      {"item": "winter hiking boots", "owned": true},
+      {"item": "trekking poles", "owned": true},
+      {"item": "headlamp", "owned": true}
+    ],
+    "gear_to_rent": [
+      {
+        "item": "microspikes",
+        "rental": {
+          "provider": "High Peaks Cyclery",
+          "pickup_time": "2025-02-14T14:00",
+          "price": 15
+        }
+      },
+      {
+        "item": "snowshoes",
+        "rental": {
+          "provider": "High Peaks Cyclery",
+          "pickup_time": "2025-02-14T14:00",
+          "price": 20
+        }
+      }
+    ],
+    "gear_provided": [
+      {"item": "ice fishing gear", "by_activity": "uuid-ice-fishing"}
+    ],
+    "clothing_suggestions": [
+      "Base layers (2 sets)",
+      "Insulated jacket",
+      "Wind/waterproof shell",
+      "Winter gloves + liner gloves",
+      "Warm hat + balaclava"
+    ]
+  },
+  
+  "contingency_plans": {
+    "weather_backup": {
+      "trigger": "High winds (>40mph) or whiteout conditions on Feb 15",
+      "alternative": {
+        "activity_id": "uuid-mt-van-ho",
+        "name": "Mt. Van Hoevenberg trail (sheltered, lower elevation)",
+        "notes": "Lower and more protected, still a good challenge"
+      }
+    },
+    "full_cancel_plan": {
+      "trigger": "Severe storm warning",
+      "alternative": "Indoor day: Olympic Museum in Lake Placid, brewery tour"
+    }
+  },
+  
+  "booking_checklist": [
+    {"item": "Lodge reservation", "status": "NEEDS_BOOKING", "url": "..."},
+    {"item": "Gear rental", "status": "NEEDS_BOOKING", "url": "..."},
+    {"item": "Ice fishing slot", "status": "NEEDS_BOOKING", "url": "..."},
+    {"item": "Dinner reservation Feb 14", "status": "OPTIONAL", "url": "..."}
+  ],
+  
+  "trip_flourishing_summary": {
+    "total_scores": {
+      "agency": 7,
+      "growth": 8,
+      "connection": 7,
+      "meaning": 4,
+      "engagement": 8
+    },
+    "narrative": "This trip balances challenge with recovery, building toward a peak experience on Day 2. You'll push your limits on Cascade while enjoying cozy cabin time and novel experiences like ice fishing. Great for deepening your winter outdoor confidence."
+  }
+}
+Optimization Algorithms
+Activity Selection: Multi-objective optimization balancing:
+
+
+Flourishing fit (match user's growth edges)
+Logistical efficiency (minimize driving)
+Energy management (don't stack exhausting activities)
+Variety (different activity types, environments)
+Temporal Scheduling: Constraint satisfaction:
+
+
+Operating hours
+Travel times between locations
+Energy curves (demanding activities when fresh)
+Meal timing
+Weather windows
+Budget Allocation: Knapsack-style optimization:
+
+
+Prioritize must-do experiences
+Find value alternatives for nice-to-haves
+Account for hidden costs (parking, tips, gear)
+Anti-Patterns to Avoid
+❌ Over-scheduling (leave breathing room)
+❌ Ignoring travel time (activities too far apart)
+❌ All-high-intensity (leads to burnout and injury)
+❌ Generic recommendations (must reflect user's specific profile)
+❌ Unbookable plans (verify availability before suggesting)
+
+Layer 7: Orchestration Layer
+Purpose
+Coordinate all layers, manage state, handle failures, and ensure the system operates coherently.
+Responsibilities
+Workflow state management
+Cross-layer communication
+Error handling and retry logic
+Resource allocation and scheduling
+Monitoring and alerting
+Data consistency guarantees
+Workflow State Machine
+ACTIVITY LIFECYCLE
+│
+│  ┌─────────────┐
+│  │  DISCOVERED │ ◄─── Discovery Layer finds source
+│  └──────┬──────┘
+│         │
+│         ▼
+│  ┌─────────────┐
+│  │  EXTRACTED  │ ◄─── Extraction Layer pulls data
+│  └──────┬──────┘
+│         │
+│         ▼
+│  ┌─────────────┐      ┌───────────────┐
+│  │  VALIDATING │ ───► │ NEEDS_RESOLVE │ ───┐
+│  └──────┬──────┘      └───────────────┘    │
+│         │                    ▲             │
+│         │ (passes)           │             │
+│         │              ┌─────┴─────┐       │
+│         ▼              │ RESOLVING │ ◄─────┘
+│  ┌─────────────┐       └─────┬─────┘
+│  │  VALIDATED  │             │
+│  └──────┬──────┘             │ (resolved)
+│         │                    │
+│         ▼                    ▼
+│  ┌─────────────┐      ┌─────────────┐
+│  │  ENRICHING  │ ◄────┤  VALIDATED  │
+│  └──────┬──────┘      └─────────────┘
+│         │
+│         ▼
+│  ┌─────────────┐
+│  │   ACTIVE    │ ◄─── Ready to serve to users
+│  └──────┬──────┘
+│         │
+│         ├─────────────────────────┐
+│         │                         │
+│         ▼                         ▼
+│  ┌─────────────┐          ┌─────────────┐
+│  │   STALE     │          │  EXPIRED    │
+│  │  (re-check) │          │  (archive)  │
+│  └─────────────┘          └─────────────┘
+Job Scheduling
+scheduled_jobs:
+  
+  # Discovery: Find new sources
+  source_discovery:
+    schedule: "0 0 * * 0"  # Weekly, Sunday midnight
+    regions: ALL_ACTIVE
+    job_type: DISCOVER_NEW_SOURCES
+    
+  # Extraction: Refresh known sources  
+  daily_extraction:
+    schedule: "0 6 * * *"  # Daily at 6am
+    targets: SOURCES_DUE_FOR_REFRESH
+    job_type: EXTRACT_FROM_SOURCES
+    
+  # High-frequency event sources
+  event_extraction:
+    schedule: "0 */4 * * *"  # Every 4 hours
+    targets: EVENT_AGGREGATOR_SOURCES
+    job_type: EXTRACT_FROM_SOURCES
+    
+  # Validation batch
+  validation_batch:
+    schedule: "0 8 * * *"  # Daily at 8am
+    targets: NEWLY_EXTRACTED + STALE_ACTIVE
+    job_type: VALIDATE_ACTIVITIES
+    
+  # Resolution processing
+  resolution_processing:
+    schedule: "0 9-17 * * 1-5"  # Hourly, business hours, weekdays
+    targets: RESOLUTION_QUEUE
+    job_type: PROCESS_RESOLUTIONS
+    
+  # Enrichment refresh
+  enrichment_refresh:
+    schedule: "0 2 * * *"  # Daily at 2am
+    targets: VALIDATED_NEEDS_ENRICHMENT
+    job_type: ENRICH_ACTIVITIES
+    
+  # Stale detection
+  stale_detection:
+    schedule: "0 1 * * *"  # Daily at 1am
+    targets: ALL_ACTIVE
+    job_type: DETECT_STALE
+Error Handling Strategy
+class OrchestrationErrorHandler:
+    """Handle errors across the pipeline."""
+    
+    ERROR_POLICIES = {
+        "extraction_failed": {
+            "retry_count": 3,
+            "retry_delay_minutes": [5, 30, 120],
+            "fallback": "mark_source_unhealthy",
+            "alert_after_retries": True
+        },
+        "validation_timeout": {
+            "retry_count": 2,
+            "retry_delay_minutes": [10, 60],
+            "fallback": "queue_for_manual_review",
+            "alert_after_retries": False
+        },
+        "resolution_no_response": {
+            "retry_count": 2,
+            "retry_delay_days": [3, 7],
+            "fallback": "mark_low_confidence",
+            "alert_after_retries": False
+        },
+        "enrichment_api_failure": {
+            "retry_count": 5,
+            "retry_delay_minutes": [1, 5, 15, 60, 240],
+            "fallback": "enrich_partial",
+            "alert_after_retries": True
+        }
+    }
+    
+    def handle_error(self, error: PipelineError):
+        policy = self.ERROR_POLICIES.get(error.type)
+        
+        if error.attempt_count < policy["retry_count"]:
+            self.schedule_retry(error, policy)
+        else:
+            self.execute_fallback(error, policy)
+            if policy["alert_after_retries"]:
+                self.alert_ops_team(error)
+Monitoring & Observability
+metrics:
+  # Pipeline health
+  - name: activities_processed_total
+    type: counter
+    labels: [layer, status, region]
+    
+  - name: pipeline_latency_seconds
+    type: histogram
+    labels: [layer, source_type]
+    buckets: [1, 5, 30, 120, 600]
+    
+  - name: extraction_confidence_score
+    type: histogram
+    labels: [source_type, activity_type]
+    buckets: [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0]
+    
+  # Data quality
+  - name: activities_active_total
+    type: gauge
+    labels: [region, activity_type, confidence_tier]
+    
+  - name: activities_stale_total
+    type: gauge
+    labels: [region, staleness_days]
+    
+  - name: resolution_queue_depth
+    type: gauge
+    labels: [resolution_type, priority]
+    
+  # Outreach metrics
+  - name: outreach_attempts_total
+    type: counter
+    labels: [channel, outcome]
+    
+  - name: outreach_response_rate
+    type: gauge
+    labels: [channel, template]
+
+alerts:
+  - name: HighExtractionFailureRate
+    condition: rate(extraction_failures[1h]) > 0.1
+    severity: warning
+    
+  - name: ResolutionQueueBacklog
+    condition: resolution_queue_depth > 500
+    severity: warning
+    
+  - name: StaleDataAccumulation
+    condition: activities_stale_total > 0.2 * activities_active_total
+    severity: critical
+    
+  - name: SourceHealthDegraded
+    condition: source_success_rate < 0.8
+    severity: warning
+
+Data Storage Architecture
+Database Schema
+-- Core activity table (validated, enriched data)
+CREATE TABLE activities (
+    id UUID PRIMARY KEY,
+    
+    -- Identity
+    name TEXT NOT NULL,
+    activity_type VARCHAR(50) NOT NULL,
+    
+    -- Location
+    region VARCHAR(100) NOT NULL,
+    location_name TEXT,
+    address TEXT,
+    coordinates GEOGRAPHY(POINT),
+    
+    -- Timing (for events)
+    datetime_start TIMESTAMPTZ,
+    datetime_end TIMESTAMPTZ,
+    recurrence_rule TEXT,  -- iCal RRULE format
+    
+    -- Core details
+    description TEXT,
+    organizer_id UUID REFERENCES organizers(id),
+    cost_min DECIMAL,
+    cost_max DECIMAL,
+    cost_currency VARCHAR(3),
+    registration_url TEXT,
+    capacity INTEGER,
+    
+    -- Enrichment
+    flourishing_scores JSONB,
+    difficulty_assessment JSONB,
+    prerequisites JSONB,
+    supporting_services JSONB,
+    accessibility JSONB,
+    seasonality JSONB,
+    
+    -- Metadata
+    confidence_score DECIMAL NOT NULL,
+    status VARCHAR(20) NOT NULL,  -- ACTIVE, STALE, EXPIRED, etc.
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    validated_at TIMESTAMPTZ,
+    enriched_at TIMESTAMPTZ,
+    
+    -- Provenance
+    primary_source_id UUID REFERENCES sources(id),
+    extraction_id UUID REFERENCES extractions(id)
+);
+
+-- Spatial index for location queries
+CREATE INDEX idx_activities_location ON activities USING GIST(coordinates);
+
+-- Source registry
+CREATE TABLE sources (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_type VARCHAR(50) NOT NULL,
+    url TEXT,
+    geographic_coverage JSONB,
+    data_types TEXT[],
+    scrape_strategy VARCHAR(50),
+    refresh_schedule VARCHAR(50),
+    reliability_score DECIMAL,
+    extraction_config JSONB,
+    last_successful_scrape TIMESTAMPTZ,
+    health_status VARCHAR(20),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Raw extractions (append-only log)
+CREATE TABLE extractions (
+    id UUID PRIMARY KEY,
+    source_id UUID REFERENCES sources(id),
+    extracted_at TIMESTAMPTZ DEFAULT NOW(),
+    raw_data JSONB NOT NULL,
+    extraction_metadata JSONB,
+    overall_confidence DECIMAL
+);
+
+-- Validation results
+CREATE TABLE validations (
+    id UUID PRIMARY KEY,
+    activity_id UUID REFERENCES activities(id),
+    validated_at TIMESTAMPTZ DEFAULT NOW(),
+    checks_passed TEXT[],
+    checks_failed JSONB,
+    duplicates_detected JSONB,
+    final_confidence DECIMAL,
+    routed_to VARCHAR(50)
+);
+
+-- Resolution queue
+CREATE TABLE resolution_queue (
+    id UUID PRIMARY KEY,
+    activity_id UUID REFERENCES activities(id),
+    resolution_type VARCHAR(50) NOT NULL,
+    priority VARCHAR(20) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    attempts JSONB DEFAULT '[]',
+    status VARCHAR(20) NOT NULL,
+    resolved_at TIMESTAMPTZ,
+    resolution_data JSONB
+);
+
+-- Outreach log
+CREATE TABLE outreach_log (
+    id UUID PRIMARY KEY,
+    resolution_id UUID REFERENCES resolution_queue(id),
+    channel VARCHAR(20) NOT NULL,  -- EMAIL, SMS, PHONE
+    recipient TEXT NOT NULL,
+    template_used VARCHAR(100),
+    sent_at TIMESTAMPTZ DEFAULT NOW(),
+    response_received_at TIMESTAMPTZ,
+    response_content TEXT,
+    parsed_response JSONB,
+    outcome VARCHAR(50)
+);
+
+-- Supporting entities
+CREATE TABLE organizers (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    type VARCHAR(50),  -- BUSINESS, NONPROFIT, INDIVIDUAL, GOVERNMENT
+    website TEXT,
+    email TEXT,
+    phone TEXT,
+    verified BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE gear_providers (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    provider_type VARCHAR(50),  -- RENTAL, RETAIL, GUIDE
+    location_id UUID REFERENCES locations(id),
+    services JSONB,
+    pricing JSONB,
+    contact JSONB,
+    hours JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Trip planning
+CREATE TABLE trips (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    overview JSONB NOT NULL,
+    lodging JSONB,
+    daily_itineraries JSONB NOT NULL,
+    packing_list JSONB,
+    contingency_plans JSONB,
+    booking_checklist JSONB,
+    flourishing_summary JSONB,
+    status VARCHAR(20) DEFAULT 'DRAFT'
+);
+Caching Strategy
+cache_layers:
+  
+  # Hot data: Active activities in user-facing regions
+  l1_memory:
+    store: Redis Cluster
+    ttl: 300  # 5 minutes
+    data: 
+      - active_activities_by_region
+      - popular_activities_today
+      - user_flourishing_profiles
+    
+  # Warm data: Enrichment data, provider info
+  l2_cache:
+    store: Redis
+    ttl: 3600  # 1 hour
+    data:
+      - gear_provider_details
+      - organizer_profiles
+      - weather_forecasts
+      
+  # Search index: Full-text and semantic search
+  search_index:
+    store: Elasticsearch / Typesense
+    sync_frequency: real-time
+    indexes:
+      - activities (full-text, geo, faceted)
+      - organizers
+      - providers
+
+Technology Stack Recommendations
+Core Infrastructure
+Component
+Recommended
+Rationale
+Primary Database
+PostgreSQL + PostGIS
+Mature, spatial support, JSONB for flexibility
+Cache
+Redis Cluster
+Fast, pub/sub for real-time updates
+Search
+Typesense
+Self-hosted, good full-text + geo
+Queue
+BullMQ (Redis)
+Simple, good for Node/TS stack
+Orchestration
+Temporal.io
+Durable workflows, visibility, retries
+
+Extraction Infrastructure
+Component
+Recommended
+Rationale
+HTTP Client
+Playwright
+JS rendering, stealth mode
+HTML Parsing
+Cheerio
+Fast, familiar jQuery syntax
+PDF Processing
+pdf-parse + pdfplumber
+Text and layout extraction
+Rate Limiting
+Bottleneck
+Configurable per-source limits
+Proxy Rotation
+BrightData / Oxylabs
+Avoid IP blocks
+
+AI/ML Components
+Component
+Recommended
+Rationale
+LLM
+Claude API
+Best reasoning, structured output
+Vision
+Claude Vision
+PDF/image extraction
+Embeddings
+OpenAI ada-002 or local
+Semantic search, deduplication
+Voice AI
+Vapi or Bland.ai
+Outbound calling automation
+
+Outreach Infrastructure
+Component
+Recommended
+Rationale
+Email
+SendGrid or Postmark
+Deliverability, templates
+SMS
+Twilio
+Reliable, programmable
+Voice
+Vapi / Bland.ai
+AI voice agents
+Scheduling
+Cal.com or custom
+If booking meetings needed
+
+Observability
+Component
+Recommended
+Rationale
+Metrics
+Prometheus + Grafana
+Industry standard
+Logging
+Structured JSON → Loki
+Correlate with metrics
+Tracing
+OpenTelemetry
+Cross-service visibility
+Alerting
+PagerDuty / Opsgenie
+Incident management
+
+
+Implementation Phases
+Phase 0: Foundation (Weeks 1-2)
+[ ] Set up database schema
+[ ] Build basic orchestration framework
+[ ] Create source registry with 10 hand-picked sources for Potsdam region
+[ ] Manual extraction for initial data seeding
+Phase 1: Core Pipeline (Weeks 3-6)
+[ ] Discovery Layer: Seed expansion from initial sources
+[ ] Extraction Layer: HTML extraction with LLM fallback
+[ ] Validation Layer: Basic temporal + geographic checks
+[ ] Delivery Layer: API to serve to Euda app
+Phase 2: Quality & Resolution (Weeks 7-10)
+[ ] Cross-source validation
+[ ] Duplicate detection and merging
+[ ] Email-based resolution outreach
+[ ] Confidence scoring refinement
+Phase 3: Enrichment & Intelligence (Weeks 11-14)
+[ ] Flourishing dimension scoring
+[ ] Dependency mapping (gear, skills)
+[ ] Supporting service linking
+[ ] Weather sensitivity integration
+Phase 4: Planning & Autonomy (Weeks 15-18)
+[ ] Trip assembly engine
+[ ] Multi-day itinerary optimization
+[ ] Voice-based resolution (phone calls)
+[ ] SMS quick-confirm flows
+Phase 5: Scale & Expansion (Weeks 19-24)
+[ ] Add 5 new regions (other college towns)
+[ ] Source discovery automation
+[ ] Performance optimization
+[ ] Operational playbooks
+
+Success Metrics
+Coverage Metrics
+Activity Coverage: % of real-world activities in region that are in database
+Source Coverage: # of unique sources per region
+Category Coverage: Activities across all types (hikes, events, classes, etc.)
+Quality Metrics
+Confidence Distribution: % of activities at each confidence tier
+Accuracy Rate: % of served data confirmed accurate (sample audit)
+Freshness: Average age of data, % stale
+Resolution Metrics
+Resolution Rate: % of gaps successfully filled
+Response Rate: % of outreach attempts that get responses
+Time to Resolution: Median time from gap identified to resolved
+Planning Metrics
+Trip Completion Rate: % of generated trips that users actually do
+Booking Conversion: % of suggested bookings completed
+User Satisfaction: Ratings on trip quality
+Operational Metrics
+Pipeline Throughput: Activities processed per day
+Error Rate: % of jobs that fail
+System Uptime: % availability
+
+Open Questions for V1.1
+Legal/Compliance: What are the terms of service implications for scraping various sources? Need legal review.
+
+
+User-Generated Data: How do we incorporate activities that users report? Trust scoring?
+
+
+Real-Time Events: How do we handle truly real-time info (pickup games forming now, flash events)?
+
+
+Booking Integration: Do we book on behalf of users or just link out? Liability implications?
+
+
+Multi-Language: If expanding beyond English-speaking regions, how does extraction change?
+
+
+Offline Resilience: How does the system behave when external APIs are down?
+
+
+GDPR/Privacy: If we're storing contact info for organizers, what are the compliance requirements?
+
+
+Voice AI Disclosure: What's required when AI calls businesses? "This call may be recorded"?
+
+
+
+Appendix: Sample Source Configurations
+AllTrails Configuration
+{
+  "source_id": "alltrails-adk",
+  "source_name": "AllTrails - Adirondacks",
+  "extraction_config": {
+    "strategy": "API_REVERSE_ENGINEER",
+    "base_url": "https://www.alltrails.com/api/alltrails/v3/trails",
+    "params": {
+      "b_lat": 44.5,
+      "b_lng": -74.5,
+      "t_lat": 44.0,
+      "t_lng": -73.5
+    },
+    "rate_limit": "10/minute",
+    "auth": "none",
+    "pagination": "cursor",
+    "fields_map": {
+      "name": "$.name",
+      "description": "$.description",
+      "length_miles": "$.length",
+      "elevation_gain_ft": "$.elevation_gain",
+      "difficulty": "$.difficulty_rating",
+      "coordinates": "$.location"
+    }
+  }
+}
+Local Recreation Department (HTML)
+{
+  "source_id": "potsdam-rec",
+  "source_name": "Potsdam Recreation Department",
+  "extraction_config": {
+    "strategy": "HTML_CALENDAR",
+    "url": "https://www.potsdamny.gov/recreation/calendar",
+    "selectors": {
+      "event_container": ".calendar-event",
+      "name": ".event-title",
+      "datetime": ".event-date",
+      "location": ".event-location",
+      "description": ".event-description",
+      "registration_url": "a.register-link"
+    },
+    "datetime_format": "MMMM D, YYYY h:mm A",
+    "rate_limit": "1/minute",
+    "requires_js": false
+  }
+}
+Facebook Events (via CrowdTangle or similar)
+{
+  "source_id": "fb-events-adk",
+  "source_name": "Facebook Events - ADK Region",
+  "extraction_config": {
+    "strategy": "THIRD_PARTY_API",
+    "provider": "crowdtangle",
+    "search_terms": ["adirondack", "lake placid", "saranac lake"],
+    "event_types": ["public"],
+    "radius_miles": 50,
+    "center_lat": 44.2,
+    "center_lng": -74.0,
+    "rate_limit": "100/day"
+  }
+}
+
+Document Version: 1.0
+ Created: January 2025
+ Author: Euda Engineering
+ Status: Draft for Review
+

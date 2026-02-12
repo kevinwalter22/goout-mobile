@@ -52,6 +52,15 @@ export interface NormalizedEvent {
   // Source
   source_url: string | null;
   external_id: string;
+
+  // Image (optional — source-provided images)
+  image_url?: string | null;
+  image_thumb_url?: string | null;
+  image_source?: string | null;
+
+  // Provenance + review (optional — used by web collector adapter)
+  review_status?: string;
+  provenance?: Record<string, any>;
 }
 
 /**
@@ -87,7 +96,11 @@ function mapCategory(
 }
 
 /**
- * Map Ticketmaster price ranges to our price bucket enum
+ * Map Ticketmaster price ranges to our price bucket enum.
+ *
+ * Only marks "free" when the MAX price is also $0, preventing false
+ * "free" labels on events with student/discount tiers at $0 but paid
+ * general admission (e.g., college hockey).
  */
 function mapPriceBucket(
   priceRanges: any[] | undefined
@@ -96,13 +109,18 @@ function mapPriceBucket(
     return "unknown";
   }
 
-  // Use the first price range
   const range = priceRanges[0];
-  const minPrice = range.min || 0;
+  const minPrice = typeof range.min === "number" ? range.min : null;
+  const maxPrice = typeof range.max === "number" ? range.max : null;
 
-  if (minPrice === 0) return "free";
-  if (minPrice < 30) return "$";
-  if (minPrice < 75) return "$$";
+  // Only "free" if both min and max are $0 (genuinely free event)
+  if (minPrice === 0 && (maxPrice === null || maxPrice === 0)) return "free";
+
+  // If min is $0 but max is positive → tiered pricing (not free)
+  const effectivePrice = minPrice != null && minPrice > 0 ? minPrice : maxPrice ?? 0;
+  if (effectivePrice === 0) return "unknown";
+  if (effectivePrice < 30) return "$";
+  if (effectivePrice < 75) return "$$";
   return "$$$";
 }
 
@@ -266,9 +284,25 @@ export function normalizeTicketmasterEvent(raw: any): NormalizedEvent {
     description = `${raw.info}\n\nNote: ${raw.pleaseNote}`;
   }
 
-  // Get best image for hook_line context (we'll let LLM enrich this)
+  // Select best images from Ticketmaster CDN
   const images = raw.images || [];
-  const bestImage = images.find((img: any) => img.ratio === "16_9") || images[0];
+
+  // Full-size: prefer 16:9 ratio with width >= 640, then any large image
+  const fullImage =
+    images
+      .filter((img: any) => img.ratio === "16_9" && (img.width || 0) >= 640)
+      .sort((a: any, b: any) => (b.width || 0) - (a.width || 0))[0] ||
+    images
+      .filter((img: any) => (img.width || 0) >= 640)
+      .sort((a: any, b: any) => (b.width || 0) - (a.width || 0))[0] ||
+    images[0];
+
+  // Thumbnail: prefer smaller image (200-400px wide)
+  const thumbImage =
+    images
+      .filter((img: any) => (img.width || 0) >= 200 && (img.width || 0) <= 400)
+      .sort((a: any, b: any) => (b.width || 0) - (a.width || 0))[0] ||
+    fullImage;
 
   return {
     kind: "event",
@@ -296,5 +330,9 @@ export function normalizeTicketmasterEvent(raw: any): NormalizedEvent {
 
     source_url: raw.url || null,
     external_id: raw.id,
+
+    image_url: fullImage?.url || null,
+    image_thumb_url: thumbImage?.url || fullImage?.url || null,
+    image_source: fullImage?.url ? "ticketmaster" : null,
   };
 }

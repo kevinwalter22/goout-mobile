@@ -1,9 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { Platform } from "react-native";
 import type { Database } from "../types/database";
+import { Env } from "../config/env";
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseUrl = Env.SUPABASE_URL;
+const supabaseAnonKey = Env.SUPABASE_ANON_KEY;
 
 // Only import storage on client side (not during SSR)
 let storage: any;
