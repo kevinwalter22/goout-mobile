@@ -16,8 +16,8 @@ Step-by-step guide for submitting Euda to the Apple App Store and Google Play.
 - [ ] `app.json` version and build number are correct (`1.0.0`, build `1`)
 - [ ] Bundle ID matches App Store Connect: `com.kevwalt22.mobile`
 - [ ] Deep linking scheme is `euda`
-- [ ] Associated domains configured: `applinks:euda.app`
-- [ ] Android intent filters set for `https://euda.app`
+- [ ] Associated domains configured: `applinks:links.euda.live` (+ `applinks:euda.app`)
+- [ ] Android intent filters set for `https://euda.app` (Android launch deferred)
 - [ ] Sentry DSN is set for production error tracking
 - [ ] All `__DEV__` gates verified (dev-only code hidden in production)
 - [ ] No hardcoded test credentials or API keys in source
@@ -51,7 +51,7 @@ Step-by-step guide for submitting Euda to the Apple App Store and Google Play.
 - [ ] **Availability:** All territories (or select specific countries)
 
 ### 4. Privacy Policy
-- [ ] Host privacy policy at a public URL (e.g., `https://euda.app/privacy`)
+- [ ] Host privacy policy at a public URL: `https://links.euda.live/privacy`
 - [ ] Enter the URL in App Store Connect > App Information > Privacy Policy URL
 - [ ] Privacy policy must cover: data collection, usage, sharing, retention, deletion
 

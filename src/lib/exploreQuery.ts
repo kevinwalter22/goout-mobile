@@ -293,7 +293,7 @@ export async function queryExploreItems(
             p_range_end: dateRange ? dateRange.end.toISOString().split("T")[0] : null,
             p_categories: dbCategories,
             p_price_bucket: effectivePriceBucket !== "all" ? effectivePriceBucket : null,
-            p_time_of_day: null, // TODO: Add time of day filtering
+            p_time_of_day: null,
             p_tags: dbTags,
             p_season: currentSeason,
             p_limit: isDistanceSort ? DISTANCE_OVERFETCH_CAP : filters.pageSize,

@@ -314,7 +314,7 @@ export default function CameraCapture() {
           Camera Access Required
         </Text>
         <Text style={{ fontSize: 16, textAlign: "center", color: colors.textSecondary }}>
-          GoOut needs camera access to let you capture and share moments from events
+          Euda needs camera access to let you capture and share moments from events
         </Text>
         <Pressable
           onPress={requestPermission}
@@ -331,7 +331,7 @@ export default function CameraCapture() {
           </Text>
         </Pressable>
         <Text style={{ fontSize: 14, textAlign: "center", color: colors.textTertiary, marginTop: 8 }}>
-          If you previously denied access, please enable it in Settings → GoOut → Camera
+          If you previously denied access, please enable it in Settings → Euda → Camera
         </Text>
       </View>
     );
