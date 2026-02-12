@@ -6,11 +6,10 @@ import Constants from "expo-constants";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
 
-// TODO: Replace with actual URLs when available
-const SUPPORT_EMAIL = "support@euda.app";
-const TERMS_URL = "https://euda.app/terms";
-const PRIVACY_URL = "https://euda.app/privacy";
-const FEEDBACK_URL = "https://github.com/your-repo/issues";
+const SUPPORT_EMAIL = "support@euda.live";
+const TERMS_URL = "https://links.euda.live/terms";
+const PRIVACY_URL = "https://links.euda.live/privacy";
+const SUPPORT_URL = "https://links.euda.live/support";
 
 export default function About() {
   const insets = useSafeAreaInsets();
@@ -42,8 +41,8 @@ export default function About() {
           onPress: () => sendEmail(`Bug Report - Euda v${appVersion}`),
         },
         {
-          text: "GitHub",
-          onPress: () => openLink(FEEDBACK_URL),
+          text: "Support Page",
+          onPress: () => openLink(SUPPORT_URL),
         },
         { text: "Cancel", style: "cancel" },
       ]

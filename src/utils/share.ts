@@ -6,7 +6,7 @@
 
 import { Share } from "react-native";
 
-const DOMAIN = "euda.app";
+const DOMAIN = "links.euda.live";
 const SCHEME = "euda";
 
 /**
@@ -14,8 +14,8 @@ const SCHEME = "euda";
  *
  * In dev builds, returns a custom-scheme link (euda://event/...) so links
  * work without the server-side .well-known files. In production, returns
- * a universal link (https://euda.app/event/...) that opens the app when
- * the domain verification files are deployed.
+ * a universal link (https://links.euda.live/event/...) that opens the app
+ * via iOS Universal Links.
  */
 export function buildDeepLink(itemId: string): string {
   if (__DEV__) {
@@ -41,7 +41,7 @@ interface ShareItemOptions {
  *   📅 Date/time (or 🕐 Schedule)
  *   📍 Location
  *
- *   https://euda.app/event/{id}
+ *   https://links.euda.live/event/{id}
  */
 export async function shareItem(options: ShareItemOptions): Promise<boolean> {
   const { title, locationName, town, startsAt, scheduleText, itemId } = options;

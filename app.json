@@ -11,7 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "buildNumber": "1",
-      "associatedDomains": ["applinks:euda.app"],
+      "associatedDomains": ["applinks:links.euda.live", "applinks:euda.app"],
       "infoPlist": {
         "NSCameraUsageDescription": "Euda needs access to your camera to take photos when you check in at events.",
         "NSLocationWhenInUseUsageDescription": "Euda needs your location to verify you are at the event before you can check in.",
