@@ -11,6 +11,7 @@ import { supabase } from "../../src/lib/supabase";
 import { useTheme, type ThemeMode } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
 import { Env } from "../../src/config/env";
+import { sendTestException } from "../../src/lib/sentry";
 
 const THEME_OPTIONS: { value: ThemeMode; label: string; icon: string }[] = [
   { value: "light", label: "Light", icon: "sunny-outline" },
@@ -546,6 +547,30 @@ export default function Settings() {
               <DevRow label="Supabase" value={Env.SUPABASE_URL.replace("https://", "")} colors={colors} />
               <DevRow label="User ID" value={profile?.id ?? "—"} colors={colors} />
               <DevRow label="Version" value={`v${appVersion} (${buildNumber})`} colors={colors} />
+              <DevRow label="Sentry DSN" value={Env.SENTRY_DSN ? "configured" : "not set"} colors={colors} />
+              <Pressable
+                onPress={() => {
+                  sendTestException();
+                  Alert.alert(
+                    "Test Error Sent",
+                    Env.SENTRY_DSN
+                      ? "Check your Sentry dashboard for the test exception."
+                      : "No DSN configured — error was not sent. Set EXPO_PUBLIC_SENTRY_DSN to enable.",
+                  );
+                }}
+                style={{
+                  marginTop: 4,
+                  paddingVertical: 10,
+                  paddingHorizontal: 14,
+                  borderRadius: 8,
+                  backgroundColor: Colors.error + "18",
+                  alignItems: "center",
+                }}
+              >
+                <Text style={{ fontSize: 14, fontWeight: "600", color: Colors.error }}>
+                  Send Sentry Test Error
+                </Text>
+              </Pressable>
             </View>
           </View>
         )}

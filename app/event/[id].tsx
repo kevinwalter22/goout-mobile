@@ -116,13 +116,33 @@ export default function EventDetail() {
     setCheckingIn(true);
 
     try {
-      const { allowed, error } = await verifyCheckInLocation(
+      const { allowed, denied, error } = await verifyCheckInLocation(
         item.lat,
         item.lng,
       );
 
       if (!allowed) {
-        Alert.alert("Cannot Check In", error || "You must be at the location");
+        if (denied) {
+          Alert.alert(
+            "Enable Location for Euda",
+            "Euda needs your location to verify you\u2019re at the venue for check-ins and to show nearby activities.",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Open Settings",
+                onPress: () => {
+                  if (Platform.OS === "ios") {
+                    Linking.openURL("app-settings:");
+                  } else {
+                    Linking.openSettings();
+                  }
+                },
+              },
+            ],
+          );
+        } else {
+          Alert.alert("Cannot Check In", error || "You must be at the location");
+        }
         return;
       }
 
@@ -303,13 +323,14 @@ export default function EventDetail() {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
+            if (!user) return;
             setDeleting(true);
             try {
               const { error: deleteError } = await supabase
                 .from("explore_items")
                 .delete()
                 .eq("id", item.id)
-                .eq("created_by_user_id", user?.id);
+                .eq("created_by_user_id", user.id);
 
               if (deleteError) {
                 Alert.alert("Error", deleteError.message);

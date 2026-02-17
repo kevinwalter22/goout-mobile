@@ -43,20 +43,44 @@ export function getDistanceInMiles(
 }
 
 /**
- * Request location permissions from the user
+ * Request location permissions from the user.
+ * Returns `denied: true` when the user has previously denied permission
+ * and the OS will no longer show the permission prompt.
  */
 export async function requestLocationPermission(): Promise<{
   granted: boolean;
+  denied?: boolean;
   error?: string;
 }> {
   try {
+    // Check current status without triggering a prompt
+    const { status: currentStatus } =
+      await Location.getForegroundPermissionsAsync();
+
+    if (currentStatus === "granted") {
+      return { granted: true };
+    }
+
+    // Already denied — OS won't re-prompt, user must go to Settings
+    if (currentStatus === "denied") {
+      return {
+        granted: false,
+        denied: true,
+        error: "Location permission was denied. Please enable it in Settings.",
+      };
+    }
+
+    // Status is undetermined — show the system permission prompt
     const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status === "granted") {
+      return { granted: true };
+    }
+
+    // User just denied the prompt
     return {
-      granted: status === "granted",
-      error:
-        status !== "granted"
-          ? "Location permission is required to check in"
-          : undefined,
+      granted: false,
+      denied: true,
+      error: "Location permission is required to check in",
     };
   } catch (_error) {
     return {
@@ -114,12 +138,14 @@ export async function verifyCheckInLocation(
 ): Promise<{
   allowed: boolean;
   distance?: number;
+  denied?: boolean;
   error?: string;
 }> {
   // Request permission
-  const { granted, error: permError } = await requestLocationPermission();
+  const { granted, denied, error: permError } =
+    await requestLocationPermission();
   if (!granted) {
-    return { allowed: false, error: permError };
+    return { allowed: false, denied, error: permError };
   }
 
   // Get current location

@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Euda",
-    "slug": "euda",
+    "slug": "mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -11,7 +11,9 @@
     "ios": {
       "supportsTablet": true,
       "buildNumber": "1",
-      "associatedDomains": ["applinks:links.euda.live", "applinks:euda.app"],
+      "associatedDomains": [
+        "applinks:links.euda.live"
+      ],
       "infoPlist": {
         "NSCameraUsageDescription": "Euda needs access to your camera to take photos when you check in at events.",
         "NSLocationWhenInUseUsageDescription": "Euda needs your location to verify you are at the event before you can check in.",
@@ -34,8 +36,16 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "data": [{ "scheme": "https", "host": "euda.app" }],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "data": [
+            {
+              "scheme": "https",
+              "host": "euda.app"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ],
       "permissions": [
@@ -93,6 +103,7 @@
       "eas": {
         "projectId": "4c8f3119-7056-4a82-a35a-c0f05b161d8a"
       }
-    }
+    },
+    "owner": "kevwalt22"
   }
 }
