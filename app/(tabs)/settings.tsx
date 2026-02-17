@@ -438,7 +438,7 @@ export default function Settings() {
                   <Text style={{ fontSize: 15, color: colors.text }}>{label}</Text>
                   <Switch
                     value={flags.get(flag) ?? false}
-                    onValueChange={(val) => toggleFlag(flag, val)}
+                    onValueChange={(val) => { toggleFlag(flag, val); }}
                     trackColor={{ false: colors.border, true: Colors.primary }}
                   />
                 </View>

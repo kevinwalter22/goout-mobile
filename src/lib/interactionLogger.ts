@@ -44,20 +44,22 @@ export function logInteraction(params: LogInteractionParams): void {
   // Sentry breadcrumb for crash context
   addActionBreadcrumb(eventType, { itemKind, exploreItemId });
 
-  supabase
-    .rpc("log_interaction_and_update_affinity", {
-      p_user_id: userId,
-      p_explore_item_id: exploreItemId,
-      p_event_type: eventType,
-      p_item_kind: itemKind,
-      p_metadata: metadata,
-    })
+  Promise.resolve(
+    supabase
+      .rpc("log_interaction_and_update_affinity", {
+        p_user_id: userId,
+        p_explore_item_id: exploreItemId,
+        p_event_type: eventType,
+        p_item_kind: itemKind,
+        p_metadata: metadata as any,
+      })
+  )
     .then(({ error }) => {
       if (error && __DEV__) {
         console.log(`[InteractionLogger] ${eventType} failed:`, error.message);
       }
     })
-    .catch((err) => {
+    .catch((err: unknown) => {
       if (__DEV__) {
         console.log(`[InteractionLogger] ${eventType} error:`, err);
       }

@@ -89,7 +89,7 @@ export function ReactionBar({ postId, initialReactions }: ReactionBarProps) {
           // Update reactions list
           setReactions((prev) => {
             const filtered = prev.filter((r) => r.user_id !== user.id);
-            return [...filtered, data];
+            return [...filtered, data] as any;
           });
         }
       }

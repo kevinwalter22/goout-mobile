@@ -23,12 +23,14 @@ export function logSecurityEvent(
   metadata?: Record<string, string | number | boolean>,
 ): void {
   // Fire-and-forget: don't await, don't throw
-  supabase
-    .rpc("log_security_event", {
-      p_event_type: eventType,
-      p_severity: severity,
-      p_metadata: metadata ?? {},
-    })
+  Promise.resolve(
+    supabase
+      .rpc("log_security_event", {
+        p_event_type: eventType,
+        p_severity: severity,
+        p_metadata: (metadata ?? {}) as any,
+      })
+  )
     .then(({ error }) => {
       if (error && __DEV__) {
         console.warn("[securityEvents] Failed to log:", eventType, error.message);

@@ -87,7 +87,7 @@ export function useRecommender(
     async function loadAffinity() {
       try {
         const { data, error } = await supabase.rpc("get_user_tag_affinity", {
-          p_user_id: user.id,
+          p_user_id: user!.id,
           p_limit: RECOMMENDER_CONFIG.TAG_AFFINITY.MAX_TAGS,
         });
 
@@ -118,7 +118,7 @@ export function useRecommender(
     async function loadTypeAffinity() {
       try {
         const { data, error } = await supabase.rpc("get_user_type_affinity", {
-          p_user_id: user.id,
+          p_user_id: user!.id,
         });
 
         if (error) {
@@ -154,7 +154,7 @@ export function useRecommender(
       try {
         const itemIds = exploreFilters.items.map((i) => i.id);
         const { data, error } = await supabase.rpc("get_friends_going_for_items", {
-          p_user_id: user.id,
+          p_user_id: user!.id,
           p_item_ids: itemIds,
         });
 
@@ -273,7 +273,7 @@ export function useRecommender(
 
       if (data?.reranked) {
         // Merge reranked top K with remaining items
-        const rerankedMap = new Map(
+        const rerankedMap = new Map<string, { rank: number; reason: string }>(
           data.reranked.map((r: any, i: number) => [r.id, { rank: i, reason: r.reason }])
         );
 

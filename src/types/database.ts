@@ -91,16 +91,16 @@ export type ExploreItem = {
   price_bucket: "free" | "$" | "$$" | "$$$" | "unknown";
   effort: "low" | "medium" | "high" | "unknown";
   xp_value: number | null;
-  priority: number;
+  priority: number | null;
   is_anchor: boolean;
   is_hidden_gem: boolean;
   source_url: string | null;
   created_at: string;
   updated_at: string;
   // AI enrichment fields
-  tags?: string[];
+  tags?: string[] | null;
   llm_enriched_at?: string | null;
-  availability_json?: Availability | null;
+  availability_json?: any;
   // Image fields
   image_url?: string | null;
   image_thumb_url?: string | null;
@@ -112,7 +112,7 @@ export type ExploreItem = {
   visibility?: EventVisibility | null;
   // Review / provenance fields (web collector)
   review_status?: "auto_approved" | "quarantined" | "approved" | "rejected" | null;
-  provenance?: Record<string, any> | null;
+  provenance?: any;
   reviewed_by?: string | null;
   reviewed_at?: string | null;
   // Refresh tracking
@@ -120,6 +120,15 @@ export type ExploreItem = {
   stale_reason?: string | null;
   // Soft delete
   deleted_at?: string | null;
+  // DB fields not always selected but present on Row type
+  external_id?: string | null;
+  source_id?: string | null;
+  dedupe_key?: string | null;
+  canonical_item_id?: string | null;
+  is_duplicate?: boolean;
+  normalized_confidence?: number | null;
+  // Allow extra fields from DB without breaking assignment
+  [key: string]: any;
 };
 
 export type EventRSVP = {
@@ -144,7 +153,7 @@ export type Post = {
   caption: string | null;
   photo_path: string;
   front_photo_path: string | null;
-  camera_mode: "front" | "back" | "dual";
+  camera_mode: string;
   latitude: number | null;
   longitude: number | null;
   created_at: string;
@@ -198,44 +207,5 @@ export type UserBlock = {
   created_at: string;
 };
 
-export type Database = {
-  public: {
-    Tables: {
-      profiles: {
-        Row: Profile;
-        Insert: Omit<Profile, "created_at" | "updated_at">;
-        Update: Partial<Omit<Profile, "id" | "created_at" | "updated_at">>;
-      };
-      events: {
-        Row: Event;
-        Insert: Omit<Event, "id">;
-        Update: Partial<Omit<Event, "id">>;
-      };
-      event_rsvps: {
-        Row: EventRSVP;
-        Insert: Omit<EventRSVP, "id" | "created_at">;
-        Update: never;
-      };
-      posts: {
-        Row: Post;
-        Insert: Omit<Post, "created_at"> & { id?: string };
-        Update: never;
-      };
-      post_reactions: {
-        Row: PostReaction;
-        Insert: Omit<PostReaction, "id" | "created_at">;
-        Update: never;
-      };
-      post_comments: {
-        Row: PostComment;
-        Insert: Omit<PostComment, "id" | "created_at">;
-        Update: never;
-      };
-      friendships: {
-        Row: Friendship;
-        Insert: Omit<Friendship, "id" | "created_at">;
-        Update: Partial<Pick<Friendship, "status">>;
-      };
-    };
-  };
-};
+// Re-export the auto-generated Database type (refresh with: npx supabase gen types typescript --project-id lkmntknpaiaiqvupzjbz --schema public > src/types/supabase.ts)
+export type { Database } from "./supabase";

@@ -118,7 +118,7 @@ export default function PostDetail() {
 
       const postWithDetails: PostWithDetails = {
         ...post,
-        profile: profileData || null,
+        profile: (profileData as any) || null,
         event: eventData,
         explore_item: exploreItemData,
         comment_count: commentsData?.length || 0,

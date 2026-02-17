@@ -154,7 +154,7 @@ export default function EditEvent() {
           lng,
         })
         .eq("id", item.id)
-        .eq("created_by_user_id", user?.id);
+        .eq("created_by_user_id", user?.id ?? "");
 
       if (updateError) {
         throw new Error(updateError.message);

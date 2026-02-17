@@ -53,7 +53,7 @@ export default function EventDetail() {
     goingCount,
     loading: rsvpLoading,
     toggleRSVP,
-  } = useExploreItemRSVP(id || "", { tags: item?.tags, itemKind: item?.kind });
+  } = useExploreItemRSVP(id || "", { tags: item?.tags ?? undefined, itemKind: item?.kind ?? undefined });
 
   const { details: placeDetails, loading: detailsLoading } = usePlaceDetails(id);
 
@@ -561,7 +561,7 @@ export default function EventDetail() {
                   <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
                     PHONE
                   </Text>
-                  <Pressable onPress={() => Linking.openURL(`tel:${placeDetails.phone_number.replace(/[^+\d]/g, "")}`)}>
+                  <Pressable onPress={() => Linking.openURL(`tel:${placeDetails.phone_number!.replace(/[^+\d]/g, "")}`)}>
                     <Text style={{ fontSize: 16, color: Colors.primary }}>
                       {placeDetails.phone_number}
                     </Text>

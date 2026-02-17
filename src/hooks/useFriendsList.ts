@@ -60,7 +60,7 @@ export function useFriendsList(userId?: string) {
       .select("id, username, avatar_url")
       .in("id", friendIds);
 
-    setFriends(profiles || []);
+    setFriends((profiles as any) || []);
     setLoading(false);
   }
 

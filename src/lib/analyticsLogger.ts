@@ -37,15 +37,17 @@ export function logAnalyticsEvent(
   // Sentry breadcrumb for crash context
   addActionBreadcrumb(`analytics:${eventName}`, metadata);
 
-  supabase
-    .from("analytics_events")
-    .insert({ user_id: userId, event_name: eventName, metadata })
+  Promise.resolve(
+    supabase
+      .from("analytics_events")
+      .insert({ user_id: userId, event_name: eventName, metadata: metadata as any })
+  )
     .then(({ error }) => {
       if (error && __DEV__) {
         console.log(`[Analytics] ${eventName} failed:`, error.message);
       }
     })
-    .catch((err) => {
+    .catch((err: unknown) => {
       if (__DEV__) {
         console.log(`[Analytics] ${eventName} error:`, err);
       }

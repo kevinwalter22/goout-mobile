@@ -430,25 +430,6 @@ export default function Explore() {
     return rsvpData[itemId] || { count: 0, userGoing: false, friendsGoing: 0 };
   }
 
-  // Stable callback for item press (used by memoized ExploreCard)
-  const handleItemPress = useCallback(
-    (itemId: string) => {
-      if (user) {
-        const item = orderedItems.find((i) => i.id === itemId);
-        if (item) {
-          logInteraction({
-            userId: user.id,
-            exploreItemId: itemId,
-            eventType: "open_detail",
-            itemKind: item.kind,
-          });
-        }
-      }
-      router.push(`/event/${itemId}` as any);
-    },
-    [user, orderedItems],
-  );
-
   // Count active filters for badge display
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -492,6 +473,25 @@ export default function Explore() {
   const orderedItems = useMemo(() => {
     return [...postableNow, ...regularItems];
   }, [postableNow, regularItems]);
+
+  // Stable callback for item press (used by memoized ExploreCard)
+  const handleItemPress = useCallback(
+    (itemId: string) => {
+      if (user) {
+        const item = orderedItems.find((i) => i.id === itemId);
+        if (item) {
+          logInteraction({
+            userId: user.id,
+            exploreItemId: itemId,
+            eventType: "open_detail",
+            itemKind: item.kind,
+          });
+        }
+      }
+      router.push(`/event/${itemId}` as any);
+    },
+    [user, orderedItems],
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

@@ -60,7 +60,7 @@ export function useCreateEvent() {
           .maybeSingle();
 
         if (sourceData) {
-          sourceId = sourceData.id;
+          sourceId = sourceData.id as any;
         }
         // If source doesn't exist, proceed without it (source_id can be null)
 

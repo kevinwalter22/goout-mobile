@@ -43,7 +43,7 @@ export function useProfile(userId: string | null) {
 
       if (publicError) throw publicError;
 
-      setProfile(publicData);
+      setProfile(publicData as any);
       setIsFullProfile(false);
     } catch (err) {
       console.error("Error loading profile:", err);

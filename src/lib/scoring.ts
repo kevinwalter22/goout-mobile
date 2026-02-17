@@ -402,8 +402,8 @@ function computeWeatherScore(
   const itemTags = (item.tags || []).map((t) => t.toLowerCase());
   const category = (item.category || "").toLowerCase();
 
-  const isIndoorByTag = itemTags.some((t) => WEATHER.INDOOR_TAGS.includes(t));
-  const isOutdoorByTag = itemTags.some((t) => WEATHER.OUTDOOR_TAGS.includes(t));
+  const isIndoorByTag = itemTags.some((t) => (WEATHER.INDOOR_TAGS as readonly string[]).includes(t));
+  const isOutdoorByTag = itemTags.some((t) => (WEATHER.OUTDOOR_TAGS as readonly string[]).includes(t));
   const isOutdoorByCategory = WEATHER.OUTDOOR_CATEGORIES.some(
     (c) => c.toLowerCase() === category
   );
@@ -523,12 +523,12 @@ function computeContextIntentScore(
 
   // Find the first matching bucket
   for (const bucket of CONTEXT_INTENT.BUCKETS) {
-    const dayMatch = bucket.daysOfWeek.includes(dayOfWeek as any);
+    const dayMatch = (bucket.daysOfWeek as readonly number[]).includes(dayOfWeek);
     const hourMatch = hour >= bucket.hourStart && hour < bucket.hourEnd;
 
     if (dayMatch && hourMatch) {
       // Base score from event/activity boost
-      let score = isEvent ? bucket.eventBoost : bucket.activityBoost;
+      let score: number = isEvent ? bucket.eventBoost : bucket.activityBoost;
 
       // Apply small tag/category bonuses
       if (bucket.tagBoosts && item.tags) {
@@ -537,7 +537,7 @@ function computeContextIntentScore(
 
         for (const [tag, bonus] of Object.entries(bucket.tagBoosts)) {
           if (itemTags.includes(tag) || categoryLower.includes(tag)) {
-            score = Math.min(1.0, score + bonus);
+            score = Math.min(1.0, score + (bonus as number));
           }
         }
       }

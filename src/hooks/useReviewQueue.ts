@@ -35,7 +35,7 @@ export function useReviewQueue() {
       return;
     }
 
-    setItems(data || []);
+    setItems((data as QuarantinedItem[]) || []);
     setLoading(false);
   }, []);
 
@@ -60,7 +60,7 @@ export function useReviewQueue() {
 
     const { error: rpcError } = await supabase.rpc("reject_quarantined_item", {
       p_item_id: itemId,
-      p_reason: reason || null,
+      p_reason: reason ?? undefined,
     });
 
     if (rpcError) {
