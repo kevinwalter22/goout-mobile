@@ -6,6 +6,7 @@ import { ToastProvider } from "../src/context/ToastContext";
 import { ThemeProvider, useTheme } from "../src/contexts/ThemeContext";
 import { validateEnv } from "../src/config/env";
 import { initSentry, SentryWrap } from "../src/lib/sentry";
+import { captureWarning } from "../src/lib/logger";
 
 // Initialize Sentry before any component renders
 initSentry();
@@ -75,7 +76,7 @@ function RootLayout() {
     if (__DEV__) {
       return <EnvErrorScreen missing={missingVars} />;
     }
-    console.error(`[Euda] Missing env vars: ${missingVars.join(", ")}`);
+    captureWarning("Missing env vars at startup", { count: missingVars.length });
   }
 
   return (

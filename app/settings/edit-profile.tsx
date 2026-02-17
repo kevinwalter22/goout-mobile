@@ -18,6 +18,8 @@ import { supabase } from "../../src/lib/supabase";
 import { useAuth } from "../../src/hooks/useAuth";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
+import { captureError } from "../../src/lib/logger";
+import { friendlyMessage } from "../../src/lib/errorMessages";
 import { Avatar } from "../../src/components/Avatar";
 
 export default function EditProfile() {
@@ -95,8 +97,8 @@ export default function EditProfile() {
         .eq("id", user.id);
 
     } catch (err) {
+      captureError(err, { action: "uploadAvatar" });
       Alert.alert("Error", "Failed to upload image");
-      console.error("Upload error:", err);
     } finally {
       setUploadingImage(false);
     }
@@ -122,8 +124,8 @@ export default function EditProfile() {
       await refreshProfile();
       router.back();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to save profile";
-      Alert.alert("Error", message);
+      captureError(err, { action: "saveProfile" });
+      Alert.alert("Error", friendlyMessage(err));
     } finally {
       setSaving(false);
     }

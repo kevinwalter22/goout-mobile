@@ -109,6 +109,21 @@ a:hover {
   color: #92400E;
 }
 
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 32px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.header-nav .logo {
+  margin-bottom: 0;
+  margin-right: auto;
+}
+
 .nav {
   display: flex;
   gap: 24px;

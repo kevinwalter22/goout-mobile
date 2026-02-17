@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
+import { captureError } from "../lib/logger";
 import type { UserBlock } from "../types/database";
 
 type BlockedUser = UserBlock & {
@@ -28,7 +29,7 @@ export function useBlockUser() {
       .order("created_at", { ascending: false });
 
     if (error) {
-      console.error("[Block] Failed to load blocks:", error);
+      captureError(error, { action: "loadBlocks" });
       setLoading(false);
       return;
     }
@@ -40,7 +41,7 @@ export function useBlockUser() {
     if (blocks.length > 0) {
       const ids = blocks.map((b) => b.blocked_id);
       const { data: profiles } = await supabase
-        .from("profiles")
+        .from("public_profiles")
         .select("id, username, avatar_url")
         .in("id", ids);
 
@@ -76,7 +77,7 @@ export function useBlockUser() {
       if (error) {
         // Duplicate block — treat as success
         if (error.code === "23505") return true;
-        console.error("[Block] Failed to block user:", error);
+        captureError(error, { action: "blockUser" });
         return false;
       }
 
@@ -99,7 +100,7 @@ export function useBlockUser() {
         .eq("blocked_id", targetUserId);
 
       if (error) {
-        console.error("[Block] Failed to unblock user:", error);
+        captureError(error, { action: "unblockUser" });
         return false;
       }
 

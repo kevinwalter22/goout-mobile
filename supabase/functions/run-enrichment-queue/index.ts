@@ -17,12 +17,8 @@ import {
   buildEnrichmentPrompt,
   validateEnrichmentResponse,
 } from "../_shared/enrichment-schema.ts";
-
-// CORS headers
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { requireServiceRole } from "../_shared/auth-guard.ts";
 
 interface WorkerConfig {
   batch_size?: number;
@@ -40,9 +36,17 @@ interface ProcessResult {
 }
 
 Deno.serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCorsPreflightIfNeeded(req);
+  if (preflight) return preflight;
+
+  const corsHeaders = getCorsHeaders(req);
+
+  const auth = requireServiceRole(req);
+  if (!auth.ok) {
+    return new Response(JSON.stringify({ error: auth.error }), {
+      status: auth.error === "Forbidden" ? 403 : 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {

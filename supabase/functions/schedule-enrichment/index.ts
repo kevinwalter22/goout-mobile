@@ -16,12 +16,8 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { requireServiceRole } from "../_shared/auth-guard.ts";
 
 interface ScheduleConfig {
   batch_size?: number;      // Max items to enqueue per run
@@ -36,8 +32,17 @@ const DEFAULT_CONFIG: Required<ScheduleConfig> = {
 };
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCorsPreflightIfNeeded(req);
+  if (preflight) return preflight;
+
+  const corsHeaders = getCorsHeaders(req);
+
+  const auth = requireServiceRole(req);
+  if (!auth.ok) {
+    return new Response(JSON.stringify({ error: auth.error }), {
+      status: auth.error === "Forbidden" ? 403 : 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {
@@ -92,10 +97,10 @@ Deno.serve(async (req) => {
         throw new Error(`Query failed: ${directError.message}`);
       }
 
-      return await enqueueItems(supabase, directCandidates || [], cfg);
+      return await enqueueItems(supabase, directCandidates || [], cfg, corsHeaders);
     }
 
-    return await enqueueItems(supabase, candidates || [], cfg);
+    return await enqueueItems(supabase, candidates || [], cfg, corsHeaders);
   } catch (error) {
     console.error("Schedule enrichment error:", error);
     return new Response(
@@ -113,7 +118,8 @@ Deno.serve(async (req) => {
 async function enqueueItems(
   supabase: any,
   candidates: any[],
-  cfg: Required<ScheduleConfig>
+  cfg: Required<ScheduleConfig>,
+  corsHeaders: Record<string, string>
 ) {
   console.log(`Found ${candidates.length} items needing enrichment`);
 

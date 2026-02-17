@@ -1,9 +1,11 @@
-import { createContext, useEffect, useState } from "react";
+import { createContext, useEffect, useRef, useState } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { clearExpiredUrlCache } from "../utils/storage";
 import { setSentryUser } from "../lib/sentry";
 import { logAnalyticsEvent } from "../lib/analyticsLogger";
+import { captureError } from "../lib/logger";
 import type { Profile } from "../types/database";
 
 type AuthContextType = {
@@ -40,6 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const appState = useRef(AppState.currentState);
 
   useEffect(() => {
     // Get initial session
@@ -56,19 +59,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       setSentryUser(session?.user?.id ?? null);
-      if (session?.user) {
+
+      if (event === "SIGNED_OUT") {
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
+      // Only reload profile on sign-in or user update, not on every token refresh
+      if (
+        session?.user &&
+        (event === "SIGNED_IN" || event === "USER_UPDATED" || event === "INITIAL_SESSION")
+      ) {
         loadProfile(session.user.id);
-      } else {
+      } else if (!session?.user) {
         setProfile(null);
         setLoading(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    // Revalidate session when app returns to foreground
+    const appStateSub = AppState.addEventListener("change", (nextState: AppStateStatus) => {
+      if (appState.current.match(/inactive|background/) && nextState === "active") {
+        supabase.auth.getSession();
+      }
+      appState.current = nextState;
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      appStateSub.remove();
+    };
   }, []);
 
   async function loadProfile(userId: string) {
@@ -82,7 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) throw error;
       setProfile(data);
     } catch (error) {
-      console.error("Error loading profile:", error);
+      captureError(error, { action: "loadProfile" });
       setProfile(null);
     } finally {
       setLoading(false);
@@ -132,7 +157,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function signOut() {
     // Clear cached URLs on logout to prevent stale data
     clearExpiredUrlCache();
-    await supabase.auth.signOut();
+    // scope: 'global' revokes the refresh token server-side and
+    // invalidates all sessions for this user across all devices.
+    await supabase.auth.signOut({ scope: "global" });
   }
 
   async function refreshProfile() {

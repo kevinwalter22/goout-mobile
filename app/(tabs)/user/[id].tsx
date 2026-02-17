@@ -30,7 +30,7 @@ export default function UserProfile() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
   const { colors } = useTheme();
-  const { profile, loading, error } = useProfile(id);
+  const { profile, isFullProfile, loading, error } = useProfile(id);
   const { posts, loading: postsLoading } = useUserPosts(id);
   const { plans, loading: plansLoading } = useUpcomingPlans(id);
   const { friends: userFriends } = useFriendsList(id); // This user's friends
@@ -134,16 +134,20 @@ export default function UserProfile() {
             borderColor: colors.separator,
           }}
         >
-          <View style={{ alignItems: "center", gap: 4, flex: 1 }}>
-            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>{profile.xp}</Text>
-            <Text style={{ fontSize: 14, color: colors.textSecondary }}>XP</Text>
-          </View>
-          <View style={{ alignItems: "center", gap: 4, flex: 1 }}>
-            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>
-              {getEffectiveStreak(profile.last_post_date, profile.streak)}
-            </Text>
-            <Text style={{ fontSize: 14, color: colors.textSecondary }}>Streak</Text>
-          </View>
+          {isFullProfile && "xp" in profile && (
+            <>
+              <View style={{ alignItems: "center", gap: 4, flex: 1 }}>
+                <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>{profile.xp}</Text>
+                <Text style={{ fontSize: 14, color: colors.textSecondary }}>XP</Text>
+              </View>
+              <View style={{ alignItems: "center", gap: 4, flex: 1 }}>
+                <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>
+                  {getEffectiveStreak(profile.last_post_date, profile.streak)}
+                </Text>
+                <Text style={{ fontSize: 14, color: colors.textSecondary }}>Streak</Text>
+              </View>
+            </>
+          )}
           <Pressable
             style={{ alignItems: "center", gap: 4, flex: 1 }}
             onPress={() => isFriends && setShowFriendsSheet(true)}

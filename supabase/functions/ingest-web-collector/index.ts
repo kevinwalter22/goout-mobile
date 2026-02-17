@@ -31,6 +31,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { WebCollector, CollectorTarget, CollectionResult, EventCandidate } from "../_shared/web-collector.ts";
 import { extractCandidates } from "../_shared/web-extractors.ts";
 import { logPipelineHealth } from "../_shared/health-log.ts";
+import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { requireServiceRole } from "../_shared/auth-guard.ts";
 
 // ============================================================================
 // Hashing Utilities
@@ -87,14 +89,16 @@ const DEFAULT_MAX_TARGETS = 10;
 // ============================================================================
 
 serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    return new Response(null, {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "authorization, content-type",
-      },
+  const preflight = handleCorsPreflightIfNeeded(req);
+  if (preflight) return preflight;
+
+  const corsHeaders = getCorsHeaders(req);
+
+  const auth = requireServiceRole(req);
+  if (!auth.ok) {
+    return new Response(JSON.stringify({ error: auth.error }), {
+      status: auth.error === "Forbidden" ? 403 : 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
@@ -211,10 +215,7 @@ serve(async (req) => {
           results: [],
         }),
         {
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Content-Type": "application/json",
-          },
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
     }
@@ -458,10 +459,7 @@ serve(async (req) => {
       errors: errors.length > 0 ? errors : undefined,
     }),
     {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Content-Type": "application/json",
-      },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     },
   );
 });

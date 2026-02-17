@@ -15,16 +15,21 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { requireServiceRole } from "../_shared/auth-guard.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCorsPreflightIfNeeded(req);
+  if (preflight) return preflight;
+
+  const corsHeaders = getCorsHeaders(req);
+
+  const auth = requireServiceRole(req);
+  if (!auth.ok) {
+    return new Response(JSON.stringify({ error: auth.error }), {
+      status: auth.error === "Forbidden" ? 403 : 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {
@@ -37,11 +42,11 @@ Deno.serve(async (req) => {
 
     // POST with action=log: record a health event
     if (req.method === "POST" && action === "log") {
-      return await handleLogEntry(supabase, req);
+      return await handleLogEntry(supabase, req, corsHeaders);
     }
 
     // GET (or POST without action): return health snapshot
-    return await handleSnapshot(supabase);
+    return await handleSnapshot(supabase, corsHeaders);
   } catch (error) {
     console.error("Health summary error:", error);
     return new Response(
@@ -60,7 +65,7 @@ Deno.serve(async (req) => {
 // GET: Health snapshot
 // ============================================================================
 
-async function handleSnapshot(supabase: any) {
+async function handleSnapshot(supabase: any, corsHeaders: Record<string, string>) {
   // Try RPC first (migration 033)
   const { data: snapshot, error: rpcError } = await supabase.rpc(
     "pipeline_health_snapshot"
@@ -68,7 +73,7 @@ async function handleSnapshot(supabase: any) {
 
   if (rpcError) {
     console.warn("RPC pipeline_health_snapshot failed, building manually:", rpcError.message);
-    return await buildManualSnapshot(supabase);
+    return await buildManualSnapshot(supabase, corsHeaders);
   }
 
   return new Response(JSON.stringify(snapshot), {
@@ -76,7 +81,7 @@ async function handleSnapshot(supabase: any) {
   });
 }
 
-async function buildManualSnapshot(supabase: any) {
+async function buildManualSnapshot(supabase: any, corsHeaders: Record<string, string>) {
   // Fallback: build snapshot from direct queries
   const [sourcesRes, normQueueRes, enrichQueueRes, qualityRes] =
     await Promise.all([
@@ -201,7 +206,7 @@ interface HealthLogEntry {
   details_json?: Record<string, unknown>;
 }
 
-async function handleLogEntry(supabase: any, req: Request) {
+async function handleLogEntry(supabase: any, req: Request, corsHeaders: Record<string, string>) {
   let entry: HealthLogEntry;
   try {
     entry = await req.json();

@@ -164,7 +164,7 @@ This section provides the precise technical flow for App Store privacy questionn
 4. On-device processing:
    - Each number is normalized to E.164 format (e.g., `+14155551234`)
    - Each normalized number is hashed: `SHA-256(salt + normalizedNumber)`
-   - Salt: `euda_phone_salt_2024` (hardcoded application constant)
+   - Salt: loaded from `EXPO_PUBLIC_PHONE_HASH_SALT` env var (server-side: `ALTER DATABASE ... SET app.phone_hash_salt`)
 5. Only the hash array is sent to the server via RPC: `match_contacts(p_user_id, p_hashed_phones)`
 6. Server compares against `profiles.phone_hash` column
 7. Returns matching user profiles (user_id, username, avatar_url)

@@ -22,6 +22,8 @@ import { Avatar } from "./Avatar";
 import { ReportSheet } from "./ReportSheet";
 import { Colors } from "../config/theme";
 import { useTheme } from "../contexts/ThemeContext";
+import { captureError } from "../lib/logger";
+import { friendlyMessage } from "../lib/errorMessages";
 import type { PostComment } from "../types/database";
 
 type CommentWithProfile = PostComment & {
@@ -72,7 +74,7 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
     // Fetch profiles for all unique user IDs
     const userIds = [...new Set(commentsData.map((c: any) => c.user_id))];
     const { data: profilesData } = await supabase
-      .from("profiles")
+      .from("public_profiles")
       .select("id, username, avatar_url")
       .in("id", userIds);
 
@@ -111,8 +113,8 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
         .single();
 
       if (insertError) {
-        console.error("[Comment] Insert error:", insertError);
-        Alert.alert("Error", `Failed to post comment: ${insertError.message}`);
+        captureError(insertError, { action: "commentInsert", postId });
+        Alert.alert("Error", friendlyMessage(insertError));
         return;
       }
 
@@ -129,13 +131,12 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
           ...(commentData as any),
           profile: profileData || null,
         };
-        console.log("[Comment] Posted successfully:", commentWithProfile);
         setComments((prev) => [...prev, commentWithProfile as any]);
         setCommentText("");
       }
     } catch (error) {
-      console.error("[Comment] Exception:", error);
-      Alert.alert("Error", `Failed to post comment: ${error}`);
+      captureError(error, { action: "commentSubmit", postId });
+      Alert.alert("Error", friendlyMessage(error));
     } finally {
       setSubmitting(false);
     }

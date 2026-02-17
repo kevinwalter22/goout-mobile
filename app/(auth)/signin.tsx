@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { Link, router } from "expo-router";
 import { useAuth } from "../../src/hooks/useAuth";
+import { friendlyMessage } from "../../src/lib/errorMessages";
 
 export default function SignIn() {
   const { signIn } = useAuth();
@@ -29,7 +30,7 @@ export default function SignIn() {
     setLoading(false);
 
     if (error) {
-      Alert.alert("Error", error.message);
+      Alert.alert("Error", friendlyMessage(error));
     } else {
       router.replace("/(tabs)/feed");
     }

@@ -15,6 +15,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../src/lib/supabase";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
+import { captureError } from "../../src/lib/logger";
+import { friendlyMessage } from "../../src/lib/errorMessages";
 
 export default function ChangePassword() {
   const insets = useSafeAreaInsets();
@@ -50,6 +52,24 @@ export default function ChangePassword() {
     setSaving(true);
 
     try {
+      // Step 1: Re-authenticate with current password
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.email) {
+        Alert.alert("Error", "Unable to verify your account. Please sign in again.");
+        return;
+      }
+
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+
+      if (authError) {
+        Alert.alert("Error", "Current password is incorrect");
+        return;
+      }
+
+      // Step 2: Update to new password
       const { error } = await supabase.auth.updateUser({
         password: newPassword,
       });
@@ -60,8 +80,8 @@ export default function ChangePassword() {
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to update password";
-      Alert.alert("Error", message);
+      captureError(err, { action: "changePassword" });
+      Alert.alert("Error", friendlyMessage(err));
     } finally {
       setSaving(false);
     }

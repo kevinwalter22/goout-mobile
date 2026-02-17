@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { Link, router } from "expo-router";
 import { useAuth } from "../../src/hooks/useAuth";
+import { friendlyMessage } from "../../src/lib/errorMessages";
 
 export default function SignUp() {
   const { signUp } = useAuth();
@@ -54,7 +55,7 @@ export default function SignUp() {
     setLoading(false);
 
     if (error) {
-      Alert.alert("Error", error.message);
+      Alert.alert("Error", friendlyMessage(error));
     } else {
       Alert.alert(
         "Success",

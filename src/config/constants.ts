@@ -30,5 +30,7 @@ export const XP_REWARDS = {
   ACTIVITY_BONUS: 5,    // Additional XP if post is linked to an activity (future feature)
 } as const;
 
-// Phone hash salt — must match server-side salt in migration 061
-export const PHONE_HASH_SALT = "euda_phone_salt_2024";
+// Phone hash salt — loaded from env, must match server-side ALTER DATABASE setting
+// See migration 072 for the server-side counterpart
+import { Env } from "./env";
+export const PHONE_HASH_SALT = Env.PHONE_HASH_SALT;

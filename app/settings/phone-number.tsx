@@ -18,6 +18,8 @@ import { useAuth } from "../../src/hooks/useAuth";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
 import { normalizePhone } from "../../src/utils/phoneHash";
+import { captureError } from "../../src/lib/logger";
+import { friendlyMessage } from "../../src/lib/errorMessages";
 
 export default function PhoneNumber() {
   const insets = useSafeAreaInsets();
@@ -58,7 +60,8 @@ export default function PhoneNumber() {
       await refreshProfile();
       router.back();
     } catch (err) {
-      Alert.alert("Error", err instanceof Error ? err.message : "Failed to save phone number");
+      captureError(err, { action: "savePhoneNumber" });
+      Alert.alert("Error", friendlyMessage(err));
     } finally {
       setSaving(false);
     }
@@ -88,7 +91,8 @@ export default function PhoneNumber() {
               await refreshProfile();
               router.back();
             } catch (err) {
-              Alert.alert("Error", err instanceof Error ? err.message : "Failed to remove phone number");
+              captureError(err, { action: "removePhoneNumber" });
+              Alert.alert("Error", friendlyMessage(err));
             } finally {
               setSaving(false);
             }

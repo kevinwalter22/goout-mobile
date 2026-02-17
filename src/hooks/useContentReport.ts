@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
+import { captureError } from "../lib/logger";
 import type { ReportReason, ReportTargetType } from "../types/database";
 
 export function useContentReport() {
@@ -40,7 +41,7 @@ export function useContentReport() {
         } as any);
 
         if (error) {
-          console.error("[Report] Failed to submit:", error);
+          captureError(error, { action: "submitReport" });
           return { success: false };
         }
 

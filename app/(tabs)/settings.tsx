@@ -12,6 +12,8 @@ import { useTheme, type ThemeMode } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
 import { Env } from "../../src/config/env";
 import { sendTestException } from "../../src/lib/sentry";
+import { captureError } from "../../src/lib/logger";
+import { friendlyMessage } from "../../src/lib/errorMessages";
 
 const THEME_OPTIONS: { value: ThemeMode; label: string; icon: string }[] = [
   { value: "light", label: "Light", icon: "sunny-outline" },
@@ -139,19 +141,22 @@ export default function Settings() {
       });
 
       if (error) {
+        captureError(error, { action: "deleteAccount" });
         Alert.alert("Error", "Failed to delete account. Please try again or contact support.");
         return;
       }
 
       if (data?.error) {
-        Alert.alert("Error", data.error);
+        captureError(data.error, { action: "deleteAccount" });
+        Alert.alert("Error", friendlyMessage(data.error));
         return;
       }
 
       // Account deleted — sign out locally and go to signin
       await signOut();
       router.replace("/signin");
-    } catch {
+    } catch (err) {
+      captureError(err, { action: "deleteAccount" });
       Alert.alert("Error", "Something went wrong. Please try again.");
     } finally {
       setDeleting(false);

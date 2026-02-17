@@ -28,6 +28,8 @@ import { POSTABLE_NOW_CONFIG } from "../../src/config/exploreFilters";
 import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import type { ExploreItem } from "../../src/types/database";
+import { captureError } from "../../src/lib/logger";
+import { friendlyMessage } from "../../src/lib/errorMessages";
 
 export default function EventDetail() {
   const { id, title: fallbackTitle } = useLocalSearchParams<{ id: string; title?: string }>();
@@ -333,11 +335,13 @@ export default function EventDetail() {
                 .eq("created_by_user_id", user.id);
 
               if (deleteError) {
-                Alert.alert("Error", deleteError.message);
+                captureError(deleteError, { action: "deleteEvent" });
+                Alert.alert("Error", friendlyMessage(deleteError));
               } else {
                 router.back();
               }
             } catch (err) {
+              captureError(err, { action: "deleteEvent" });
               Alert.alert("Error", "Failed to delete event");
             } finally {
               setDeleting(false);
@@ -557,7 +561,7 @@ export default function EventDetail() {
                   <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
                     PHONE
                   </Text>
-                  <Pressable onPress={() => Linking.openURL(`tel:${placeDetails.phone_number}`)}>
+                  <Pressable onPress={() => Linking.openURL(`tel:${placeDetails.phone_number.replace(/[^+\d]/g, "")}`)}>
                     <Text style={{ fontSize: 16, color: Colors.primary }}>
                       {placeDetails.phone_number}
                     </Text>
@@ -565,7 +569,7 @@ export default function EventDetail() {
                 </View>
               )}
 
-              {placeDetails.website_uri && (
+              {placeDetails.website_uri && /^https?:\/\//i.test(placeDetails.website_uri) && (
                 <View style={{ gap: 4 }}>
                   <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
                     WEBSITE
@@ -596,7 +600,7 @@ export default function EventDetail() {
                 </View>
               )}
 
-              {placeDetails.google_maps_uri && (
+              {placeDetails.google_maps_uri && /^https?:\/\//i.test(placeDetails.google_maps_uri) && (
                 <Pressable onPress={() => Linking.openURL(placeDetails.google_maps_uri!)}>
                   <Text style={{ fontSize: 14, fontWeight: "600", color: Colors.primary }}>
                     Open in Google Maps

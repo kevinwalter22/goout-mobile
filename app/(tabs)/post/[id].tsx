@@ -81,9 +81,9 @@ export default function PostDetail() {
       // Cast to Post type to avoid type issues
       const post = postData as Post;
 
-      // Fetch profile
+      // Fetch profile (public view — safe for any user)
       const { data: profileData } = await supabase
-        .from("profiles")
+        .from("public_profiles")
         .select("id, username, avatar_url")
         .eq("id", post.user_id)
         .single();

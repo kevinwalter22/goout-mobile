@@ -56,7 +56,7 @@ export function useFriendsList(userId?: string) {
 
     // Fetch profiles for all friends
     const { data: profiles } = await supabase
-      .from("profiles")
+      .from("public_profiles")
       .select("id, username, avatar_url")
       .in("id", friendIds);
 

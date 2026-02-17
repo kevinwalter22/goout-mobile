@@ -21,6 +21,8 @@ import { Avatar } from "../../src/components/Avatar";
 import { normalizePhone, hashPhone } from "../../src/utils/phoneHash";
 import { mediumHaptic } from "../../src/utils/haptics";
 import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
+import { captureError } from "../../src/lib/logger";
+import { friendlyMessage } from "../../src/lib/errorMessages";
 
 type ContactMatch = {
   user_id: string;
@@ -110,8 +112,8 @@ export default function FindContacts() {
       );
 
       if (error) {
-        console.error("[Contacts] Match RPC error:", error.message);
-        Alert.alert("Error", "Failed to match contacts. Please try again.");
+        captureError(error, { action: "matchContacts" });
+        Alert.alert("Error", friendlyMessage(error));
         setMatches([]);
       } else {
         resultCount = (matchData || []).length;
@@ -119,8 +121,8 @@ export default function FindContacts() {
         setMatches(matchData || []);
       }
     } catch (err) {
-      console.error("[Contacts] Sync error:", err);
-      Alert.alert("Error", "Something went wrong. Please try again.");
+      captureError(err, { action: "contactsSync" });
+      Alert.alert("Error", friendlyMessage(err));
       setMatches([]);
     } finally {
       logAnalyticsEvent(user.id, "contacts_sync_completed", {

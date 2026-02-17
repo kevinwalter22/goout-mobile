@@ -22,12 +22,8 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { logPipelineHealth } from "../_shared/health-log.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { requireServiceRole } from "../_shared/auth-guard.ts";
 
 interface CoordinatorConfig {
   max_fetches?: number;     // Max partitions to fetch per invocation
@@ -53,8 +49,17 @@ const SOURCE_FUNCTION_MAP: Record<string, string> = {
 };
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+  const preflight = handleCorsPreflightIfNeeded(req);
+  if (preflight) return preflight;
+
+  const corsHeaders = getCorsHeaders(req);
+
+  const auth = requireServiceRole(req);
+  if (!auth.ok) {
+    return new Response(JSON.stringify({ error: auth.error }), {
+      status: auth.error === "Forbidden" ? 403 : 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
   try {

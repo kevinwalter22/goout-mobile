@@ -4,7 +4,8 @@ import { useAuth } from "./useAuth";
 
 /**
  * Hook to check if the current user has admin privileges.
- * Uses RLS-protected query to ensure security.
+ * Calls the same SECURITY DEFINER function used by all RLS policies,
+ * ensuring the client and DB always agree on admin status.
  */
 export function useAdmin() {
   const { user } = useAuth();
@@ -21,17 +22,13 @@ export function useAdmin() {
     async function checkAdminStatus() {
       setLoading(true);
 
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("is_admin")
-        .eq("id", user.id)
-        .single();
+      const { data, error } = await supabase.rpc("is_current_user_admin");
 
       if (error) {
         console.log("[useAdmin] Error checking admin status:", error.message);
         setIsAdmin(false);
       } else {
-        setIsAdmin(data?.is_admin ?? false);
+        setIsAdmin(data === true);
       }
 
       setLoading(false);

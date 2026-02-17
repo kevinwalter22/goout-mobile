@@ -5,6 +5,7 @@
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
+const PHONE_HASH_SALT = process.env.EXPO_PUBLIC_PHONE_HASH_SALT ?? "";
 const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN ?? "";
 
 export type AppEnv = "dev" | "staging" | "prod";
@@ -18,6 +19,7 @@ function detectEnv(url: string): AppEnv {
 export const Env = {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
+  PHONE_HASH_SALT,
   SENTRY_DSN,
   APP_ENV: detectEnv(SUPABASE_URL) as AppEnv,
   IS_DEV: __DEV__,
@@ -28,5 +30,6 @@ export function validateEnv(): string[] {
   const missing: string[] = [];
   if (!SUPABASE_URL) missing.push("EXPO_PUBLIC_SUPABASE_URL");
   if (!SUPABASE_ANON_KEY) missing.push("EXPO_PUBLIC_SUPABASE_ANON_KEY");
+  if (!PHONE_HASH_SALT) missing.push("EXPO_PUBLIC_PHONE_HASH_SALT");
   return missing;
 }

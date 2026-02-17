@@ -38,7 +38,8 @@
       "Bash(npm ls:*)",
       "Bash(node:*)",
       "Bash(del \"\\\\?\\\\c:\\\\Users\\\\kevin\\\\Documents\\\\goout-app\\\\mobile\\\\nul\")",
-      "Bash(python -c \"import os; os.remove\\(r''\\\\?\\\\c:\\\\Users\\\\kevin\\\\Documents\\\\goout-app\\\\mobile\\\\nul''\\)\")"
+      "Bash(python -c \"import os; os.remove\\(r''\\\\?\\\\c:\\\\Users\\\\kevin\\\\Documents\\\\goout-app\\\\mobile\\\\nul''\\)\")",
+      "Bash(git rm:*)"
     ]
   }
 }

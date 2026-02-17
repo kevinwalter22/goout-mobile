@@ -1,13 +1,16 @@
-export type Profile = {
+export type PublicProfile = {
   id: string;
   username: string;
+  avatar_url: string | null;
+  bio: string | null;
   created_at: string;
+};
+
+export type Profile = PublicProfile & {
   updated_at: string;
   xp: number;
   streak: number;
   last_post_date: string | null;
-  avatar_url: string | null;
-  bio: string | null;
   is_admin: boolean;
   phone_number: string | null;
   phone_hash: string | null;

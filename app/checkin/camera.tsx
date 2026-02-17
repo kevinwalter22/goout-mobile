@@ -24,6 +24,8 @@ import { CAMERA_MODES, MAX_CAPTION_LENGTH, XP_REWARDS } from "../../src/config/c
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { heavyHaptic, successHaptic, errorHaptic } from "../../src/utils/haptics";
 import { logInteraction } from "../../src/lib/interactionLogger";
+import { captureError } from "../../src/lib/logger";
+
 export default function CameraCapture() {
   const { eventId, exploreItemId, mode, itemKind } = useLocalSearchParams<{
     eventId?: string;
@@ -112,7 +114,7 @@ export default function CameraCapture() {
         setFacing("front");
       }
     } catch (error) {
-      console.error("Error taking photo:", error);
+      captureError(error, { action: "takePhoto" });
       errorHaptic();
       Alert.alert("Error", "Failed to take photo");
     }
@@ -186,7 +188,7 @@ export default function CameraCapture() {
       const { error: postError } = await supabase.from("posts").insert(postData);
 
       if (postError) {
-        console.error("[Post] DB insert failed:", postError);
+        captureError(postError, { action: "postInsert" });
         throw new Error(postError.message || "Failed to save post");
       }
 
@@ -242,7 +244,7 @@ export default function CameraCapture() {
         router.replace("/(tabs)/feed" as any);
       }, 500);
     } catch (error) {
-      console.error("[Post] Error:", error);
+      captureError(error, { action: "createPost" });
 
       // Cleanup: Delete uploaded images if post creation failed
       if (uploadedBackPath) {

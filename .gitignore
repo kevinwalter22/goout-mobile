@@ -43,9 +43,9 @@ app-example
 /android
 
 .env
-supabase/functions/.env
-
 .env.local
+supabase/functions/.env
+supabase/anthropic_key.txt
 
 # Windows reserved device names
 nul
