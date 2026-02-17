@@ -9,13 +9,17 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Image } from "expo-image";
 import { Link, router } from "expo-router";
 import { useAuth } from "../../src/hooks/useAuth";
 import { friendlyMessage } from "../../src/lib/errorMessages";
 import { logSecurityEvent, SEC } from "../../src/lib/securityEvents";
+import { useTheme } from "../../src/contexts/ThemeContext";
+import { Colors, Spacing, BorderRadius, FontSize, FontWeight } from "../../src/config/theme";
 
 export default function SignIn() {
   const { signIn } = useAuth();
+  const { colors } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -41,56 +45,74 @@ export default function SignIn() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      style={{ flex: 1 }}
+      style={{ flex: 1, backgroundColor: colors.background }}
     >
       <View
         style={{
           flex: 1,
-          padding: 24,
+          padding: Spacing.xl,
           justifyContent: "center",
-          gap: 16,
+          gap: Spacing.lg,
         }}
       >
-        <View style={{ gap: 8 }}>
-          <Text style={{ fontSize: 32, fontWeight: "700" }}>euda</Text>
-          <Text style={{ fontSize: 16, opacity: 0.7 }}>
-            Presence &gt; content
+        <View style={{ alignItems: "center", gap: Spacing.sm }}>
+          <Image
+            source={require("../../assets/images/euda.png")}
+            style={{ width: 140, height: 140 }}
+            contentFit="contain"
+            priority="high"
+            cachePolicy="memory-disk"
+          />
+          <Text style={{ fontSize: FontSize.md, color: colors.textSecondary }}>
+            Stop spectating. Start living.
           </Text>
         </View>
 
-        <View style={{ gap: 12, marginTop: 24 }}>
-          <View style={{ gap: 6 }}>
-            <Text style={{ fontSize: 14, fontWeight: "600" }}>Email</Text>
+        <View style={{ gap: Spacing.md, marginTop: Spacing.xl }}>
+          <View style={{ gap: Spacing.xs + 2 }}>
+            <Text style={{ fontSize: FontSize.sm, fontWeight: FontWeight.semibold, color: colors.text }}>
+              Email
+            </Text>
             <TextInput
               value={email}
               onChangeText={setEmail}
               placeholder="you@example.com"
+              placeholderTextColor={colors.textTertiary}
               autoCapitalize="none"
               autoComplete="email"
               keyboardType="email-address"
               style={{
-                padding: 12,
-                borderRadius: 8,
+                padding: Spacing.md,
+                borderRadius: BorderRadius.sm,
                 borderWidth: 1,
-                fontSize: 16,
+                borderColor: colors.border,
+                backgroundColor: colors.inputBg,
+                fontSize: FontSize.md,
+                color: colors.text,
               }}
             />
           </View>
 
-          <View style={{ gap: 6 }}>
-            <Text style={{ fontSize: 14, fontWeight: "600" }}>Password</Text>
+          <View style={{ gap: Spacing.xs + 2 }}>
+            <Text style={{ fontSize: FontSize.sm, fontWeight: FontWeight.semibold, color: colors.text }}>
+              Password
+            </Text>
             <TextInput
               value={password}
               onChangeText={setPassword}
               placeholder="••••••••"
+              placeholderTextColor={colors.textTertiary}
               secureTextEntry
               autoCapitalize="none"
               autoComplete="password"
               style={{
-                padding: 12,
-                borderRadius: 8,
+                padding: Spacing.md,
+                borderRadius: BorderRadius.sm,
                 borderWidth: 1,
-                fontSize: 16,
+                borderColor: colors.border,
+                backgroundColor: colors.inputBg,
+                fontSize: FontSize.md,
+                color: colors.text,
               }}
             />
           </View>
@@ -98,18 +120,19 @@ export default function SignIn() {
           <Pressable
             onPress={handleSignIn}
             disabled={loading}
-            style={{
-              marginTop: 8,
-              padding: 16,
-              borderRadius: 12,
-              backgroundColor: "#000",
+            style={({ pressed }) => ({
+              marginTop: Spacing.sm,
+              padding: Spacing.lg,
+              borderRadius: BorderRadius.md,
+              backgroundColor: pressed ? Colors.primaryDark : Colors.primary,
               alignItems: "center",
-            }}
+              opacity: loading ? 0.7 : 1,
+            })}
           >
             {loading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={Colors.white} />
             ) : (
-              <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
+              <Text style={{ color: Colors.white, fontSize: FontSize.md, fontWeight: FontWeight.semibold }}>
                 Sign In
               </Text>
             )}
@@ -117,16 +140,18 @@ export default function SignIn() {
 
           <View
             style={{
-              marginTop: 16,
+              marginTop: Spacing.lg,
               flexDirection: "row",
               justifyContent: "center",
-              gap: 6,
+              gap: Spacing.xs + 2,
             }}
           >
-            <Text style={{ opacity: 0.7 }}>Don&apos;t have an account?</Text>
+            <Text style={{ color: colors.textSecondary }}>Don&apos;t have an account?</Text>
             <Link href="/(auth)/signup" asChild>
               <Pressable>
-                <Text style={{ fontWeight: "600" }}>Sign Up</Text>
+                <Text style={{ fontWeight: FontWeight.semibold, color: Colors.primary }}>
+                  Sign Up
+                </Text>
               </Pressable>
             </Link>
           </View>

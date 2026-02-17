@@ -5,6 +5,7 @@
       {
         "appIDs": ["4CLZQV3J6X.com.kevwalt22.mobile"],
         "components": [
+          { "/": "/auth/callback", "comment": "Supabase email verification redirect" },
           { "/": "/event/*", "comment": "Event detail deep link" },
           { "/": "/post/*",  "comment": "Post detail deep link" },
           { "/": "/user/*",  "comment": "User profile deep link" }

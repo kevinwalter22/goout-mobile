@@ -123,6 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           data: {
             username,
           },
+          emailRedirectTo: "https://links.euda.live/auth/callback",
         },
       });
 
