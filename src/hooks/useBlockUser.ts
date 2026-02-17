@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
 import { captureError } from "../lib/logger";
+import { logSecurityEvent, SEC } from "../lib/securityEvents";
 import type { UserBlock } from "../types/database";
 
 type BlockedUser = UserBlock & {
@@ -81,6 +82,7 @@ export function useBlockUser() {
         return false;
       }
 
+      logSecurityEvent(SEC.USER_BLOCK, "low");
       setBlockedIds((prev) => new Set([...prev, targetUserId]));
       // Reload to get profile info
       loadBlocks();

@@ -171,7 +171,7 @@ export default function PhoneNumber() {
             style={inputStyle}
           />
           <Text style={{ fontSize: 12, color: colors.textTertiary }}>
-            Your phone number helps friends find you. It won't be shown publicly.
+            Your phone number helps friends find you. It won&apos;t be shown publicly.
           </Text>
         </View>
 

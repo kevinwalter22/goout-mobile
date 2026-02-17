@@ -16,7 +16,8 @@
     "import:events": "tsx scripts/import_curated_events.ts",
     "geocode": "tsx scripts/geocode_explore_items.ts",
     "geocode:ai": "tsx scripts/geocode_with_ai.ts",
-    "bump": "node scripts/bump-build.js"
+    "bump": "node scripts/bump-build.js",
+    "security:test": "tsx security-tests/run.ts"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

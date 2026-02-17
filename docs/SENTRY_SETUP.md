@@ -63,3 +63,50 @@ const ENABLED = !__DEV__ && !!Env.SENTRY_DSN;
 
 All exported functions (`setSentryUser`, `addNavigationBreadcrumb`, etc.) are
 no-ops when `ENABLED` is false. The app is fully functional without Sentry.
+
+---
+
+## PII Scrubbing
+
+Sentry is configured to **never** capture personal data:
+
+| Layer | What's scrubbed | How |
+|-------|----------------|-----|
+| `sendDefaultPii: false` | IP addresses, cookies, form data | Sentry SDK flag |
+| `beforeSend` hook | `event.user.ip_address` removed; breadcrumb data scrubbed for keys containing: `token`, `password`, `secret`, `authorization`, `phone`, `phone_number`, `contacts`, `email` | `src/lib/sentry.ts` |
+| `beforeBreadcrumb` hook | HTTP request/response headers stripped from `xhr`/`fetch` breadcrumbs | `src/lib/sentry.ts` |
+| `setSentryUser()` | Only sends `{ id: userId }` — no email, name, or phone | `src/lib/sentry.ts` |
+| Babel plugin | `console.log`/`warn`/`info` stripped in production builds (only `console.error` kept for Sentry breadcrumbs) | `babel.config.js` |
+
+**What IS captured:** stack traces, device model, OS version, anonymous user ID, navigation breadcrumbs, custom action breadcrumbs, error messages (scrubbed).
+
+**Session Replay sampling:** 10% of normal sessions, 100% of sessions with errors.
+
+---
+
+## Monitoring & Incident Response
+
+### Security events table
+
+The `security_events` table (migration 076) logs security-relevant actions:
+
+| Event type | Severity | Trigger |
+|-----------|----------|---------|
+| `auth.failed_login` | medium | Failed sign-in attempt |
+| `auth.password_change` | medium | Successful password change |
+| `auth.account_delete` | high | Account deletion |
+| `content.report` | low | Content report submitted |
+| `user.block` | low | User blocked |
+
+Events are logged via `logSecurityEvent()` from `src/lib/securityEvents.ts` (fire-and-forget, never blocks UI).
+
+### What to check, where
+
+| What | Where | How |
+|------|-------|-----|
+| Crashes and errors | Sentry dashboard | Check daily; alerts auto-fire on new issues |
+| Security events (last 24h) | `npx tsx security-tests/monitoring-check.ts` | Run with admin creds; exits non-zero if critical/high events |
+| Security event summary | Supabase SQL: `SELECT * FROM get_security_event_summary(7)` | Admin-only RPC, summarizes by day/type/severity |
+| Rate limit hits | Supabase table: `user_rate_limits` | Check for users hitting limits frequently |
+| Content reports | Supabase table: `content_reports` | Admin review via Settings > Admin Review in-app |
+| Edge function auth | `npm run security:test` | Automated test suite — run before deploys |

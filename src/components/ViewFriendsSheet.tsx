@@ -43,7 +43,7 @@ export function ViewFriendsSheet({
       <View style={[styles.container, { backgroundColor: colors.surface }]}>
         {/* Header */}
         <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-          <Text style={[styles.title, { color: colors.text }]}>{username}'s Friends ({friends.length})</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{username}&apos;s Friends ({friends.length})</Text>
           <Pressable onPress={onClose} style={styles.closeButton}>
             <Text style={[styles.closeText, { color: colors.textSecondary }]}>✕</Text>
           </Pressable>

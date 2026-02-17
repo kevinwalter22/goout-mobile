@@ -1,0 +1,26 @@
+version: 2
+
+updates:
+  # npm dependencies
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    # Group minor/patch updates to reduce PR spam
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    # Security updates are opened ASAP (default behavior)
+    # Major updates are individual PRs for careful review
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5

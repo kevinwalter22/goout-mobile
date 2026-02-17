@@ -14,6 +14,7 @@ import { Env } from "../../src/config/env";
 import { sendTestException } from "../../src/lib/sentry";
 import { captureError } from "../../src/lib/logger";
 import { friendlyMessage } from "../../src/lib/errorMessages";
+import { logSecurityEvent, SEC } from "../../src/lib/securityEvents";
 
 const THEME_OPTIONS: { value: ThemeMode; label: string; icon: string }[] = [
   { value: "light", label: "Light", icon: "sunny-outline" },
@@ -152,6 +153,8 @@ export default function Settings() {
         return;
       }
 
+      // Log before sign-out (user session still active)
+      logSecurityEvent(SEC.AUTH_ACCOUNT_DELETE, "high");
       // Account deleted — sign out locally and go to signin
       await signOut();
       router.replace("/signin");

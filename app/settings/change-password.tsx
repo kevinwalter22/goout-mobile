@@ -17,6 +17,7 @@ import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
 import { captureError } from "../../src/lib/logger";
 import { friendlyMessage } from "../../src/lib/errorMessages";
+import { logSecurityEvent, SEC } from "../../src/lib/securityEvents";
 
 export default function ChangePassword() {
   const insets = useSafeAreaInsets();
@@ -76,6 +77,7 @@ export default function ChangePassword() {
 
       if (error) throw error;
 
+      logSecurityEvent(SEC.AUTH_PASSWORD_CHANGE, "medium");
       Alert.alert("Success", "Your password has been updated", [
         { text: "OK", onPress: () => router.back() },
       ]);
@@ -215,7 +217,7 @@ export default function ChangePassword() {
           </View>
           {confirmPassword.length > 0 && newPassword !== confirmPassword && (
             <Text style={{ fontSize: 12, color: Colors.error }}>
-              Passwords don't match
+              Passwords don&apos;t match
             </Text>
           )}
         </View>

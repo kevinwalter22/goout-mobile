@@ -73,7 +73,7 @@ export default function NotificationSettings() {
         </Pressable>
 
         <Text style={{ fontSize: 12, color: colors.textTertiary, textAlign: "center" }}>
-          You can enable or disable push notifications for Euda in your device's notification settings.
+          You can enable or disable push notifications for Euda in your device&apos;s notification settings.
         </Text>
       </View>
     </View>

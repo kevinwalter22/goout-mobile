@@ -12,6 +12,7 @@ import {
 import { Link, router } from "expo-router";
 import { useAuth } from "../../src/hooks/useAuth";
 import { friendlyMessage } from "../../src/lib/errorMessages";
+import { logSecurityEvent, SEC } from "../../src/lib/securityEvents";
 
 export default function SignIn() {
   const { signIn } = useAuth();
@@ -30,6 +31,7 @@ export default function SignIn() {
     setLoading(false);
 
     if (error) {
+      logSecurityEvent(SEC.AUTH_FAILED_LOGIN, "medium");
       Alert.alert("Error", friendlyMessage(error));
     } else {
       router.replace("/(tabs)/feed");

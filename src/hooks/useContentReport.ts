@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
 import { captureError } from "../lib/logger";
+import { logSecurityEvent, SEC } from "../lib/securityEvents";
 import type { ReportReason, ReportTargetType } from "../types/database";
 
 export function useContentReport() {
@@ -45,6 +46,7 @@ export function useContentReport() {
           return { success: false };
         }
 
+        logSecurityEvent(SEC.CONTENT_REPORT, "low", { target_type: targetType });
         return { success: true };
       } finally {
         setSubmitting(false);

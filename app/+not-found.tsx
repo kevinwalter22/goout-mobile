@@ -45,7 +45,7 @@ export default function NotFoundScreen() {
           marginBottom: 24,
         }}
       >
-        This link doesn't match anything in the app.
+        This link doesn&apos;t match anything in the app.
       </Text>
       <Pressable
         onPress={() => router.replace("/")}
