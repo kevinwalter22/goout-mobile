@@ -24,6 +24,9 @@ import { Toast } from "../../src/components/Toast";
 import type { ToastType } from "../../src/components/Toast";
 import { openDirections } from "../../src/utils/maps";
 import { useBlockUser } from "../../src/hooks/useBlockUser";
+import { useAuth } from "../../src/hooks/useAuth";
+import { deleteImage } from "../../src/utils/storage";
+import { supabase } from "../../src/lib/supabase";
 import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 
@@ -39,6 +42,7 @@ const FeedItem = React.memo(function FeedItem({
   onToast,
   onReport,
   onBlockUser,
+  onDeletePost,
   colors,
 }: {
   item: PostWithDetails;
@@ -46,6 +50,7 @@ const FeedItem = React.memo(function FeedItem({
   onToast: (message: string) => void;
   onReport: (postId: string, userId: string) => void;
   onBlockUser: (userId: string) => void;
+  onDeletePost?: (post: PostWithDetails) => void;
   colors: any;
 }) {
   return (
@@ -102,6 +107,7 @@ const FeedItem = React.memo(function FeedItem({
             targetId={item.id}
             onReport={() => onReport(item.id, item.user_id)}
             onBlockUser={() => onBlockUser(item.user_id)}
+            onDelete={onDeletePost ? () => onDeletePost(item) : undefined}
           />
         </View>
       </View>
@@ -156,7 +162,8 @@ const FeedItem = React.memo(function FeedItem({
 });
 
 export default function Feed() {
-  const { posts, loading, error, refresh } = usePosts();
+  const { posts, loading, error, refresh, removePost } = usePosts();
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [reportTarget, setReportTarget] = useState<{ postId: string; userId: string } | null>(null);
@@ -193,6 +200,23 @@ export default function Feed() {
       Alert.alert("Error", "Failed to block user. Please try again.");
     }
   }, [blockUser]);
+
+  const handleDeletePost = useCallback((post: PostWithDetails) => {
+    // Optimistic removal
+    removePost(post.id);
+
+    supabase.from("posts").delete().eq("id", post.id).then(({ error }) => {
+      if (error) {
+        setToast({ visible: true, message: "Failed to delete post", type: "error" });
+        refresh();
+        return;
+      }
+      // Clean up storage files (fire-and-forget)
+      deleteImage(post.photo_path);
+      if (post.front_photo_path) deleteImage(post.front_photo_path);
+      setToast({ visible: true, message: "Post deleted", type: "success" });
+    });
+  }, [removePost, refresh]);
 
   // Listen for scroll-to-top events
   useEffect(() => {
@@ -297,6 +321,7 @@ export default function Feed() {
             onToast={handleToast}
             onReport={handleReport}
             onBlockUser={handleBlockUser}
+            onDeletePost={item.user_id === user?.id ? handleDeletePost : undefined}
             colors={colors}
           />
         )}

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -24,8 +24,10 @@ import { Avatar } from "../../src/components/Avatar";
 import { useFriendRequests } from "../../src/hooks/useFriendRequests";
 import { PostImage } from "../../src/components/PostImage";
 import { pickAndUploadAvatar } from "../../src/utils/avatar";
+import { deleteImage } from "../../src/utils/storage";
 import { supabase } from "../../src/lib/supabase";
 import { useToast } from "../../src/context/ToastContext";
+import { useFocusEffect } from "expo-router";
 import { scrollToTopEmitter } from "../../src/utils/scrollToTop";
 import { useUpcomingPlans } from "../../src/hooks/useUpcomingPlans";
 import { Colors } from "../../src/config/theme";
@@ -39,7 +41,7 @@ export default function Profile() {
   const { friends } = useFriendsList();
   const { requests } = useFriendRequests();
   const { recommendations, loading: recsLoading, sendRequest } = useFriendRecommendations(5);
-  const { posts, loading: postsLoading } = useUserPosts(user?.id || null);
+  const { posts, loading: postsLoading, removePost, refresh: refreshPosts } = useUserPosts(user?.id || null);
   const { plans, loading: plansLoading } = useUpcomingPlans(user?.id);
   const { showToast } = useToast();
   const { colors } = useTheme();
@@ -55,6 +57,13 @@ export default function Profile() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [savingBio, setSavingBio] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
+
+  // Silently refresh posts when screen regains focus (e.g. after deleting from post detail)
+  useFocusEffect(
+    useCallback(() => {
+      refreshPosts();
+    }, [])
+  );
 
   // Listen for scroll-to-top events
   useEffect(() => {
@@ -161,6 +170,37 @@ export default function Profile() {
   function handleFriendTap(friendId: string) {
     setShowFriends(false);
     router.push(`/user/${friendId}` as any);
+  }
+
+  function handleDeletePost(postId: string, photoPath: string, frontPhotoPath: string | null) {
+    Alert.alert(
+      "Delete Post",
+      "This will permanently delete this post. This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            // Optimistic removal
+            removePost(postId);
+
+            const { error } = await supabase.from("posts").delete().eq("id", postId);
+            if (error) {
+              showToast("Failed to delete post", "error");
+              refreshPosts();
+              return;
+            }
+
+            // Clean up storage files (fire-and-forget)
+            deleteImage(photoPath);
+            if (frontPhotoPath) deleteImage(frontPhotoPath);
+
+            showToast("Post deleted", "success");
+          },
+        },
+      ],
+    );
   }
 
   if (loading) {
@@ -493,6 +533,7 @@ export default function Profile() {
                 <Pressable
                   key={post.id}
                   onPress={() => router.push(`/post/${post.id}` as any)}
+                  onLongPress={() => handleDeletePost(post.id, post.photo_path, post.front_photo_path)}
                   style={{
                     width: postSize,
                     height: postSize,
@@ -524,6 +565,10 @@ export default function Profile() {
       <FriendRequestsSheet
         visible={showFriendRequests}
         onClose={() => setShowFriendRequests(false)}
+        onViewProfile={(userId) => {
+          setShowFriendRequests(false);
+          router.push(`/user/${userId}` as any);
+        }}
       />
 
       {/* Bio Edit Modal */}

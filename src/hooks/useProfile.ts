@@ -37,7 +37,7 @@ export function useProfile(userId: string | null) {
       // Fall back to public_profiles (safe columns for any user)
       const { data: publicData, error: publicError } = await supabase
         .from("public_profiles")
-        .select("id, username, avatar_url, bio, created_at")
+        .select("id, username, avatar_url, bio, created_at, xp, streak, last_post_date")
         .eq("id", userId)
         .maybeSingle();
 

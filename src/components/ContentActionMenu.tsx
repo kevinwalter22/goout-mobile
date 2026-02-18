@@ -13,6 +13,8 @@ type ContentActionMenuProps = {
   targetId: string;
   onReport: () => void;
   onBlockUser: () => void;
+  /** Called when the user deletes their own content. Only shown for own content. */
+  onDelete?: () => void;
   /** Size of the trigger icon */
   size?: number;
 };
@@ -23,14 +25,17 @@ export function ContentActionMenu({
   targetId,
   onReport,
   onBlockUser,
+  onDelete,
   size = 20,
 }: ContentActionMenuProps) {
   const { user } = useAuth();
   const { colors } = useTheme();
   const [menuVisible, setMenuVisible] = useState(false);
 
-  // Don't show menu on own content
-  if (user?.id === authorUserId) return null;
+  const isOwnContent = user?.id === authorUserId;
+
+  // Don't show menu on own content unless delete is available
+  if (isOwnContent && !onDelete) return null;
 
   const targetLabel =
     targetType === "post" ? "Post" : targetType === "comment" ? "Comment" : "User";
@@ -63,42 +68,72 @@ export function ContentActionMenu({
             style={[styles.menu, { backgroundColor: colors.surface }]}
             onStartShouldSetResponder={() => true}
           >
-            <Pressable
-              style={[styles.menuItem, { borderBottomColor: colors.borderLight }]}
-              onPress={() => {
-                setMenuVisible(false);
-                onReport();
-              }}
-            >
-              <Ionicons name="flag-outline" size={20} color={colors.text} />
-              <Text style={[styles.menuLabel, { color: colors.text }]}>
-                Report {targetLabel}
-              </Text>
-            </Pressable>
+            {isOwnContent && onDelete ? (
+              /* Owner menu — delete only */
+              <Pressable
+                style={styles.menuItem}
+                onPress={() => {
+                  setMenuVisible(false);
+                  Alert.alert(
+                    `Delete ${targetLabel}`,
+                    "This will permanently delete this post. This action cannot be undone.",
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Delete",
+                        style: "destructive",
+                        onPress: onDelete,
+                      },
+                    ]
+                  );
+                }}
+              >
+                <Ionicons name="trash-outline" size={20} color={Colors.error} />
+                <Text style={[styles.menuLabel, { color: Colors.error }]}>
+                  Delete {targetLabel}
+                </Text>
+              </Pressable>
+            ) : (
+              /* Other user menu — report + block */
+              <>
+                <Pressable
+                  style={[styles.menuItem, { borderBottomColor: colors.borderLight }]}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    onReport();
+                  }}
+                >
+                  <Ionicons name="flag-outline" size={20} color={colors.text} />
+                  <Text style={[styles.menuLabel, { color: colors.text }]}>
+                    Report {targetLabel}
+                  </Text>
+                </Pressable>
 
-            <Pressable
-              style={styles.menuItem}
-              onPress={() => {
-                setMenuVisible(false);
-                Alert.alert(
-                  "Block User",
-                  "They won't be able to see your content, and their content will be hidden from your feed.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Block",
-                      style: "destructive",
-                      onPress: onBlockUser,
-                    },
-                  ]
-                );
-              }}
-            >
-              <Ionicons name="ban-outline" size={20} color={Colors.error} />
-              <Text style={[styles.menuLabel, { color: Colors.error }]}>
-                Block User
-              </Text>
-            </Pressable>
+                <Pressable
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setMenuVisible(false);
+                    Alert.alert(
+                      "Block User",
+                      "They won't be able to see your content, and their content will be hidden from your feed.",
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Block",
+                          style: "destructive",
+                          onPress: onBlockUser,
+                        },
+                      ]
+                    );
+                  }}
+                >
+                  <Ionicons name="ban-outline" size={20} color={Colors.error} />
+                  <Text style={[styles.menuLabel, { color: Colors.error }]}>
+                    Block User
+                  </Text>
+                </Pressable>
+              </>
+            )}
 
             <Pressable
               style={[styles.cancelItem, { borderTopColor: colors.separator }]}

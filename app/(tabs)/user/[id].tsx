@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocalSearchParams, router } from "expo-router";
 import {
   View,
@@ -7,12 +7,11 @@ import {
   ScrollView,
   ActivityIndicator,
   Pressable,
-  FlatList,
   Image,
 } from "react-native";
 import { useProfile } from "../../../src/hooks/useProfile";
 import { useUserPosts } from "../../../src/hooks/useUserPosts";
-import { useFriendsList } from "../../../src/hooks/useFriendsList";
+import { useFriendCount } from "../../../src/hooks/useFriendCount";
 import { useFriendship } from "../../../src/hooks/useFriendship";
 import { useBlockUser } from "../../../src/hooks/useBlockUser";
 import { Avatar } from "../../../src/components/Avatar";
@@ -30,10 +29,10 @@ export default function UserProfile() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
   const { colors } = useTheme();
-  const { profile, isFullProfile, loading, error } = useProfile(id);
+  const { profile, loading, error, refresh: refreshProfile } = useProfile(id);
   const { posts, loading: postsLoading } = useUserPosts(id);
   const { plans, loading: plansLoading } = useUpcomingPlans(id);
-  const { friends: userFriends } = useFriendsList(id); // This user's friends
+  const { count: friendCount } = useFriendCount(id);
   const {
     status,
     loading: friendshipLoading,
@@ -50,6 +49,16 @@ export default function UserProfile() {
 
   const isOwnProfile = user?.id === id;
   const isFriends = status === "accepted";
+  const canSeeContent = isOwnProfile || isFriends;
+
+  // Auto-refresh profile when friendship is accepted (to get full profile data)
+  const prevStatusRef = useRef(status);
+  useEffect(() => {
+    if (prevStatusRef.current !== "accepted" && status === "accepted") {
+      refreshProfile();
+    }
+    prevStatusRef.current = status;
+  }, [status]);
 
   if (loading) {
     return (
@@ -77,9 +86,6 @@ export default function UserProfile() {
       </View>
     );
   }
-
-  // Count friends for this user
-  const userFriendCount = userFriends.length;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -134,26 +140,22 @@ export default function UserProfile() {
             borderColor: colors.separator,
           }}
         >
-          {isFullProfile && "xp" in profile && (
-            <>
-              <View style={{ alignItems: "center", gap: 4, flex: 1 }}>
-                <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>{profile.xp}</Text>
-                <Text style={{ fontSize: 14, color: colors.textSecondary }}>XP</Text>
-              </View>
-              <View style={{ alignItems: "center", gap: 4, flex: 1 }}>
-                <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>
-                  {getEffectiveStreak(profile.last_post_date, profile.streak)}
-                </Text>
-                <Text style={{ fontSize: 14, color: colors.textSecondary }}>Streak</Text>
-              </View>
-            </>
-          )}
+          <View style={{ alignItems: "center", gap: 4, flex: 1 }}>
+            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>{profile.xp}</Text>
+            <Text style={{ fontSize: 14, color: colors.textSecondary }}>XP</Text>
+          </View>
+          <View style={{ alignItems: "center", gap: 4, flex: 1 }}>
+            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>
+              {getEffectiveStreak(profile.last_post_date, profile.streak)}
+            </Text>
+            <Text style={{ fontSize: 14, color: colors.textSecondary }}>Streak</Text>
+          </View>
           <Pressable
             style={{ alignItems: "center", gap: 4, flex: 1 }}
             onPress={() => isFriends && setShowFriendsSheet(true)}
             disabled={!isFriends}
           >
-            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>{userFriendCount}</Text>
+            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>{friendCount}</Text>
             <Text style={{ fontSize: 14, color: colors.textSecondary }}>Friends</Text>
           </Pressable>
         </View>
@@ -253,8 +255,17 @@ export default function UserProfile() {
         )}
       </View>
 
-      {/* Upcoming Plans */}
-      {!plansLoading && plans.length > 0 && (
+      {/* Restricted profile message for non-friends */}
+      {!canSeeContent && (
+        <View style={{ padding: 24, alignItems: "center" }}>
+          <Text style={{ fontSize: 14, color: colors.textSecondary, textAlign: "center" }}>
+            Add {profile.username} as a friend to see their posts and plans.
+          </Text>
+        </View>
+      )}
+
+      {/* Upcoming Plans — friends and own profile only */}
+      {canSeeContent && !plansLoading && plans.length > 0 && (
         <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
           <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 12, color: colors.text }}>
             Upcoming
@@ -313,46 +324,48 @@ export default function UserProfile() {
         </View>
       )}
 
-      {/* Posts grid */}
-      <View style={{ padding: 16 }}>
-        <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 16, color: colors.text }}>
-          Posts ({posts.length})
-        </Text>
-
-        {postsLoading ? (
-          <ActivityIndicator color={Colors.primary} />
-        ) : posts.length === 0 ? (
-          <Text style={{ textAlign: "center", color: colors.textSecondary, paddingVertical: 32 }}>
-            No posts yet
+      {/* Posts grid — friends and own profile only */}
+      {canSeeContent && (
+        <View style={{ padding: 16 }}>
+          <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 16, color: colors.text }}>
+            Posts ({posts.length})
           </Text>
-        ) : (
-          <View
-            style={{
-              flexDirection: "row",
-              flexWrap: "wrap",
-              gap: 8,
-            }}
-          >
-            {posts.map((post) => (
-              <Pressable
-                key={post.id}
-                onPress={() => router.push(`/post/${post.id}` as any)}
-                style={{
-                  width: "31%",
-                  aspectRatio: 1,
-                  borderRadius: 8,
-                  overflow: "hidden",
-                }}
-              >
-                <PostImage
-                  photoPath={post.photo_path}
-                  style={{ width: "100%", height: "100%" }}
-                />
-              </Pressable>
-            ))}
-          </View>
-        )}
-      </View>
+
+          {postsLoading ? (
+            <ActivityIndicator color={Colors.primary} />
+          ) : posts.length === 0 ? (
+            <Text style={{ textAlign: "center", color: colors.textSecondary, paddingVertical: 32 }}>
+              No posts yet
+            </Text>
+          ) : (
+            <View
+              style={{
+                flexDirection: "row",
+                flexWrap: "wrap",
+                gap: 8,
+              }}
+            >
+              {posts.map((post) => (
+                <Pressable
+                  key={post.id}
+                  onPress={() => router.push(`/post/${post.id}` as any)}
+                  style={{
+                    width: "31%",
+                    aspectRatio: 1,
+                    borderRadius: 8,
+                    overflow: "hidden",
+                  }}
+                >
+                  <PostImage
+                    photoPath={post.photo_path}
+                    style={{ width: "100%", height: "100%" }}
+                  />
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
       </ScrollView>
 
       {/* Friends Sheet - only accessible if friends with user */}

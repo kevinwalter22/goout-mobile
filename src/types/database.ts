@@ -4,13 +4,13 @@ export type PublicProfile = {
   avatar_url: string | null;
   bio: string | null;
   created_at: string;
+  xp: number;
+  streak: number;
+  last_post_date: string | null;
 };
 
 export type Profile = PublicProfile & {
   updated_at: string;
-  xp: number;
-  streak: number;
-  last_post_date: string | null;
   is_admin: boolean;
   phone_number: string | null;
   phone_hash: string | null;

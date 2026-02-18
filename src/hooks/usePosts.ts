@@ -165,10 +165,15 @@ export function usePosts() {
     }
   }, [user]);
 
+  function removePost(postId: string) {
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+  }
+
   return {
     posts,
     loading,
     error,
     refresh: loadPosts,
+    removePost,
   };
 }

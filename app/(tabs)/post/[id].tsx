@@ -19,7 +19,9 @@ import { ReportSheet } from "../../../src/components/ReportSheet";
 import { Toast } from "../../../src/components/Toast";
 import type { ToastType } from "../../../src/components/Toast";
 import { openDirections } from "../../../src/utils/maps";
+import { deleteImage } from "../../../src/utils/storage";
 import { useBlockUser } from "../../../src/hooks/useBlockUser";
+import { useAuth } from "../../../src/hooks/useAuth";
 import { Colors } from "../../../src/config/theme";
 import { useTheme } from "../../../src/contexts/ThemeContext";
 import type { Post } from "../../../src/types/database";
@@ -40,6 +42,7 @@ type PostWithDetails = Post & {
 
 export default function PostDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuth();
   const { colors } = useTheme();
   const [post, setPost] = useState<PostWithDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,12 +67,12 @@ export default function PostDetail() {
       setLoading(true);
       setError(null);
 
-      // Fetch the post
+      // Fetch the post (.maybeSingle avoids PGRST116 if row was deleted)
       const { data: postData, error: postError } = await supabase
         .from("posts")
         .select("*")
         .eq("id", id)
-        .single();
+        .maybeSingle();
 
       if (postError) throw postError;
       if (!postData) {
@@ -141,6 +144,22 @@ export default function PostDetail() {
     } else {
       Alert.alert("Error", "Failed to block user. Please try again.");
     }
+  }
+
+  async function handleDeletePost() {
+    if (!post) return;
+
+    const { error } = await supabase.from("posts").delete().eq("id", post.id);
+    if (error) {
+      setToast({ visible: true, message: "Failed to delete post", type: "error" });
+      return;
+    }
+
+    // Clean up storage files (fire-and-forget)
+    deleteImage(post.photo_path);
+    if (post.front_photo_path) deleteImage(post.front_photo_path);
+
+    router.back();
   }
 
   if (loading) {
@@ -244,6 +263,7 @@ export default function PostDetail() {
                 targetId={post.id}
                 onReport={() => setShowReport(true)}
                 onBlockUser={() => handleBlockUser(post.user_id)}
+                onDelete={post.user_id === user?.id ? handleDeletePost : undefined}
               />
             </View>
           </View>

@@ -16,9 +16,10 @@ import { useTheme } from "../contexts/ThemeContext";
 type FriendRequestsSheetProps = {
   visible: boolean;
   onClose: () => void;
+  onViewProfile?: (userId: string) => void;
 };
 
-export function FriendRequestsSheet({ visible, onClose }: FriendRequestsSheetProps) {
+export function FriendRequestsSheet({ visible, onClose, onViewProfile }: FriendRequestsSheetProps) {
   const { requests, loading, refresh } = useFriendRequests();
   const { colors } = useTheme();
 
@@ -60,7 +61,7 @@ export function FriendRequestsSheet({ visible, onClose }: FriendRequestsSheetPro
           data={requests}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <FriendRequestItem request={item} onResponse={refresh} />
+            <FriendRequestItem request={item} onResponse={refresh} onViewProfile={onViewProfile} />
           )}
         />
       </View>
@@ -72,9 +73,11 @@ export function FriendRequestsSheet({ visible, onClose }: FriendRequestsSheetPro
 function FriendRequestItem({
   request,
   onResponse,
+  onViewProfile,
 }: {
   request: { id: string; user_id: string; username: string; avatar_url: string | null };
   onResponse: () => void;
+  onViewProfile?: (userId: string) => void;
 }) {
   const { acceptFriendRequest, declineFriendRequest, loading } = useFriendship(request.user_id);
   const { colors } = useTheme();
@@ -91,11 +94,16 @@ function FriendRequestItem({
 
   return (
     <View style={[styles.requestItem, { borderBottomColor: colors.borderLight }]}>
-      <Avatar avatarUrl={request.avatar_url} size={50} />
-      <View style={styles.requestInfo}>
-        <Text style={[styles.requestUsername, { color: colors.text }]}>{request.username}</Text>
-        <Text style={[styles.requestSubtext, { color: colors.textSecondary }]}>wants to be friends</Text>
-      </View>
+      <Pressable
+        style={styles.requestProfile}
+        onPress={() => onViewProfile?.(request.user_id)}
+      >
+        <Avatar avatarUrl={request.avatar_url} size={50} />
+        <View style={styles.requestInfo}>
+          <Text style={[styles.requestUsername, { color: colors.text }]}>{request.username}</Text>
+          <Text style={[styles.requestSubtext, { color: colors.textSecondary }]}>wants to be friends</Text>
+        </View>
+      </Pressable>
       <View style={styles.requestActions}>
         <Pressable
           onPress={handleAccept}
@@ -170,6 +178,12 @@ const styles = StyleSheet.create({
     gap: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#f0f0f0",
+  },
+  requestProfile: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
   },
   requestInfo: {
     flex: 1,
