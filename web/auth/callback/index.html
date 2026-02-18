@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Email Verified — Euda</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .verify-container {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+    }
+    .verify-card {
+      max-width: 400px;
+      width: 100%;
+    }
+    .verify-card .logo {
+      font-size: 36px;
+      margin-bottom: 16px;
+    }
+    .checkmark {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: #10B981;
+      color: #fff;
+      font-size: 32px;
+      line-height: 64px;
+      margin: 0 auto 20px;
+    }
+    .subtitle {
+      color: var(--text-secondary);
+      font-size: 15px;
+      margin-bottom: 24px;
+    }
+    .btn { display: block; margin: 0 auto; max-width: 280px; }
+    .hint {
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+  </style>
+</head>
+<body>
+  <div class="verify-container">
+    <div class="verify-card">
+      <div class="logo">euda</div>
+      <div class="checkmark">&#10003;</div>
+      <h1>Email Verified</h1>
+      <p class="subtitle">Your account is ready. Open the Euda app to sign in.</p>
+      <a id="open-app" class="btn" href="#">Open Euda</a>
+      <p class="hint">If the app doesn't open, go back to Euda and sign in with your email and password.</p>
+    </div>
+  </div>
+  <script>
+    // Try to open the app via universal link first, then custom scheme
+    (function () {
+      var hash = window.location.hash;
+      var search = window.location.search;
+
+      // Build the deep link URL with any tokens from the redirect
+      var appUrl = 'euda://auth/callback' + search + hash;
+      var universalUrl = 'https://links.euda.live/auth/callback' + search + hash;
+
+      var btn = document.getElementById('open-app');
+      btn.href = appUrl;
+
+      // Auto-attempt to open the app after a short delay
+      setTimeout(function () {
+        window.location.href = appUrl;
+      }, 300);
+    })();
+  </script>
+</body>
+</html>
