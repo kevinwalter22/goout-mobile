@@ -24,6 +24,8 @@ import { Colors } from "../config/theme";
 import { useTheme } from "../contexts/ThemeContext";
 import { captureError } from "../lib/logger";
 import { friendlyMessage } from "../lib/errorMessages";
+import { checkBeforeSubmit } from "../lib/moderation/textModeration";
+import { useEnforcement } from "../hooks/useEnforcement";
 import type { PostComment } from "../types/database";
 
 type CommentWithProfile = PostComment & {
@@ -44,6 +46,7 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { blockedIds, blockUser } = useBlockUser();
+  const { isSuspended, suspendedUntil } = useEnforcement();
   const [comments, setComments] = useState<CommentWithProfile[]>([]);
   const [commentText, setCommentText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -96,9 +99,35 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
   async function handleSubmit() {
     if (!user || !commentText.trim() || submitting) return;
 
+    // Enforcement check
+    if (isSuspended) {
+      const untilStr = suspendedUntil
+        ? ` until ${new Date(suspendedUntil).toLocaleDateString()}`
+        : "";
+      Alert.alert("Account Suspended", `Your account is suspended${untilStr}. You cannot comment.`);
+      return;
+    }
+
     const content = commentText.trim();
     if (content.length > 500) {
       Alert.alert("Error", "Comment must be 500 characters or less");
+      return;
+    }
+
+    // Rate limit check
+    try {
+      const { error: rlError } = await supabase.rpc("check_comment_rate_limit");
+      if (rlError) {
+        Alert.alert("Slow down", "You're commenting too quickly. Please try again later.");
+        return;
+      }
+    } catch {
+      // Don't block on rate limit failure
+    }
+
+    const modCheck = checkBeforeSubmit(content, "comment");
+    if (!modCheck.allowed) {
+      Alert.alert("Can't post", modCheck.reason);
       return;
     }
 
@@ -235,7 +264,25 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
                       )}
                     </View>
                   </View>
-                  <Text style={[styles.commentText, { color: colors.text }]}>{item.content}</Text>
+                  {item.moderation_status === "quarantined" && item.user_id === user?.id && (
+                    <View style={{
+                      backgroundColor: Colors.warning + "18",
+                      borderRadius: 4,
+                      paddingHorizontal: 6,
+                      paddingVertical: 2,
+                      alignSelf: "flex-start",
+                      marginTop: 2,
+                    }}>
+                      <Text style={{ fontSize: 11, color: Colors.warning }}>Pending review</Text>
+                    </View>
+                  )}
+                  {item.moderation_status === "blocked" && item.user_id === user?.id ? (
+                    <Text style={[styles.commentText, { color: colors.textTertiary, fontStyle: "italic" }]}>
+                      This comment has been removed.
+                    </Text>
+                  ) : (
+                    <Text style={[styles.commentText, { color: colors.text }]}>{item.content}</Text>
+                  )}
                   {item.user_id === user?.id && (
                     <Pressable
                       onPress={() => handleDelete(item.id)}

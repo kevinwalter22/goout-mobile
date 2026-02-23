@@ -28,8 +28,8 @@ type ReportSheetProps = {
 const REASONS: { value: ReportReason; label: string; icon: string }[] = [
   { value: "spam", label: "Spam", icon: "megaphone-outline" },
   { value: "harassment", label: "Harassment or bullying", icon: "warning-outline" },
-  { value: "inappropriate_content", label: "Inappropriate content", icon: "eye-off-outline" },
-  { value: "impersonation", label: "Impersonation", icon: "person-outline" },
+  { value: "hate_speech", label: "Hate speech", icon: "ban-outline" },
+  { value: "sexual_content", label: "Sexual content", icon: "eye-off-outline" },
   { value: "other", label: "Other", icon: "ellipsis-horizontal-outline" },
 ];
 

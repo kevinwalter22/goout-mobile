@@ -217,7 +217,8 @@ function getCurrentSeason(): string {
 export async function queryExploreItems(
   supabase: SupabaseClient,
   filters: ExploreFilterState,
-  userLocation?: { lat: number; lng: number } | null
+  userLocation?: { lat: number; lng: number } | null,
+  userId?: string
 ): Promise<QueryResult<any>> {
   try {
     // Debug: Log filter state
@@ -371,7 +372,11 @@ export async function queryExploreItems(
       .gte("priority", 0) // Exclude stale/demoted items (priority = -1)
       .eq("is_duplicate", false) // Exclude cross-source duplicates
       .or("normalized_confidence.is.null,normalized_confidence.gte.40") // Quality gate
-      .or("review_status.is.null,review_status.in.(auto_approved,approved)"); // Quarantine gate
+      .or(
+        userId
+          ? `review_status.is.null,review_status.in.(auto_approved,approved),created_by_user_id.eq.${userId}`
+          : "review_status.is.null,review_status.in.(auto_approved,approved)"
+      ); // Quarantine gate (include creator's own items)
 
     // Hide past events: show activities (no starts_at), events still going
     // (ends_at >= now), or events within 3h grace window (no ends_at)

@@ -10,6 +10,16 @@ export function useFriendCount(userId: string | null) {
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  function fetchCount() {
+    if (!userId) return;
+    supabase
+      .rpc("get_friend_count", { p_user_id: userId })
+      .then(({ data, error }) => {
+        if (!error && data != null) setCount(data);
+      })
+      .finally(() => setLoading(false));
+  }
+
   useEffect(() => {
     if (!userId) {
       setLoading(false);
@@ -17,13 +27,14 @@ export function useFriendCount(userId: string | null) {
     }
 
     setLoading(true);
-    supabase
-      .rpc("get_friend_count", { p_user_id: userId })
-      .then(({ data, error }) => {
-        if (!error && data != null) setCount(data);
-      })
-      .finally(() => setLoading(false));
+    fetchCount();
   }, [userId]);
 
-  return { count, loading };
+  /** Optimistic +1, then revalidate from server */
+  function increment() {
+    setCount((c) => c + 1);
+    fetchCount();
+  }
+
+  return { count, loading, refresh: fetchCount, increment };
 }

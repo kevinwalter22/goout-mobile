@@ -25,6 +25,7 @@ import { useFriendRequests } from "../../src/hooks/useFriendRequests";
 import { PostImage } from "../../src/components/PostImage";
 import { pickAndUploadAvatar } from "../../src/utils/avatar";
 import { deleteImage } from "../../src/utils/storage";
+import { requestImageModeration } from "../../src/utils/imageModeration";
 import { supabase } from "../../src/lib/supabase";
 import { useToast } from "../../src/context/ToastContext";
 import { useFocusEffect } from "expo-router";
@@ -38,8 +39,8 @@ import { useFriendRecommendations } from "../../src/hooks/useFriendRecommendatio
 export default function Profile() {
   const { profile, loading, signOut, user, refreshProfile } = useAuth();
   const insets = useSafeAreaInsets();
-  const { friends } = useFriendsList();
-  const { requests } = useFriendRequests();
+  const { friends, refresh: refreshFriends } = useFriendsList();
+  const { requests, refresh: refreshRequests, removeRequest } = useFriendRequests();
   const { recommendations, loading: recsLoading, sendRequest } = useFriendRecommendations(5);
   const { posts, loading: postsLoading, removePost, refresh: refreshPosts } = useUserPosts(user?.id || null);
   const { plans, loading: plansLoading } = useUpcomingPlans(user?.id);
@@ -58,10 +59,12 @@ export default function Profile() {
   const [savingBio, setSavingBio] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // Silently refresh posts when screen regains focus (e.g. after deleting from post detail)
+  // Silently refresh data when screen regains focus (e.g. after deleting post or accepting friend)
   useFocusEffect(
     useCallback(() => {
       refreshPosts();
+      refreshFriends();
+      refreshRequests();
     }, [])
   );
 
@@ -124,6 +127,8 @@ export default function Profile() {
       }
 
       showToast("Avatar updated!", "success");
+      // Fire-and-forget image moderation
+      requestImageModeration({ bucket: "avatars", path: `${user.id}/avatar.jpg` });
       // Refresh profile to show updated avatar
       await refreshProfile();
     } catch (error) {
@@ -556,6 +561,10 @@ export default function Profile() {
       <UserSearchSheet
         visible={showUserSearch}
         onClose={() => setShowUserSearch(false)}
+        onViewProfile={(userId) => {
+          setShowUserSearch(false);
+          router.push(`/user/${userId}` as any);
+        }}
       />
       <FriendsSheet
         visible={showFriends}
@@ -568,6 +577,11 @@ export default function Profile() {
         onViewProfile={(userId) => {
           setShowFriendRequests(false);
           router.push(`/user/${userId}` as any);
+        }}
+        onRequestHandled={(action) => {
+          // Optimistic: refresh the profile page's own hook instances
+          refreshRequests();
+          if (action === "accepted") refreshFriends();
         }}
       />
 

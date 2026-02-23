@@ -29,6 +29,7 @@ export default function CreateEvent() {
   const [locationName, setLocationName] = useState("");
   const [address, setAddress] = useState("");
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [visibility, setVisibility] = useState<"friends_only" | "public">("friends_only");
 
   // Handle address selection from autocomplete
   function handleAddressSelect(suggestion: AddressSuggestion) {
@@ -57,10 +58,20 @@ export default function CreateEvent() {
       address: address.trim() || undefined,
       lat: selectedCoords?.lat,
       lng: selectedCoords?.lng,
+      visibility,
     });
 
     if (result) {
-      router.back();
+      const status = (result as any).review_status;
+      if (status === "quarantined") {
+        Alert.alert(
+          "Pending Review",
+          "Your event was created but is pending review. It will be visible to others once approved.",
+          [{ text: "OK", onPress: () => router.back() }],
+        );
+      } else {
+        router.back();
+      }
     } else if (error) {
       Alert.alert("Error", error);
     }
@@ -333,21 +344,89 @@ export default function CreateEvent() {
           />
         </View>
 
-        {/* Visibility Info */}
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            backgroundColor: colors.surface,
-            borderRadius: 12,
-            padding: 16,
-          }}
-        >
-          <Ionicons name="people" size={20} color={Colors.primary} />
-          <Text style={{ fontSize: 14, color: colors.textSecondary, flex: 1 }}>
-            This event will be visible only to you and your friends
+        {/* Visibility Toggle */}
+        <View style={{ gap: 8 }}>
+          <Text
+            style={{
+              fontSize: 14,
+              fontWeight: "600",
+              color: colors.textSecondary,
+            }}
+          >
+            Visibility
           </Text>
+          <View
+            style={{
+              flexDirection: "row",
+              backgroundColor: colors.surface,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: colors.border,
+              overflow: "hidden",
+            }}
+          >
+            <Pressable
+              onPress={() => setVisibility("friends_only")}
+              style={{
+                flex: 1,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                paddingVertical: 12,
+                backgroundColor:
+                  visibility === "friends_only" ? Colors.primary : "transparent",
+              }}
+            >
+              <Ionicons
+                name="people"
+                size={18}
+                color={visibility === "friends_only" ? "#fff" : colors.textSecondary}
+              />
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontWeight: "600",
+                  color: visibility === "friends_only" ? "#fff" : colors.textSecondary,
+                }}
+              >
+                Friends Only
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setVisibility("public")}
+              style={{
+                flex: 1,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                paddingVertical: 12,
+                backgroundColor:
+                  visibility === "public" ? Colors.primary : "transparent",
+              }}
+            >
+              <Ionicons
+                name="globe-outline"
+                size={18}
+                color={visibility === "public" ? "#fff" : colors.textSecondary}
+              />
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontWeight: "600",
+                  color: visibility === "public" ? "#fff" : colors.textSecondary,
+                }}
+              >
+                Public
+              </Text>
+            </Pressable>
+          </View>
+          {visibility === "public" && (
+            <Text style={{ fontSize: 12, color: colors.textTertiary, paddingHorizontal: 4 }}>
+              Public events require approval before they appear to everyone.
+            </Text>
+          )}
         </View>
 
         {/* Bottom padding for scroll */}

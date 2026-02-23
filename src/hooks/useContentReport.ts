@@ -47,6 +47,36 @@ export function useContentReport() {
         }
 
         logSecurityEvent(SEC.CONTENT_REPORT, "low", { target_type: targetType });
+
+        // Bridge to moderation_flags for admin inbox (fire-and-forget)
+        const categoryMap: Record<string, string> = {
+          spam: "spam",
+          harassment: "harassment",
+          hate_speech: "hate_speech",
+          sexual_content: "sexual_content",
+          other: "other",
+        };
+
+        supabase
+          .from("moderation_flags")
+          .insert({
+            flagged_by: user.id,
+            target_type: targetType,
+            target_id: targetId,
+            source: "user_report",
+            category: categoryMap[reason] || "other",
+            severity: 50,
+            action: "quarantine",
+            reason: details || `User report: ${reason}`,
+            metadata: { report_reason: reason, details },
+            status: "open",
+          } as any)
+          .then(({ error: flagError }) => {
+            if (flagError && __DEV__) {
+              console.log("[useContentReport] Flag insert error:", flagError.message);
+            }
+          });
+
         return { success: true };
       } finally {
         setSubmitting(false);

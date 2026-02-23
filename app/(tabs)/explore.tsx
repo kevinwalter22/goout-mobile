@@ -48,6 +48,7 @@ const ExploreCard = React.memo(function ExploreCard({
   kindFilter,
   onPress,
   colors,
+  currentUserId,
 }: {
   item: ExploreItem;
   rsvpInfo: RSVPInfo;
@@ -56,6 +57,7 @@ const ExploreCard = React.memo(function ExploreCard({
   kindFilter: KindFilter;
   onPress: (id: string) => void;
   colors: any;
+  currentUserId?: string;
 }) {
   return (
     <>
@@ -99,6 +101,34 @@ const ExploreCard = React.memo(function ExploreCard({
                 >
                   <Text style={{ fontSize: 10, fontWeight: "700", color: "#fff" }}>
                     POST NOW
+                  </Text>
+                </View>
+              )}
+              {currentUserId && item.created_by_user_id === currentUserId && item.review_status === "quarantined" && (
+                <View
+                  style={{
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 4,
+                    backgroundColor: "#F59E0B",
+                  }}
+                >
+                  <Text style={{ fontSize: 10, fontWeight: "700", color: "#fff" }}>
+                    PENDING
+                  </Text>
+                </View>
+              )}
+              {currentUserId && item.created_by_user_id === currentUserId && item.review_status === "rejected" && (
+                <View
+                  style={{
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 4,
+                    backgroundColor: "#EF4444",
+                  }}
+                >
+                  <Text style={{ fontSize: 10, fontWeight: "700", color: "#fff" }}>
+                    REJECTED
                   </Text>
                 </View>
               )}
@@ -813,6 +843,7 @@ export default function Explore() {
                 kindFilter={filters.kindFilter}
                 onPress={handleItemPress}
                 colors={colors}
+                currentUserId={user?.id}
               />
             )}
           />

@@ -157,6 +157,8 @@ export type Post = {
   latitude: number | null;
   longitude: number | null;
   created_at: string;
+  moderation_status?: "approved" | "quarantined" | "blocked";
+  moderation_reason?: string | null;
 };
 
 export type PostReaction = {
@@ -173,6 +175,8 @@ export type PostComment = {
   user_id: string;
   content: string;
   created_at: string;
+  moderation_status?: "approved" | "quarantined" | "blocked";
+  moderation_reason?: string | null;
 };
 
 export type Friendship = {
@@ -183,7 +187,7 @@ export type Friendship = {
   created_at: string;
 };
 
-export type ReportReason = "spam" | "harassment" | "inappropriate_content" | "impersonation" | "other";
+export type ReportReason = "spam" | "harassment" | "hate_speech" | "sexual_content" | "other";
 export type ReportStatus = "pending" | "reviewed" | "dismissed" | "actioned";
 export type ReportTargetType = "post" | "comment" | "user";
 

@@ -389,6 +389,12 @@ export default function Settings() {
                 label="Review Queue"
                 onPress={() => router.push("/settings/admin-review" as any)}
               />
+              <View style={{ height: 1, backgroundColor: colors.border }} />
+              <SettingsItem
+                icon="flag-outline"
+                label="Moderation Inbox"
+                onPress={() => router.push("/settings/admin-moderation" as any)}
+              />
             </View>
           </View>
         )}

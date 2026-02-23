@@ -7,6 +7,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "./useAuth";
 import { queryExploreItems, QueryResult } from "../lib/exploreQuery";
 import {
   ExploreFilterState,
@@ -67,6 +68,8 @@ export interface UseExploreFiltersReturn {
 export function useExploreFilters(
   userLocation?: { lat: number; lng: number } | null
 ): UseExploreFiltersReturn {
+  const { user } = useAuth();
+
   // Filter state
   const [filters, setFilters] = useState<ExploreFilterState>(DEFAULT_FILTER_STATE);
 
@@ -105,7 +108,8 @@ export function useExploreFilters(
         const result: QueryResult<ExploreItem> = await queryExploreItems(
           supabase,
           filterState,
-          userLocation
+          userLocation,
+          user?.id
         );
 
         // Check if this is still the latest query

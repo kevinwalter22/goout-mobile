@@ -70,9 +70,15 @@ export function useFriendRequests() {
     setLoading(false);
   }
 
+  /** Optimistically remove a request from the local list */
+  function removeRequest(requestId: string) {
+    setRequests((prev) => prev.filter((r) => r.id !== requestId));
+  }
+
   return {
     requests,
     loading,
     refresh: loadRequests,
+    removeRequest,
   };
 }

@@ -27,6 +27,7 @@ import { useBlockUser } from "../../src/hooks/useBlockUser";
 import { useAuth } from "../../src/hooks/useAuth";
 import { deleteImage } from "../../src/utils/storage";
 import { supabase } from "../../src/lib/supabase";
+import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 
@@ -55,6 +56,35 @@ const FeedItem = React.memo(function FeedItem({
 }) {
   return (
     <View style={{ padding: 16, gap: 12 }}>
+      {/* Moderation banners */}
+      {item.moderation_status === "quarantined" && (
+        <View style={{
+          backgroundColor: Colors.warning + "18",
+          borderRadius: 8,
+          padding: 12,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+        }}>
+          <Ionicons name="time-outline" size={16} color={Colors.warning} />
+          <Text style={{ fontSize: 13, color: Colors.warning, flex: 1 }}>
+            Pending review — this post is only visible to you.
+          </Text>
+        </View>
+      )}
+      {item.moderation_status === "blocked" && (
+        <View style={{
+          backgroundColor: colors.separator,
+          borderRadius: 8,
+          padding: 16,
+          alignItems: "center",
+        }}>
+          <Text style={{ fontSize: 14, color: colors.textSecondary }}>
+            This content has been removed for violating community guidelines.
+          </Text>
+        </View>
+      )}
+
       {/* Header */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Pressable onPress={() => router.push(`/user/${item.user_id}` as any)}>
@@ -112,32 +142,34 @@ const FeedItem = React.memo(function FeedItem({
         </View>
       </View>
 
-      {/* Photo */}
-      {item.photo_path &&
-        (item.camera_mode === "dual" && item.front_photo_path ? (
-          <DualCameraPost
-            backPhotoPath={item.photo_path}
-            frontPhotoPath={item.front_photo_path}
-            style={{
-              width: "100%",
-              aspectRatio: 3 / 4,
-              borderRadius: 12,
-              overflow: "hidden",
-            }}
-          />
-        ) : (
-          <PostImage
-            photoPath={item.photo_path}
-            style={{
-              width: "100%",
-              aspectRatio: 3 / 4,
-              borderRadius: 12,
-            }}
-          />
-        ))}
-
-      {/* Caption */}
-      {item.caption && <Text style={{ fontSize: 14, color: colors.text }}>{item.caption}</Text>}
+      {/* Photo + Caption (hidden when blocked) */}
+      {item.moderation_status !== "blocked" && (
+        <>
+          {item.photo_path &&
+            (item.camera_mode === "dual" && item.front_photo_path ? (
+              <DualCameraPost
+                backPhotoPath={item.photo_path}
+                frontPhotoPath={item.front_photo_path}
+                style={{
+                  width: "100%",
+                  aspectRatio: 3 / 4,
+                  borderRadius: 12,
+                  overflow: "hidden",
+                }}
+              />
+            ) : (
+              <PostImage
+                photoPath={item.photo_path}
+                style={{
+                  width: "100%",
+                  aspectRatio: 3 / 4,
+                  borderRadius: 12,
+                }}
+              />
+            ))}
+          {item.caption && <Text style={{ fontSize: 14, color: colors.text }}>{item.caption}</Text>}
+        </>
+      )}
 
       {/* Engagement Row */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 16, marginTop: 8 }}>

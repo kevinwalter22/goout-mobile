@@ -17,9 +17,11 @@ type FriendRequestsSheetProps = {
   visible: boolean;
   onClose: () => void;
   onViewProfile?: (userId: string) => void;
+  /** Called after a request is accepted or declined so the parent can refresh its own state */
+  onRequestHandled?: (action: "accepted" | "declined") => void;
 };
 
-export function FriendRequestsSheet({ visible, onClose, onViewProfile }: FriendRequestsSheetProps) {
+export function FriendRequestsSheet({ visible, onClose, onViewProfile, onRequestHandled }: FriendRequestsSheetProps) {
   const { requests, loading, refresh } = useFriendRequests();
   const { colors } = useTheme();
 
@@ -61,7 +63,7 @@ export function FriendRequestsSheet({ visible, onClose, onViewProfile }: FriendR
           data={requests}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <FriendRequestItem request={item} onResponse={refresh} onViewProfile={onViewProfile} />
+            <FriendRequestItem request={item} onResponse={refresh} onViewProfile={onViewProfile} onRequestHandled={onRequestHandled} />
           )}
         />
       </View>
@@ -74,10 +76,12 @@ function FriendRequestItem({
   request,
   onResponse,
   onViewProfile,
+  onRequestHandled,
 }: {
   request: { id: string; user_id: string; username: string; avatar_url: string | null };
   onResponse: () => void;
   onViewProfile?: (userId: string) => void;
+  onRequestHandled?: (action: "accepted" | "declined") => void;
 }) {
   const { acceptFriendRequest, declineFriendRequest, loading } = useFriendship(request.user_id);
   const { colors } = useTheme();
@@ -85,11 +89,13 @@ function FriendRequestItem({
   async function handleAccept() {
     await acceptFriendRequest();
     onResponse();
+    onRequestHandled?.("accepted");
   }
 
   async function handleDecline() {
     await declineFriendRequest();
     onResponse();
+    onRequestHandled?.("declined");
   }
 
   return (

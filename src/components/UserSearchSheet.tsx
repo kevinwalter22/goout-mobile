@@ -27,9 +27,10 @@ type User = {
 type UserSearchSheetProps = {
   visible: boolean;
   onClose: () => void;
+  onViewProfile?: (userId: string) => void;
 };
 
-export function UserSearchSheet({ visible, onClose }: UserSearchSheetProps) {
+export function UserSearchSheet({ visible, onClose, onViewProfile }: UserSearchSheetProps) {
   const { user: currentUser } = useAuth();
   const { colors } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
@@ -106,7 +107,7 @@ export function UserSearchSheet({ visible, onClose }: UserSearchSheetProps) {
         <FlatList
           data={results}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <UserSearchResultItem user={item} />}
+          renderItem={({ item }) => <UserSearchResultItem user={item} onViewProfile={onViewProfile} />}
         />
       </KeyboardAvoidingView>
     </Modal>
@@ -114,7 +115,7 @@ export function UserSearchSheet({ visible, onClose }: UserSearchSheetProps) {
 }
 
 // Sub-component for each search result
-function UserSearchResultItem({ user }: { user: User }) {
+function UserSearchResultItem({ user, onViewProfile }: { user: User; onViewProfile?: (userId: string) => void }) {
   const { status, loading, sendFriendRequest, cancelFriendRequest, removeFriend } = useFriendship(user.id);
   const { colors } = useTheme();
 
@@ -139,8 +140,13 @@ function UserSearchResultItem({ user }: { user: User }) {
 
   return (
     <View style={[styles.resultItem, { borderBottomColor: colors.borderLight }]}>
-      <Avatar avatarUrl={user.avatar_url} size={40} />
-      <Text style={[styles.resultUsername, { color: colors.text }]}>{user.username}</Text>
+      <Pressable
+        style={styles.resultProfile}
+        onPress={() => onViewProfile?.(user.id)}
+      >
+        <Avatar avatarUrl={user.avatar_url} size={40} />
+        <Text style={[styles.resultUsername, { color: colors.text }]}>{user.username}</Text>
+      </Pressable>
       <Pressable
         onPress={handlePress}
         disabled={loading || status === "pending_received"}
@@ -216,6 +222,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#f0f0f0",
   },
+  resultProfile: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
   resultAvatar: {
     width: 40,
     height: 40,
@@ -223,9 +235,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#e0e0e0",
   },
   resultUsername: {
-    flex: 1,
     fontSize: 16,
     fontWeight: "600",
+    flexShrink: 1,
   },
   friendButton: {
     paddingHorizontal: 16,

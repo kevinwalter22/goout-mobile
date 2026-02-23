@@ -32,7 +32,7 @@ export default function UserProfile() {
   const { profile, loading, error, refresh: refreshProfile } = useProfile(id);
   const { posts, loading: postsLoading } = useUserPosts(id);
   const { plans, loading: plansLoading } = useUpcomingPlans(id);
-  const { count: friendCount } = useFriendCount(id);
+  const { count: friendCount, increment: incrementFriendCount } = useFriendCount(id);
   const {
     status,
     loading: friendshipLoading,
@@ -51,11 +51,12 @@ export default function UserProfile() {
   const isFriends = status === "accepted";
   const canSeeContent = isOwnProfile || isFriends;
 
-  // Auto-refresh profile when friendship is accepted (to get full profile data)
+  // Auto-refresh profile + friend count when friendship is accepted
   const prevStatusRef = useRef(status);
   useEffect(() => {
     if (prevStatusRef.current !== "accepted" && status === "accepted") {
       refreshProfile();
+      incrementFriendCount();
     }
     prevStatusRef.current = status;
   }, [status]);

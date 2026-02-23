@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import * as Location from "expo-location";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
+import { checkBeforeSubmit, moderateText } from "../lib/moderation/textModeration";
 import type { ExploreItem } from "../types/database";
 
 /**
@@ -33,6 +34,7 @@ export interface CreateEventInput {
   address?: string;
   lat?: number;
   lng?: number;
+  visibility?: "friends_only" | "public";
 }
 
 export function useCreateEvent() {
@@ -50,7 +52,55 @@ export function useCreateEvent() {
       setLoading(true);
       setError(null);
 
+      // Enforcement check
+      const { data: enforcement } = await supabase.rpc("check_enforcement");
+      if (enforcement && enforcement.length > 0) {
+        const e = enforcement[0];
+        if (e.is_suspended && (!e.suspended_until || new Date(e.suspended_until) > new Date())) {
+          const untilStr = e.suspended_until
+            ? ` until ${new Date(e.suspended_until).toLocaleDateString()}`
+            : "";
+          setError(`Your account is suspended${untilStr}. You cannot create events.`);
+          setLoading(false);
+          return null;
+        }
+      }
+
+      // Pre-submit moderation on title + description
+      const titleCheck = checkBeforeSubmit(input.title, "event");
+      if (!titleCheck.allowed) {
+        setError(titleCheck.reason);
+        setLoading(false);
+        return null;
+      }
+      if (input.description) {
+        const descCheck = checkBeforeSubmit(input.description, "event");
+        if (!descCheck.allowed) {
+          setError(descCheck.reason);
+          setLoading(false);
+          return null;
+        }
+      }
+
       try {
+        // Determine review_status based on visibility + text moderation
+        const visibility = input.visibility ?? "friends_only";
+        let reviewStatus: string = "auto_approved";
+
+        // Run moderateText to detect quarantine-level content
+        const combinedText = [input.title, input.description].filter(Boolean).join(" ");
+        const modResult = moderateText(combinedText, "event");
+
+        if (modResult.action === "quarantine" || visibility === "public") {
+          // Public events always need approval; quarantine-level text also needs review
+          reviewStatus = "quarantined";
+        }
+
+        // Shadowbanned users' events always quarantined
+        if (enforcement?.[0]?.is_shadowbanned) {
+          reviewStatus = "quarantined";
+        }
+
         // Try to get the "User Created" source_id (optional - may not exist yet)
         let sourceId: number | null = null;
         const { data: sourceData } = await supabase
@@ -96,7 +146,8 @@ export function useCreateEvent() {
             is_anchor: false,
             is_hidden_gem: false,
             created_by_user_id: user.id,
-            visibility: "friends_only",
+            visibility,
+            review_status: reviewStatus,
           } as any)
           .select()
           .single();

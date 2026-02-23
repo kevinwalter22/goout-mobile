@@ -22,6 +22,7 @@ const DEFAULT_FLAGS = new Map<string, boolean>([
   [RECOMMENDER_CONFIG.FLAGS.TYPE_AFFINITY_LEARNING, true],
   ["contacts_sync", true],
   ["ingestion", true],
+  ["image_moderation_enabled", true],
 ]);
 
 export function useFeatureFlags() {

@@ -21,6 +21,7 @@ import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
 import { AddressAutocomplete, type AddressSuggestion } from "../../src/components/AddressAutocomplete";
 import type { ExploreItem } from "../../src/types/database";
+import { checkBeforeSubmit, moderateText } from "../../src/lib/moderation/textModeration";
 
 /**
  * Geocode an address to get lat/lng coordinates
@@ -57,6 +58,7 @@ export default function EditEvent() {
   const [description, setDescription] = useState("");
   const [locationName, setLocationName] = useState("");
   const [address, setAddress] = useState("");
+  const [visibility, setVisibility] = useState<"friends_only" | "public">("friends_only");
 
   // Date/time state
   const [startDate, setStartDate] = useState(new Date());
@@ -103,6 +105,7 @@ export default function EditEvent() {
       setDescription(data.description || "");
       setLocationName(data.location_name || "");
       setAddress(data.address || "");
+      setVisibility(data.visibility === "public" ? "public" : "friends_only");
       if (data.starts_at) {
         setStartDate(new Date(data.starts_at));
       }
@@ -120,6 +123,20 @@ export default function EditEvent() {
 
   async function handleSave() {
     if (!canSave || !item) return;
+
+    // Pre-submit moderation on title + description
+    const titleCheck = checkBeforeSubmit(title.trim(), "event");
+    if (!titleCheck.allowed) {
+      Alert.alert("Can't save", titleCheck.reason);
+      return;
+    }
+    if (description.trim()) {
+      const descCheck = checkBeforeSubmit(description.trim(), "event");
+      if (!descCheck.allowed) {
+        Alert.alert("Can't save", descCheck.reason);
+        return;
+      }
+    }
 
     setSaving(true);
     setError(null);
@@ -141,18 +158,32 @@ export default function EditEvent() {
         }
       }
 
+      // Determine review_status changes
+      const updatePayload: Record<string, unknown> = {
+        title: title.trim(),
+        description: description.trim() || null,
+        starts_at: startDate.toISOString(),
+        ends_at: endDate?.toISOString() || null,
+        location_name: locationName.trim() || null,
+        address: trimmedAddress || null,
+        lat,
+        lng,
+        visibility,
+      };
+
+      // Re-quarantine if switching to public or if text moderation flags content
+      const wasPublic = item.visibility === "public";
+      const nowPublic = visibility === "public";
+      const combinedText = [title.trim(), description.trim()].filter(Boolean).join(" ");
+      const modResult = moderateText(combinedText, "event");
+
+      if ((nowPublic && !wasPublic) || modResult.action === "quarantine") {
+        updatePayload.review_status = "quarantined";
+      }
+
       const { error: updateError } = await supabase
         .from("explore_items")
-        .update({
-          title: title.trim(),
-          description: description.trim() || null,
-          starts_at: startDate.toISOString(),
-          ends_at: endDate?.toISOString() || null,
-          location_name: locationName.trim() || null,
-          address: trimmedAddress || null,
-          lat,
-          lng,
-        })
+        .update(updatePayload)
         .eq("id", item.id)
         .eq("created_by_user_id", user?.id ?? "");
 
@@ -160,7 +191,15 @@ export default function EditEvent() {
         throw new Error(updateError.message);
       }
 
-      router.back();
+      if (updatePayload.review_status === "quarantined") {
+        Alert.alert(
+          "Pending Review",
+          "Your event has been updated and is pending review.",
+          [{ text: "OK", onPress: () => router.back() }],
+        );
+      } else {
+        router.back();
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to save event";
       Alert.alert("Error", message);
@@ -482,21 +521,89 @@ export default function EditEvent() {
           />
         </View>
 
-        {/* Visibility Info */}
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            backgroundColor: colors.surface,
-            borderRadius: 12,
-            padding: 16,
-          }}
-        >
-          <Ionicons name="people" size={20} color={Colors.primary} />
-          <Text style={{ fontSize: 14, color: colors.textSecondary, flex: 1 }}>
-            This event is visible only to you and your friends
+        {/* Visibility Toggle */}
+        <View style={{ gap: 8 }}>
+          <Text
+            style={{
+              fontSize: 14,
+              fontWeight: "600",
+              color: colors.textSecondary,
+            }}
+          >
+            Visibility
           </Text>
+          <View
+            style={{
+              flexDirection: "row",
+              backgroundColor: colors.surface,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: colors.border,
+              overflow: "hidden",
+            }}
+          >
+            <Pressable
+              onPress={() => setVisibility("friends_only")}
+              style={{
+                flex: 1,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                paddingVertical: 12,
+                backgroundColor:
+                  visibility === "friends_only" ? Colors.primary : "transparent",
+              }}
+            >
+              <Ionicons
+                name="people"
+                size={18}
+                color={visibility === "friends_only" ? "#fff" : colors.textSecondary}
+              />
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontWeight: "600",
+                  color: visibility === "friends_only" ? "#fff" : colors.textSecondary,
+                }}
+              >
+                Friends Only
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setVisibility("public")}
+              style={{
+                flex: 1,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                paddingVertical: 12,
+                backgroundColor:
+                  visibility === "public" ? Colors.primary : "transparent",
+              }}
+            >
+              <Ionicons
+                name="globe-outline"
+                size={18}
+                color={visibility === "public" ? "#fff" : colors.textSecondary}
+              />
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontWeight: "600",
+                  color: visibility === "public" ? "#fff" : colors.textSecondary,
+                }}
+              >
+                Public
+              </Text>
+            </Pressable>
+          </View>
+          {visibility === "public" && (
+            <Text style={{ fontSize: 12, color: colors.textTertiary, paddingHorizontal: 4 }}>
+              Public events require approval before they appear to everyone.
+            </Text>
+          )}
         </View>
 
         {/* Bottom padding for scroll */}

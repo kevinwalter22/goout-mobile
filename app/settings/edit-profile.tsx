@@ -21,6 +21,8 @@ import { Colors } from "../../src/config/theme";
 import { captureError } from "../../src/lib/logger";
 import { friendlyMessage } from "../../src/lib/errorMessages";
 import { Avatar } from "../../src/components/Avatar";
+import { checkBeforeSubmit } from "../../src/lib/moderation/textModeration";
+import { requestImageModeration } from "../../src/utils/imageModeration";
 
 export default function EditProfile() {
   const insets = useSafeAreaInsets();
@@ -96,6 +98,9 @@ export default function EditProfile() {
         .update({ avatar_url: newUrl })
         .eq("id", user.id);
 
+      // Fire-and-forget image moderation
+      requestImageModeration({ bucket: "avatars", path: fileName });
+
     } catch (err) {
       captureError(err, { action: "uploadAvatar" });
       Alert.alert("Error", "Failed to upload image");
@@ -106,6 +111,22 @@ export default function EditProfile() {
 
   async function handleSave() {
     if (!canSave || !user) return;
+
+    // Check username
+    const usernameCheck = checkBeforeSubmit(username.trim(), "username");
+    if (!usernameCheck.allowed) {
+      Alert.alert("Invalid username", usernameCheck.reason);
+      return;
+    }
+
+    // Check bio
+    if (bio.trim()) {
+      const bioCheck = checkBeforeSubmit(bio.trim(), "bio");
+      if (!bioCheck.allowed) {
+        Alert.alert("Invalid bio", bioCheck.reason);
+        return;
+      }
+    }
 
     setSaving(true);
 

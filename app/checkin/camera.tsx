@@ -25,6 +25,9 @@ import { useTheme } from "../../src/contexts/ThemeContext";
 import { heavyHaptic, successHaptic, errorHaptic } from "../../src/utils/haptics";
 import { logInteraction } from "../../src/lib/interactionLogger";
 import { captureError } from "../../src/lib/logger";
+import { checkBeforeSubmit } from "../../src/lib/moderation/textModeration";
+import { requestImageModeration } from "../../src/utils/imageModeration";
+import { useEnforcement } from "../../src/hooks/useEnforcement";
 
 export default function CameraCapture() {
   const { eventId, exploreItemId, mode, itemKind } = useLocalSearchParams<{
@@ -36,6 +39,7 @@ export default function CameraCapture() {
   const { user, refreshProfile } = useAuth();
   const { showToast } = useToast();
   const { colors } = useTheme();
+  const { isSuspended, suspendedUntil } = useEnforcement();
 
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<CameraType>(
@@ -123,6 +127,35 @@ export default function CameraCapture() {
   async function handlePost() {
     if (!user || photos.length === 0) return;
 
+    // Enforcement check
+    if (isSuspended) {
+      const untilStr = suspendedUntil
+        ? ` until ${new Date(suspendedUntil).toLocaleDateString()}`
+        : "";
+      Alert.alert("Account Suspended", `Your account is suspended${untilStr}. You cannot create posts.`);
+      return;
+    }
+
+    // Rate limit check
+    try {
+      const { error: rlError } = await supabase.rpc("check_post_rate_limit");
+      if (rlError) {
+        Alert.alert("Slow down", "You're posting too quickly. Please try again later.");
+        return;
+      }
+    } catch {
+      // Don't block on rate limit failure
+    }
+
+    // Pre-submit moderation check on caption
+    if (caption.trim()) {
+      const modCheck = checkBeforeSubmit(caption.trim(), "caption");
+      if (!modCheck.allowed) {
+        Alert.alert("Can't post", modCheck.reason);
+        return;
+      }
+    }
+
     setUploading(true);
 
     let uploadedBackPath: string | null = null;
@@ -196,6 +229,12 @@ export default function CameraCapture() {
         explore_item_id: postData.explore_item_id,
         event_id: postData.event_id,
       });
+
+      // Fire-and-forget image moderation
+      requestImageModeration({ bucket: "posts", path: backPath });
+      if (frontPath) {
+        requestImageModeration({ bucket: "posts", path: frontPath });
+      }
 
       // Step 4: Update XP and streak progression
       try {
