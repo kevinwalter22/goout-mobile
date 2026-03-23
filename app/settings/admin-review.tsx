@@ -8,10 +8,11 @@ import {
   Text,
   View,
 } from "react-native";
-import { Stack } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useReviewQueue, type QuarantinedItem } from "../../src/hooks/useReviewQueue";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 
@@ -160,8 +161,8 @@ function QueueCard({
 }
 
 export default function AdminReview() {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const { items, loading, error, fetchQueue, approveItem, rejectItem } =
     useReviewQueue();
 
@@ -186,12 +187,7 @@ export default function AdminReview() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <Stack.Screen
-        options={{
-          title: "Review Queue",
-          headerShown: true,
-        }}
-      />
+      <ScreenHeader title="Review Queue" />
 
       {loading && items.length === 0 ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>

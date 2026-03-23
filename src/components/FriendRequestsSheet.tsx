@@ -38,7 +38,7 @@ export function FriendRequestsSheet({ visible, onClose, onViewProfile, onRequest
           <Text style={[styles.title, { color: colors.text }]}>
             Friend Requests ({requests.length})
           </Text>
-          <Pressable onPress={onClose} style={styles.closeButton}>
+          <Pressable onPress={onClose} style={styles.closeButton} accessibilityLabel="Close" accessibilityRole="button">
             <Text style={[styles.closeText, { color: colors.textSecondary }]}>✕</Text>
           </Pressable>
         </View>
@@ -103,6 +103,8 @@ function FriendRequestItem({
       <Pressable
         style={styles.requestProfile}
         onPress={() => onViewProfile?.(request.user_id)}
+        accessibilityLabel={`View ${request.username}'s profile`}
+        accessibilityRole="button"
       >
         <Avatar avatarUrl={request.avatar_url} size={50} />
         <View style={styles.requestInfo}>
@@ -114,6 +116,9 @@ function FriendRequestItem({
         <Pressable
           onPress={handleAccept}
           disabled={loading}
+          accessibilityLabel={`Accept ${request.username}'s friend request`}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: loading }}
           style={[styles.acceptButton, { backgroundColor: Colors.primary }]}
         >
           <Text style={styles.acceptButtonText}>
@@ -123,6 +128,9 @@ function FriendRequestItem({
         <Pressable
           onPress={handleDecline}
           disabled={loading}
+          accessibilityLabel={`Decline ${request.username}'s friend request`}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: loading }}
           style={[styles.declineButton, { backgroundColor: colors.surfaceVariant }]}
         >
           <Text style={[styles.declineButtonText, { color: colors.textSecondary }]}>

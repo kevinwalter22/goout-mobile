@@ -35,6 +35,7 @@ export interface CreateEventInput {
   lat?: number;
   lng?: number;
   visibility?: "friends_only" | "public";
+  recurrence?: "weekly" | "monthly";
 }
 
 export function useCreateEvent() {
@@ -148,6 +149,7 @@ export function useCreateEvent() {
             created_by_user_id: user.id,
             visibility,
             review_status: reviewStatus,
+            recurrence: input.recurrence || null,
           } as any)
           .select()
           .single();

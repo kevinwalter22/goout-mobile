@@ -32,11 +32,13 @@ export async function requireUser(
 }
 
 /**
- * Validate that the caller is using the service-role key.
+ * Validate that the caller is using a service-role key.
  * Use for internal/ops functions called by fetch-coordinator, cron, or admin scripts.
  *
- * When fetch-coordinator invokes sub-functions via supabase.functions.invoke(),
- * the JS client automatically passes Authorization: Bearer <service-role-key>.
+ * Checks:
+ * 1. Direct match against SUPABASE_SERVICE_ROLE_KEY env var
+ * 2. Falls back to JWT payload inspection (role === "service_role")
+ *    to handle key rotation where env var and API key diverge.
  */
 export function requireServiceRole(
   req: Request
@@ -44,8 +46,23 @@ export function requireServiceRole(
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) return { ok: false, error: "Missing authorization" };
 
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const token = authHeader.replace("Bearer ", "");
-  if (token !== serviceKey) return { ok: false, error: "Forbidden" };
-  return { ok: true };
+
+  // Fast path: direct comparison
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (serviceKey && token === serviceKey) return { ok: true };
+
+  // Fallback: decode JWT payload and check role claim
+  try {
+    const parts = token.split(".");
+    if (parts.length === 3) {
+      // Base64url decode the payload
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+      if (payload.role === "service_role") return { ok: true };
+    }
+  } catch {
+    // Invalid JWT format — fall through to Forbidden
+  }
+
+  return { ok: false, error: "Forbidden" };
 }

@@ -12,24 +12,28 @@ import {
 } from "react-native";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { supabase } from "../../src/lib/supabase";
 import { useAuth } from "../../src/hooks/useAuth";
 import { useAdmin } from "../../src/hooks/useAdmin";
 import { useExploreItemRSVP } from "../../src/hooks/useExploreItemRSVP";
 import { usePlaceDetails } from "../../src/hooks/usePlaceDetails";
-import { verifyCheckInLocation } from "../../src/utils/location";
+import { verifyCheckInLocation, getLocationPermissionStatus } from "../../src/utils/location";
 import { openDirections, hasLocationData } from "../../src/utils/maps";
 import { shareItem } from "../../src/utils/share";
 import { logInteraction } from "../../src/lib/interactionLogger";
 import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
+import { useItemFeedback, type FeedbackType } from "../../src/hooks/useItemFeedback";
 import { FriendsGoingSheet } from "../../src/components/FriendsGoingSheet";
 import { AdminEditSheet } from "../../src/components/AdminEditSheet";
+import { ReportSheet } from "../../src/components/ReportSheet";
 import { POSTABLE_NOW_CONFIG } from "../../src/config/exploreFilters";
 import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import type { ExploreItem } from "../../src/types/database";
 import { captureError } from "../../src/lib/logger";
 import { friendlyMessage } from "../../src/lib/errorMessages";
+import { getFallbackImage } from "../../src/lib/categoryFallbackImages";
 
 export default function EventDetail() {
   const { id, title: fallbackTitle } = useLocalSearchParams<{ id: string; title?: string }>();
@@ -43,6 +47,7 @@ export default function EventDetail() {
   const [friendsGoingCount, setFriendsGoingCount] = useState(0);
   const [showFriendsGoing, setShowFriendsGoing] = useState(false);
   const [showAdminEdit, setShowAdminEdit] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   // Check if current user is the creator of this event
@@ -56,6 +61,12 @@ export default function EventDetail() {
   } = useExploreItemRSVP(id || "", { tags: item?.tags ?? undefined, itemKind: item?.kind ?? undefined });
 
   const { details: placeDetails, loading: detailsLoading } = usePlaceDetails(id);
+
+  const {
+    currentFeedback,
+    submitting: feedbackSubmitting,
+    submitFeedback,
+  } = useItemFeedback(id || "");
 
   // Determine if the event has ended (activities never "end")
   const isEnded = useMemo(() => {
@@ -113,6 +124,23 @@ export default function EventDetail() {
     if (Platform.OS === "web") {
       Alert.alert("Not Available", "Check-in is only available on mobile");
       return;
+    }
+
+    // Show in-app explanation before the OS location prompt fires on first use.
+    // Users who understand the context are far more likely to tap "Allow".
+    const locationStatus = await getLocationPermissionStatus();
+    if (locationStatus === "undetermined") {
+      const proceed = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          "Location Needed for Check-In",
+          "Euda uses your location to verify you\u2019re at the venue. Your location is only used during check-in and is never stored.",
+          [
+            { text: "Not Now", style: "cancel", onPress: () => resolve(false) },
+            { text: "Continue", onPress: () => resolve(true) },
+          ],
+        );
+      });
+      if (!proceed) return;
     }
 
     setCheckingIn(true);
@@ -217,13 +245,20 @@ export default function EventDetail() {
   function formatDateTime() {
     if (!item) return "";
     if (item.starts_at) {
-      return new Date(item.starts_at).toLocaleString("en-US", {
+      const dateStr = new Date(item.starts_at).toLocaleString("en-US", {
         weekday: "long",
         month: "long",
         day: "numeric",
         hour: "numeric",
         minute: "2-digit",
       });
+      if (item.recurrence === "weekly") {
+        return `${dateStr}\nRepeats every ${new Date(item.starts_at).toLocaleDateString("en-US", { weekday: "long" })}`;
+      }
+      if (item.recurrence === "monthly") {
+        return `${dateStr}\nRepeats monthly`;
+      }
+      return dateStr;
     }
     if (item.time_text) {
       return item.time_text;
@@ -234,18 +269,11 @@ export default function EventDetail() {
     return "Ongoing";
   }
 
-  const headerOptions = {
-    headerShown: true,
-    headerBackTitle: "Back",
-    headerStyle: { backgroundColor: colors.background },
-    headerTintColor: colors.text,
-    headerTitleStyle: { color: colors.text },
-  };
-
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <Stack.Screen options={{ title: "Event", ...headerOptions }} />
+        <Stack.Screen options={{ headerShown: false }} />
+        <ScreenHeader />
         <View
           style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
         >
@@ -258,7 +286,8 @@ export default function EventDetail() {
   if (error || !item) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <Stack.Screen options={{ title: fallbackTitle || "Event", ...headerOptions }} />
+        <Stack.Screen options={{ headerShown: false }} />
+        <ScreenHeader />
         <View style={{ flex: 1, padding: 24, justifyContent: "center", alignItems: "center", gap: 12 }}>
           <Ionicons name="calendar-outline" size={48} color={colors.textTertiary} />
           <Text style={{ fontSize: 18, fontWeight: "600", textAlign: "center", color: colors.text }}>
@@ -274,6 +303,8 @@ export default function EventDetail() {
           </Text>
           <Pressable
             onPress={() => router.back()}
+            accessibilityLabel="Go back"
+            accessibilityRole="button"
             style={{
               marginTop: 12,
               paddingHorizontal: 24,
@@ -315,10 +346,13 @@ export default function EventDetail() {
   };
 
   // Handle delete (for user-created events)
+  const isRecurring = item?.recurrence && !["none", ""].includes(item.recurrence);
   const handleDelete = () => {
     Alert.alert(
-      "Delete Event",
-      "Are you sure you want to delete this event? This action cannot be undone.",
+      isRecurring ? "Delete Recurring Event" : "Delete Event",
+      isRecurring
+        ? "Are you sure? This will stop all future occurrences of this event."
+        : "Are you sure you want to delete this event? This action cannot be undone.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -354,25 +388,23 @@ export default function EventDetail() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <Stack.Screen
-        options={{
-          title: item.title,
-          ...headerOptions,
-          headerRight: () => (
-            <Pressable
-              onPress={handleShare}
-              style={{
-                width: 36,
-                height: 36,
-                justifyContent: "center",
-                alignItems: "center",
-              }}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Ionicons name="share-outline" size={22} color={Colors.primary} />
-            </Pressable>
-          ),
-        }}
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenHeader
+        right={
+          <Pressable
+            onPress={handleShare}
+            accessibilityLabel="Share"
+            accessibilityRole="button"
+            style={{
+              padding: 8,
+              borderRadius: 20,
+              backgroundColor: Colors.primary + "18",
+            }}
+            hitSlop={8}
+          >
+            <Ionicons name="share-outline" size={22} color={Colors.primary} />
+          </Pressable>
+        }
       />
       <ScrollView style={{ flex: 1 }}>
         {/* Event Ended Banner */}
@@ -396,21 +428,19 @@ export default function EventDetail() {
           </View>
         )}
 
-        {/* Header Image — only when a real image exists */}
-        {item.image_url ? (
-          <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
-            <Image
-              source={{ uri: item.image_url }}
-              style={{
-                width: "100%",
-                height: 200,
-                borderRadius: 16,
-                backgroundColor: colors.surfaceVariant,
-              }}
-              resizeMode="cover"
-            />
-          </View>
-        ) : null}
+        {/* Header Image — cached image or category fallback */}
+        <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
+          <Image
+            source={{ uri: item.image_url || getFallbackImage(item.category) }}
+            style={{
+              width: "100%",
+              height: 200,
+              borderRadius: 16,
+              backgroundColor: colors.surfaceVariant,
+            }}
+            resizeMode="cover"
+          />
+        </View>
 
         <View style={{ padding: 24, gap: 24 }}>
           <View style={{ gap: 8 }}>
@@ -446,9 +476,14 @@ export default function EventDetail() {
             }}
           >
             <View style={{ gap: 4 }}>
-              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
-                WHEN
-              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
+                  WHEN
+                </Text>
+                {item.recurrence && !["none", ""].includes(item.recurrence) && (
+                  <Ionicons name="repeat" size={14} color={Colors.primary} />
+                )}
+              </View>
               <Text style={{ fontSize: 16, color: colors.text }}>
                 {formatDateTime()}
               </Text>
@@ -479,6 +514,8 @@ export default function EventDetail() {
                         label: item.location_name || item.title,
                       })
                     }
+                    accessibilityLabel="Get directions"
+                    accessibilityRole="button"
                     style={{
                       flexDirection: "row",
                       alignItems: "center",
@@ -511,23 +548,25 @@ export default function EventDetail() {
               </View>
             )}
 
-            {item.kind === "event" && (
-              <View style={{ gap: 4 }}>
-                <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
-                  GOING
-                </Text>
-                <Text style={{ fontSize: 16, color: colors.text }}>
-                  {rsvpLoading ? "..." : `${goingCount} ${goingCount === 1 ? "person" : "people"}`}
-                </Text>
-                {friendsGoingCount > 0 && (
-                  <Pressable onPress={() => setShowFriendsGoing(true)}>
-                    <Text style={{ fontSize: 14, fontWeight: "600", color: Colors.primary, marginTop: 4 }}>
-                      {friendsGoingCount} {friendsGoingCount === 1 ? "friend" : "friends"} going →
-                    </Text>
-                  </Pressable>
-                )}
-              </View>
-            )}
+            <View style={{ gap: 4 }}>
+              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
+                {item.kind === "activity" ? "GOING TODAY" : "GOING"}
+              </Text>
+              <Text style={{ fontSize: 16, color: colors.text }}>
+                {rsvpLoading ? "..." : `${goingCount} ${goingCount === 1 ? "person" : "people"}`}
+              </Text>
+              {friendsGoingCount > 0 && (
+                <Pressable
+                  onPress={() => setShowFriendsGoing(true)}
+                  accessibilityLabel={`${friendsGoingCount} ${friendsGoingCount === 1 ? "friend" : "friends"} going — tap to view`}
+                  accessibilityRole="button"
+                >
+                  <Text style={{ fontSize: 14, fontWeight: "600", color: Colors.primary, marginTop: 4 }}>
+                    {friendsGoingCount} {friendsGoingCount === 1 ? "friend" : "friends"} going →
+                  </Text>
+                </Pressable>
+              )}
+            </View>
           </View>
 
           {/* Place Details (lazy-loaded for Google Places items) */}
@@ -561,7 +600,11 @@ export default function EventDetail() {
                   <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
                     PHONE
                   </Text>
-                  <Pressable onPress={() => Linking.openURL(`tel:${placeDetails.phone_number!.replace(/[^+\d]/g, "")}`)}>
+                  <Pressable
+                    onPress={() => Linking.openURL(`tel:${placeDetails.phone_number!.replace(/[^+\d]/g, "")}`)}
+                    accessibilityLabel={`Call ${placeDetails.phone_number}`}
+                    accessibilityRole="link"
+                  >
                     <Text style={{ fontSize: 16, color: Colors.primary }}>
                       {placeDetails.phone_number}
                     </Text>
@@ -574,7 +617,11 @@ export default function EventDetail() {
                   <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
                     WEBSITE
                   </Text>
-                  <Pressable onPress={() => Linking.openURL(placeDetails.website_uri!)}>
+                  <Pressable
+                    onPress={() => Linking.openURL(placeDetails.website_uri!)}
+                    accessibilityLabel="Open website"
+                    accessibilityRole="link"
+                  >
                     <Text style={{ fontSize: 16, color: Colors.primary }} numberOfLines={1}>
                       {placeDetails.website_uri.replace(/^https?:\/\/(www\.)?/, "")}
                     </Text>
@@ -601,7 +648,11 @@ export default function EventDetail() {
               )}
 
               {placeDetails.google_maps_uri && /^https?:\/\//i.test(placeDetails.google_maps_uri) && (
-                <Pressable onPress={() => Linking.openURL(placeDetails.google_maps_uri!)}>
+                <Pressable
+                  onPress={() => Linking.openURL(placeDetails.google_maps_uri!)}
+                  accessibilityLabel="Open in Google Maps"
+                  accessibilityRole="link"
+                >
                   <Text style={{ fontSize: 14, fontWeight: "600", color: Colors.primary }}>
                     Open in Google Maps
                   </Text>
@@ -618,39 +669,53 @@ export default function EventDetail() {
 
           {!isEnded && (
             <View style={{ gap: 12 }}>
-              {/* RSVP button — events only */}
-              {item.kind === "event" && (
-                <Pressable
-                  onPress={toggleRSVP}
-                  disabled={rsvpLoading}
-                  style={{
-                    padding: 16,
-                    borderRadius: 12,
-                    backgroundColor: isGoing ? colors.background : colors.text,
-                    borderWidth: isGoing ? 2 : 0,
-                    borderColor: colors.text,
-                    alignItems: "center",
-                  }}
-                >
-                  {rsvpLoading ? (
-                    <ActivityIndicator color={isGoing ? colors.text : colors.background} />
-                  ) : (
-                    <Text
-                      style={{
-                        color: isGoing ? colors.text : colors.background,
-                        fontSize: 16,
-                        fontWeight: "600",
-                      }}
-                    >
-                      {isGoing ? "✓ I'm Going" : "I'm Going"}
-                    </Text>
-                  )}
-                </Pressable>
-              )}
+              {/* RSVP button — events and activities */}
+              <Pressable
+                onPress={toggleRSVP}
+                disabled={rsvpLoading}
+                accessibilityLabel={
+                  isGoing
+                    ? item.kind === "activity" ? "Going today — tap to cancel" : "I'm going — tap to cancel"
+                    : item.kind === "activity" ? "I'm going today" : "I'm going"
+                }
+                accessibilityRole="button"
+                accessibilityState={{ disabled: rsvpLoading }}
+                style={{
+                  padding: 16,
+                  borderRadius: 12,
+                  backgroundColor: isGoing ? colors.background : colors.text,
+                  borderWidth: isGoing ? 2 : 0,
+                  borderColor: colors.text,
+                  alignItems: "center",
+                }}
+              >
+                {rsvpLoading ? (
+                  <ActivityIndicator color={isGoing ? colors.text : colors.background} />
+                ) : (
+                  <Text
+                    style={{
+                      color: isGoing ? colors.text : colors.background,
+                      fontSize: 16,
+                      fontWeight: "600",
+                    }}
+                  >
+                    {isGoing
+                      ? item.kind === "activity"
+                        ? "✓ Going Today"
+                        : "✓ I'm Going"
+                      : item.kind === "activity"
+                        ? "I'm Going Today"
+                        : "I'm Going"}
+                  </Text>
+                )}
+              </Pressable>
 
               <Pressable
                 onPress={handleCheckIn}
                 disabled={checkingIn}
+                accessibilityLabel={item.kind === "activity" ? "Post" : "Check in and post"}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: checkingIn }}
                 style={{
                   padding: 16,
                   borderRadius: 12,
@@ -675,6 +740,69 @@ export default function EventDetail() {
             </View>
           )}
 
+          {/* Community feedback buttons */}
+          {user && (
+            <View
+              style={{
+                paddingTop: 16,
+                borderTopWidth: 1,
+                borderTopColor: colors.border,
+                gap: 10,
+              }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
+                HOW WAS THIS?
+              </Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {(
+                  [
+                    { type: "upvote" as FeedbackType, label: "Useful", icon: "thumbs-up-outline" as const, color: Colors.success },
+                    { type: "confirm" as FeedbackType, label: "Confirmed", icon: "checkmark-circle-outline" as const, color: Colors.primary },
+                    { type: "downvote" as FeedbackType, label: "Irrelevant", icon: "thumbs-down-outline" as const, color: Colors.warning },
+                    { type: "report_closed" as FeedbackType, label: "Closed", icon: "close-circle-outline" as const, color: Colors.error },
+                  ] as const
+                ).map((btn) => {
+                  const isActive = currentFeedback === btn.type;
+                  return (
+                    <Pressable
+                      key={btn.type}
+                      onPress={() => submitFeedback(btn.type)}
+                      disabled={feedbackSubmitting}
+                      accessibilityLabel={btn.label}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isActive, disabled: feedbackSubmitting }}
+                      style={{
+                        flex: 1,
+                        alignItems: "center",
+                        gap: 4,
+                        paddingVertical: 10,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: isActive ? btn.color : colors.border,
+                        backgroundColor: isActive ? btn.color + "15" : "transparent",
+                      }}
+                    >
+                      <Ionicons
+                        name={btn.icon}
+                        size={18}
+                        color={isActive ? btn.color : colors.textSecondary}
+                      />
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          fontWeight: isActive ? "600" : "400",
+                          color: isActive ? btn.color : colors.textSecondary,
+                        }}
+                      >
+                        {btn.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
           {/* Edit/Delete for user-created events */}
           {isUserCreated && (
             <View
@@ -691,6 +819,8 @@ export default function EventDetail() {
               <View style={{ flexDirection: "row", gap: 12 }}>
                 <Pressable
                   onPress={handleEdit}
+                  accessibilityLabel="Edit event"
+                  accessibilityRole="button"
                   style={{
                     flex: 1,
                     flexDirection: "row",
@@ -710,6 +840,9 @@ export default function EventDetail() {
                 <Pressable
                   onPress={handleDelete}
                   disabled={deleting}
+                  accessibilityLabel="Delete event"
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: deleting }}
                   style={{
                     flex: 1,
                     flexDirection: "row",
@@ -736,6 +869,20 @@ export default function EventDetail() {
             </View>
           )}
 
+          {/* Report listing — shown to logged-in users who didn't create this item */}
+          {user && !isUserCreated && (
+            <Pressable
+              onPress={() => setShowReport(true)}
+              accessibilityLabel="Report this listing"
+              accessibilityRole="button"
+              style={{ alignItems: "center", paddingVertical: 8 }}
+            >
+              <Text style={{ fontSize: 13, color: colors.textTertiary }}>
+                Report this listing
+              </Text>
+            </Pressable>
+          )}
+
           {/* Admin Edit - only visible to admins */}
           {isAdmin && !isUserCreated && (
             <View
@@ -754,6 +901,8 @@ export default function EventDetail() {
               </View>
               <Pressable
                 onPress={() => setShowAdminEdit(true)}
+                accessibilityLabel="Edit item"
+                accessibilityRole="button"
                 style={{
                   flexDirection: "row",
                   alignItems: "center",
@@ -773,6 +922,16 @@ export default function EventDetail() {
           )}
         </View>
       </ScrollView>
+
+      {/* Report Modal */}
+      {item && (
+        <ReportSheet
+          visible={showReport}
+          onClose={() => setShowReport(false)}
+          targetType="explore_item"
+          targetId={item.id}
+        />
+      )}
 
       {/* Friends Going Modal */}
       <FriendsGoingSheet

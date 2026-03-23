@@ -51,6 +51,9 @@ export function FilterChips({
         {/* Filter button (opens advanced filters) */}
         <Pressable
           onPress={handleFilterPress}
+          accessibilityLabel={hasAdvancedFilters ? `Filters, ${countActiveAdvancedFilters(filters)} active` : "Filters"}
+          accessibilityRole="button"
+          accessibilityState={{ selected: hasAdvancedFilters }}
           style={[
             styles.filterButton,
             hasAdvancedFilters && styles.filterButtonActive,
@@ -78,6 +81,9 @@ export function FilterChips({
             <Pressable
               key={filter.id}
               onPress={() => handleChipPress(filter.id)}
+              accessibilityLabel={filter.label}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isActive }}
               style={[styles.chip, isActive && styles.chipActive]}
             >
               <Text style={[styles.chipText, isActive && styles.chipTextActive]}>

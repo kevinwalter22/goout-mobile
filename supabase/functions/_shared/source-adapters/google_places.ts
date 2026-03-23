@@ -64,17 +64,10 @@ const TYPE_CATEGORY_MAP: Record<string, string> = {
   historical_landmark: "arts",
   visitor_center: "community",
   community_center: "community",
-  church: "community",
 
   // Shopping
   shopping_mall: "community",
   book_store: "community",
-  clothing_store: "community",
-  florist: "community",
-  pet_store: "community",
-
-  // Accommodation
-  lodging: "community",
 
   // Attractions
   tourist_attraction: "community",
@@ -125,15 +118,9 @@ const TYPE_TAGS_MAP: Record<string, string[]> = {
   historical_landmark: ["cultural", "educational", "scenic"],
   visitor_center: ["educational", "family_friendly"],
   community_center: ["community", "family_friendly"],
-  church: ["cultural", "community"],
 
   shopping_mall: ["shopping", "indoors"],
   book_store: ["shopping", "indoors"],
-  clothing_store: ["shopping", "indoors"],
-  florist: ["shopping"],
-  pet_store: ["shopping", "family_friendly"],
-
-  lodging: ["travel"],
 
   tourist_attraction: ["scenic", "local_favorite"],
   university: ["educational"],

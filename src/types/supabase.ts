@@ -669,6 +669,38 @@ export type Database = {
       explore_item_rsvps: {
         Row: {
           created_at: string
+          expires_at: string | null
+          explore_item_id: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string | null
+          explore_item_id: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string | null
+          explore_item_id?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "explore_item_rsvps_explore_item_id_fkey"
+            columns: ["explore_item_id"]
+            isOneToOne: false
+            referencedRelation: "explore_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      explore_item_suppressions: {
+        Row: {
+          created_at: string
           explore_item_id: string
           id: string
           user_id: string
@@ -685,15 +717,7 @@ export type Database = {
           id?: string
           user_id?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "explore_item_rsvps_explore_item_id_fkey"
-            columns: ["explore_item_id"]
-            isOneToOne: false
-            referencedRelation: "explore_items"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       explore_items: {
         Row: {
@@ -1015,6 +1039,51 @@ export type Database = {
         }
         Relationships: []
       }
+      moderation_flags: {
+        Row: {
+          action: string
+          category: string
+          created_at: string
+          flagged_by: string | null
+          id: string
+          metadata: Json | null
+          reason: string | null
+          severity: number
+          source: string
+          status: string
+          target_id: string
+          target_type: string
+        }
+        Insert: {
+          action: string
+          category: string
+          created_at?: string
+          flagged_by?: string | null
+          id?: string
+          metadata?: Json | null
+          reason?: string | null
+          severity?: number
+          source: string
+          status?: string
+          target_id: string
+          target_type: string
+        }
+        Update: {
+          action?: string
+          category?: string
+          created_at?: string
+          flagged_by?: string | null
+          id?: string
+          metadata?: Json | null
+          reason?: string | null
+          severity?: number
+          source?: string
+          status?: string
+          target_id?: string
+          target_type?: string
+        }
+        Relationships: []
+      }
       pipeline_health_log: {
         Row: {
           created_at: string
@@ -1241,10 +1310,13 @@ export type Database = {
         Row: {
           avatar_url: string | null
           bio: string | null
+          contacts_synced_at: string | null
           created_at: string
           id: string
           is_admin: boolean
           last_post_date: string | null
+          notify_event_reminders: boolean
+          notify_friend_requests: boolean
           phone_hash: string | null
           phone_number: string | null
           phone_verified_at: string | null
@@ -1256,10 +1328,13 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           bio?: string | null
+          contacts_synced_at?: string | null
           created_at?: string
           id: string
           is_admin?: boolean
           last_post_date?: string | null
+          notify_event_reminders?: boolean
+          notify_friend_requests?: boolean
           phone_hash?: string | null
           phone_number?: string | null
           phone_verified_at?: string | null
@@ -1271,10 +1346,13 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           bio?: string | null
+          contacts_synced_at?: string | null
           created_at?: string
           id?: string
           is_admin?: boolean
           last_post_date?: string | null
+          notify_event_reminders?: boolean
+          notify_friend_requests?: boolean
           phone_hash?: string | null
           phone_number?: string | null
           phone_verified_at?: string | null
@@ -1370,6 +1448,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      user_item_feedback: {
+        Row: {
+          created_at: string
+          explore_item_id: string
+          feedback_type: string
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          explore_item_id: string
+          feedback_type: string
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          explore_item_id?: string
+          feedback_type?: string
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       user_rate_limits: {
         Row: {
@@ -1681,11 +1786,76 @@ export type Database = {
             }
             Returns: undefined
           }
+      admin_bulk_suppress: {
+        Args: {
+          p_reason?: string
+          p_sub_categories?: string[]
+          p_title_pattern?: string
+        }
+        Returns: number
+      }
+      admin_negative_feedback_items: {
+        Args: { p_limit?: number }
+        Returns: {
+          admin_suppressed_reason: string | null
+          category: string | null
+          closed_count: number
+          confirm_count: number
+          downvote_count: number
+          explore_item_id: string
+          is_admin_suppressed: boolean
+          kind: string
+          net_score: number
+          title: string
+          total_count: number
+          upvote_count: number
+        }[]
+      }
+      admin_recurring_item_audit: {
+        Args: { p_limit?: number }
+        Returns: {
+          category: string | null
+          id: string
+          is_admin_suppressed: boolean
+          kind: string
+          normalized_confidence: number | null
+          relevance_tier: number | null
+          source_name: string | null
+          sub_category: string | null
+          tag_count: number
+          tags: string[] | null
+          title: string
+        }[]
+      }
+      admin_suppress_item: {
+        Args: { p_item_id: string; p_reason?: string }
+        Returns: undefined
+      }
+      admin_unsuppress_item: {
+        Args: { p_item_id: string }
+        Returns: undefined
+      }
       approve_quarantined_item: {
         Args: { p_item_id: string }
         Returns: undefined
       }
       assert_caller: { Args: { p_user_id: string }; Returns: undefined }
+      check_comment_rate_limit: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      check_enforcement: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          is_shadowbanned: boolean
+          is_suspended: boolean
+          suspended_until: string | null
+        }[]
+      }
+      check_post_rate_limit: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
       check_rate_limit: {
         Args: {
           p_action: string
@@ -1775,6 +1945,10 @@ export type Database = {
           p_time_of_day?: string
         }
         Returns: number
+      }
+      delete_item_feedback: {
+        Args: { p_explore_item_id: string; p_user_id: string }
+        Returns: undefined
       }
       demote_stale_items: { Args: never; Returns: number }
       demote_stale_web_items: {
@@ -1880,6 +2054,15 @@ export type Database = {
       }
       get_current_season: { Args: never; Returns: string }
       get_day_abbrev: { Args: { p_date?: string }; Returns: string }
+      get_contact_suggestions: {
+        Args: { p_user_id: string }
+        Returns: {
+          avatar_url: string | null
+          mutual_count: number
+          user_id: string
+          username: string
+        }[]
+      }
       get_display_image: {
         Args: { p_category: string; p_image_thumb_url: string }
         Returns: string
@@ -1909,6 +2092,10 @@ export type Database = {
         }[]
       }
       get_fallback_image: { Args: { p_category: string }; Returns: string }
+      get_friend_count: {
+        Args: { p_user_id: string }
+        Returns: number
+      }
       get_friend_recommendations: {
         Args: { p_limit?: number; p_user_id: string }
         Returns: {
@@ -1945,6 +2132,13 @@ export type Database = {
           web_collector_with_images: number
         }[]
       }
+      get_item_feedback_scores: {
+        Args: { p_item_ids: string[] }
+        Returns: {
+          explore_item_id: string
+          net_score: number
+        }[]
+      }
       get_items_needing_images: {
         Args: { p_limit?: number; p_source_type?: string }
         Returns: {
@@ -1957,6 +2151,32 @@ export type Database = {
           title: string
           town: string
         }[]
+      }
+      get_moderation_inbox: {
+        Args: {
+          p_limit?: number
+          p_offset?: number
+          p_source?: string | null
+          p_target_type?: string | null
+        }
+        Returns: {
+          action: string
+          category: string
+          created_at: string
+          flagged_by: string | null
+          id: string
+          metadata: Json | null
+          reason: string | null
+          severity: number
+          source: string
+          status: string
+          target_id: string
+          target_type: string
+        }[]
+      }
+      get_my_item_feedback: {
+        Args: { p_explore_item_id: string; p_user_id: string }
+        Returns: string | null
       }
       get_quarantine_queue: {
         Args: { p_limit?: number; p_offset?: number }
@@ -2078,6 +2298,15 @@ export type Database = {
           username: string
         }[]
       }
+      moderate_content: {
+        Args: {
+          p_action: string
+          p_reason: string
+          p_target_id: string
+          p_target_type: string
+        }
+        Returns: undefined
+      }
       needs_image_refresh: {
         Args: { p_image_cached_at: string; p_refresh_days?: number }
         Returns: boolean
@@ -2112,6 +2341,10 @@ export type Database = {
         Args: { p_item_id: string; p_reason?: string }
         Returns: undefined
       }
+      remove_push_token: {
+        Args: { p_token: string; p_user_id: string }
+        Returns: undefined
+      }
       reset_circuit_breaker: {
         Args: { p_target_id: string }
         Returns: undefined
@@ -2121,6 +2354,10 @@ export type Database = {
         Returns: {
           jobs_reset: number
         }[]
+      }
+      resolve_flag: {
+        Args: { p_flag_id: string; p_note?: string; p_resolution: string }
+        Returns: undefined
       }
       save_phone_number: {
         Args: { p_phone_number: string; p_user_id: string }
@@ -2134,8 +2371,26 @@ export type Database = {
           username: string
         }[]
       }
+      set_user_enforcement: {
+        Args: {
+          p_is_shadowbanned: boolean
+          p_is_suspended: boolean
+          p_note?: string
+          p_suspended_until?: string | null
+          p_user_id: string
+        }
+        Returns: undefined
+      }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
+      submit_item_feedback: {
+        Args: {
+          p_explore_item_id: string
+          p_feedback_type: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
       toggle_feature_flag: {
         Args: { p_flag_name: string; p_is_enabled: boolean }
         Returns: {
@@ -2150,6 +2405,14 @@ export type Database = {
       }
       update_item_image: {
         Args: { p_image_url: string; p_item_id: string; p_thumb_url?: string }
+        Returns: undefined
+      }
+      update_notification_preferences: {
+        Args: {
+          p_event_reminders: boolean
+          p_friend_requests: boolean
+          p_user_id: string
+        }
         Returns: undefined
       }
       update_robots_cache: {
@@ -2178,6 +2441,10 @@ export type Database = {
       }
       update_user_tag_affinity: {
         Args: { p_tags: string[]; p_user_id: string; p_weight?: number }
+        Returns: undefined
+      }
+      upsert_push_token: {
+        Args: { p_platform: string; p_token: string; p_user_id: string }
         Returns: undefined
       }
       validate_availability_json: { Args: { p_avail: Json }; Returns: Json }

@@ -31,6 +31,8 @@ export interface UseRecommenderOptions {
   enableScoring?: boolean;
   /** Enable LLM reranking for top K items (default: false, behind feature flag) */
   enableLLMReranker?: boolean;
+  /** Override page size for initial fetch (e.g., 200 for cards mode) */
+  pageSizeOverride?: number;
 }
 
 export interface UseRecommenderReturn extends Omit<UseExploreFiltersReturn, "items"> {
@@ -58,10 +60,10 @@ export function useRecommender(
   userLocation?: { lat: number; lng: number } | null,
   options: UseRecommenderOptions = {}
 ): UseRecommenderReturn {
-  const { enableScoring = true, enableLLMReranker = false } = options;
+  const { enableScoring = true, enableLLMReranker = false, pageSizeOverride } = options;
 
   const { user } = useAuth();
-  const exploreFilters = useExploreFilters(userLocation);
+  const exploreFilters = useExploreFilters(userLocation, { pageSizeOverride });
   const { weather } = useWeather(userLocation);
   const { flags: featureFlags } = useFeatureFlags();
 
@@ -73,6 +75,7 @@ export function useRecommender(
     totalInteractions: number;
   } | null>(null);
   const [friendsGoingMap, setFriendsGoingMap] = useState<Map<string, number>>(new Map());
+  const [communityFeedbackMap, setCommunityFeedbackMap] = useState<Map<string, number>>(new Map());
   const [rerankedItems, setRerankedItems] = useState<ScoredItem[] | null>(null);
   const [reranking, setReranking] = useState(false);
 
@@ -177,6 +180,38 @@ export function useRecommender(
   }, [user, exploreFilters.items, featureFlags]);
 
   // ========================================
+  // Load community feedback scores for visible items
+  // ========================================
+
+  useEffect(() => {
+    if (exploreFilters.items.length === 0) return;
+    if (!featureFlags.get(RECOMMENDER_CONFIG.FLAGS.COMMUNITY_FEEDBACK)) return;
+
+    async function loadFeedbackScores() {
+      try {
+        const itemIds = exploreFilters.items.map((i) => i.id);
+        const { data, error } = await supabase.rpc("get_item_feedback_scores", {
+          p_item_ids: itemIds,
+        });
+
+        if (error) {
+          console.log("[useRecommender] Feedback scores not available:", error.message);
+          return;
+        }
+
+        if (data) {
+          setCommunityFeedbackMap(
+            new Map(data.map((d: any) => [d.explore_item_id, d.net_score]))
+          );
+        }
+      } catch (err) {
+        console.log("[useRecommender] Failed to load feedback scores:", err);
+      }
+    }
+    loadFeedbackScores();
+  }, [exploreFilters.items, featureFlags]);
+
+  // ========================================
   // Build scoring context
   // ========================================
 
@@ -190,6 +225,7 @@ export function useRecommender(
       friendsGoingMap,
       userTagAffinity,
       userTypeAffinity,
+      communityFeedbackMap,
       weather: weather
         ? {
             isRaining: weather.isRaining,
@@ -200,7 +236,7 @@ export function useRecommender(
       featureFlags,
       kindFilter,
     }),
-    [userLocation, friendsGoingMap, userTagAffinity, userTypeAffinity, weather, featureFlags, kindFilter]
+    [userLocation, friendsGoingMap, userTagAffinity, userTypeAffinity, communityFeedbackMap, weather, featureFlags, kindFilter]
   );
 
   // ========================================
@@ -225,6 +261,9 @@ export function useRecommender(
           weather: 0,
           contextIntent: 0,
           typeAffinity: 0,
+          quality: 0,
+          communityFeedback: 0,
+          freshness: 0,
           total: 0,
         },
       }));

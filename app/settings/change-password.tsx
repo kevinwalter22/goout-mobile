@@ -10,9 +10,9 @@ import {
   View,
 } from "react-native";
 import { router } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../src/lib/supabase";
+import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
 import { captureError } from "../../src/lib/logger";
@@ -20,7 +20,6 @@ import { friendlyMessage } from "../../src/lib/errorMessages";
 import { logSecurityEvent, SEC } from "../../src/lib/securityEvents";
 
 export default function ChangePassword() {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
 
   const [currentPassword, setCurrentPassword] = useState("");
@@ -111,25 +110,7 @@ export default function ChangePassword() {
       style={{ flex: 1, backgroundColor: colors.background }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      {/* Header */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          padding: 16,
-          paddingTop: insets.top + 16,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border,
-          gap: 12,
-        }}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
-          Change Password
-        </Text>
-      </View>
+      <ScreenHeader title="Change Password" />
 
       <ScrollView
         style={{ flex: 1 }}
@@ -150,9 +131,10 @@ export default function ChangePassword() {
               secureTextEntry={!showCurrentPassword}
               autoCapitalize="none"
               autoCorrect={false}
+              accessibilityLabel="Current password"
               style={inputStyle}
             />
-            <Pressable onPress={() => setShowCurrentPassword(!showCurrentPassword)} hitSlop={8}>
+            <Pressable onPress={() => setShowCurrentPassword(!showCurrentPassword)} hitSlop={8} accessibilityLabel={showCurrentPassword ? "Hide current password" : "Show current password"} accessibilityRole="button">
               <Ionicons
                 name={showCurrentPassword ? "eye-off-outline" : "eye-outline"}
                 size={20}
@@ -176,9 +158,10 @@ export default function ChangePassword() {
               secureTextEntry={!showNewPassword}
               autoCapitalize="none"
               autoCorrect={false}
+              accessibilityLabel="New password"
               style={inputStyle}
             />
-            <Pressable onPress={() => setShowNewPassword(!showNewPassword)} hitSlop={8}>
+            <Pressable onPress={() => setShowNewPassword(!showNewPassword)} hitSlop={8} accessibilityLabel={showNewPassword ? "Hide new password" : "Show new password"} accessibilityRole="button">
               <Ionicons
                 name={showNewPassword ? "eye-off-outline" : "eye-outline"}
                 size={20}
@@ -205,9 +188,10 @@ export default function ChangePassword() {
               secureTextEntry={!showConfirmPassword}
               autoCapitalize="none"
               autoCorrect={false}
+              accessibilityLabel="Confirm new password"
               style={inputStyle}
             />
-            <Pressable onPress={() => setShowConfirmPassword(!showConfirmPassword)} hitSlop={8}>
+            <Pressable onPress={() => setShowConfirmPassword(!showConfirmPassword)} hitSlop={8} accessibilityLabel={showConfirmPassword ? "Hide confirm password" : "Show confirm password"} accessibilityRole="button">
               <Ionicons
                 name={showConfirmPassword ? "eye-off-outline" : "eye-outline"}
                 size={20}
@@ -226,6 +210,9 @@ export default function ChangePassword() {
         <Pressable
           onPress={handleChangePassword}
           disabled={!isValid}
+          accessibilityLabel="Update password"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !isValid }}
           style={{
             marginTop: 8,
             padding: 16,

@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { Platform } from "react-native";
 import type { Database } from "../types/database";
 import { Env } from "../config/env";
+import { devFetch } from "./devNetworkSim";
 
 const supabaseUrl = Env.SUPABASE_URL;
 const supabaseAnonKey = Env.SUPABASE_ANON_KEY;
@@ -40,5 +41,8 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+  },
+  global: {
+    fetch: devFetch,
   },
 });

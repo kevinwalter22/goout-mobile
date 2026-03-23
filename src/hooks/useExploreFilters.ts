@@ -66,7 +66,8 @@ export interface UseExploreFiltersReturn {
 // ============================================================================
 
 export function useExploreFilters(
-  userLocation?: { lat: number; lng: number } | null
+  userLocation?: { lat: number; lng: number } | null,
+  options?: { pageSizeOverride?: number }
 ): UseExploreFiltersReturn {
   const { user } = useAuth();
 
@@ -105,9 +106,12 @@ export function useExploreFilters(
       const _t0 = __DEV__ ? performance.now() : 0;
 
       try {
+        const queryFilters = options?.pageSizeOverride
+          ? { ...filterState, pageSize: options.pageSizeOverride }
+          : filterState;
         const result: QueryResult<ExploreItem> = await queryExploreItems(
           supabase,
-          filterState,
+          queryFilters,
           userLocation,
           user?.id
         );

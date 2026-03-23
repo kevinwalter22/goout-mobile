@@ -10,14 +10,14 @@ export function useFriendCount(userId: string | null) {
   const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  function fetchCount() {
+  async function fetchCount() {
     if (!userId) return;
-    supabase
-      .rpc("get_friend_count", { p_user_id: userId })
-      .then(({ data, error }) => {
-        if (!error && data != null) setCount(data);
-      })
-      .finally(() => setLoading(false));
+    try {
+      const { data, error } = await supabase.rpc("get_friend_count", { p_user_id: userId });
+      if (!error && data != null) setCount(data);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {

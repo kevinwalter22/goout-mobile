@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   Text,
@@ -10,6 +11,7 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import * as Location from "expo-location";
+import { getCurrentLocation, requestLocationPermission } from "../../src/utils/location";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../src/lib/supabase";
@@ -20,13 +22,20 @@ import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { FilterSheet } from "../../src/components/FilterSheet";
 import { ExploreMapView } from "../../src/components/ExploreMapView";
+import { GroupedExploreFeed } from "../../src/components/GroupedExploreFeed";
+import { ViewModeToggle, type ViewMode } from "../../src/components/ViewModeToggle";
 import { processPostableNow } from "../../src/lib/postableNow";
+import { useGroupedExplore } from "../../src/hooks/useGroupedExplore";
 import { getEffectiveFilters } from "../../src/config/exploreFilters";
 import { logInteraction } from "../../src/lib/interactionLogger";
 import { addNavigationBreadcrumb } from "../../src/lib/sentry";
+import { getFallbackImage } from "../../src/lib/categoryFallbackImages";
 import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
+import { formatOpeningHours } from "../../src/utils/formatOpeningHours";
+import { useItemSuppressions } from "../../src/hooks/useItemSuppressions";
 import type { KindFilter } from "../../src/config/exploreFilters";
 import type { ExploreItem } from "../../src/types/database";
+import type { ScoredItem } from "../../src/lib/scoring";
 
 type ExploreItemWithRSVP = ExploreItem & {
   rsvp_count: number;
@@ -47,6 +56,7 @@ const ExploreCard = React.memo(function ExploreCard({
   isFirstRegular,
   kindFilter,
   onPress,
+  onLongPress,
   colors,
   currentUserId,
 }: {
@@ -56,6 +66,7 @@ const ExploreCard = React.memo(function ExploreCard({
   isFirstRegular: boolean;
   kindFilter: KindFilter;
   onPress: (id: string) => void;
+  onLongPress?: (id: string) => void;
   colors: any;
   currentUserId?: string;
 }) {
@@ -74,6 +85,10 @@ const ExploreCard = React.memo(function ExploreCard({
       )}
       <Pressable
         onPress={() => onPress(item.id)}
+        onLongPress={() => onLongPress?.(item.id)}
+        accessibilityLabel={item.title}
+        accessibilityRole="button"
+        accessibilityHint="Double tap to view details"
         style={{
           padding: 14,
           borderRadius: 12,
@@ -86,7 +101,7 @@ const ExploreCard = React.memo(function ExploreCard({
         <View style={{ flexDirection: "row", gap: 12 }}>
           {/* Text content */}
           <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
               <Text style={{ fontSize: 16, fontWeight: "700", flex: 1, color: colors.text }}>
                 {item.title}
               </Text>
@@ -129,6 +144,24 @@ const ExploreCard = React.memo(function ExploreCard({
                 >
                   <Text style={{ fontSize: 10, fontWeight: "700", color: "#fff" }}>
                     REJECTED
+                  </Text>
+                </View>
+              )}
+              {item.recurrence && !["none", ""].includes(item.recurrence) && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 3,
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 4,
+                    backgroundColor: colors.surfaceVariant,
+                  }}
+                >
+                  <Ionicons name="repeat" size={10} color={colors.textSecondary} />
+                  <Text style={{ fontSize: 10, fontWeight: "700", color: colors.textSecondary }}>
+                    {item.recurrence === "weekly" ? "WEEKLY" : "MONTHLY"}
                   </Text>
                 </View>
               )}
@@ -188,21 +221,19 @@ const ExploreCard = React.memo(function ExploreCard({
             </View>
           </View>
 
-          {/* Thumbnail on right — only when a real image exists */}
-          {item.image_thumb_url ? (
-            <Image
-              source={{ uri: item.image_thumb_url }}
-              style={{
-                width: 72,
-                height: 72,
-                borderRadius: 36,
-                borderWidth: 2,
-                borderColor: colors.border,
-                backgroundColor: colors.surfaceVariant,
-              }}
-              resizeMode="cover"
-            />
-          ) : null}
+          {/* Thumbnail on right — cached image or category fallback */}
+          <Image
+            source={{ uri: item.image_thumb_url || getFallbackImage(item.category) }}
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: 36,
+              borderWidth: 2,
+              borderColor: colors.border,
+              backgroundColor: colors.surfaceVariant,
+            }}
+            resizeMode="cover"
+          />
         </View>
 
         {(rsvpInfo.count > 0 || rsvpInfo.userGoing || rsvpInfo.friendsGoing > 0) && (
@@ -252,16 +283,28 @@ const ExploreCard = React.memo(function ExploreCard({
 // Extracted so the memoized card can use it without depending on parent scope
 function formatItemDateTime(item: ExploreItem) {
   if (item.starts_at) {
-    return new Date(item.starts_at).toLocaleString("en-US", {
+    const dateStr = new Date(item.starts_at).toLocaleString("en-US", {
       weekday: "short",
       month: "short",
       day: "numeric",
       hour: "numeric",
       minute: "2-digit",
     });
+    if (item.recurrence === "weekly") {
+      return `${dateStr} (every ${new Date(item.starts_at).toLocaleDateString("en-US", { weekday: "long" })})`;
+    }
+    if (item.recurrence === "monthly") {
+      return `${dateStr} (monthly)`;
+    }
+    return dateStr;
   }
   if (item.time_text) return item.time_text;
-  if (item.schedule_text) return item.schedule_text;
+  // For activities with weekly hours, show compact "Open/Closed" summary
+  if (item.schedule_text) {
+    const { summaryLine } = formatOpeningHours(item.schedule_text);
+    if (summaryLine) return summaryLine;
+    return item.schedule_text;
+  }
   return "Ongoing";
 }
 
@@ -272,7 +315,7 @@ export default function Explore() {
   const flatListRef = useRef<FlatList>(null);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [viewMode, setViewMode] = useState<"list" | "map">("list");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
 
   // User location (for Postable Now feature)
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -286,6 +329,9 @@ export default function Explore() {
     Record<string, { count: number; userGoing: boolean; friendsGoing: number }>
   >({});
   const [friendIds, setFriendIds] = useState<string[]>([]);
+
+  // Item suppressions ("Not Interested")
+  const { suppressedIds, suppressItem } = useItemSuppressions(user?.id);
 
   // Use the recommender hook (wraps useExploreFilters with scoring)
   const {
@@ -309,7 +355,10 @@ export default function Explore() {
     refresh,
     weather,
     scoringEnabled,
-  } = useRecommender(userLocation, { enableScoring: true });
+  } = useRecommender(userLocation, {
+    enableScoring: true,
+    pageSizeOverride: viewMode === "cards" ? 200 : undefined,
+  });
 
   // Listen for scroll-to-top events
   useEffect(() => {
@@ -332,19 +381,13 @@ export default function Explore() {
   // Function to get current location (reusable for initial load, refresh, and periodic updates)
   const updateLocation = useCallback(async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        return;
-      }
+      const { granted } = await requestLocationPermission();
+      if (!granted) return;
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      const { latitude, longitude, error } = await getCurrentLocation();
+      if (error) return;
 
-      setUserLocation({
-        lat: location.coords.latitude,
-        lng: location.coords.longitude,
-      });
+      setUserLocation({ lat: latitude, lng: longitude });
     } catch (error) {
       console.log("[Explore] Could not get location:", error);
     }
@@ -448,12 +491,13 @@ export default function Explore() {
     setRefreshing(false);
   }, [refresh, updateLocation]);
 
-  // Handle load more (infinite scroll)
+  // Handle load more (infinite scroll) — disabled in cards mode (all items pre-fetched)
   const handleLoadMore = useCallback(() => {
+    if (viewMode === "cards") return;
     if (!loading && hasMore) {
       loadMore();
     }
-  }, [loading, hasMore, loadMore]);
+  }, [viewMode, loading, hasMore, loadMore]);
 
   // Get RSVP info for an item
   function getRSVPInfo(itemId: string) {
@@ -474,9 +518,11 @@ export default function Explore() {
   const effectiveFilters = useMemo(() => getEffectiveFilters(filters), [filters]);
 
   // Process Postable Now from candidates (independent of main sort/pagination)
+  // Filter out suppressed items before processing
   const { postableNow: allPostableNow } = useMemo(() => {
-    return processPostableNow(postableNowCandidates, userLocation);
-  }, [postableNowCandidates, userLocation]);
+    const unsuppressed = postableNowCandidates.filter((i) => !suppressedIds.has(i.id));
+    return processPostableNow(unsuppressed, userLocation);
+  }, [postableNowCandidates, userLocation, suppressedIds]);
 
   // Postable Now shows items that are truly postable (within range + time),
   // filtered by kind toggle but not by category/tag filters.
@@ -489,15 +535,51 @@ export default function Explore() {
     return allPostableNow.filter((item) => item.kind === filters.kindFilter);
   }, [allPostableNow, filters.kindFilter]);
 
+  // Grouping engine for cards mode — scored postable items for cards feed
+  const postableNowScored = useMemo<ScoredItem[]>(() => {
+    return postableNow.map((item) => ({
+      ...item,
+      recommendScore: 1,
+      scoreBreakdown: {
+        timeMatch: 1, distance: 1, openNow: 1, friendsGoing: 0,
+        tagAffinity: 0, weather: 0.5, contextIntent: 0.5, typeAffinity: 0.5,
+        quality: 1, communityFeedback: 0.5, freshness: 0.5, total: 1,
+      },
+    }));
+  }, [postableNow]);
+
+  // Cards mode: filter out low-confidence and suppressed items before grouping
+  // so card groups only contain higher-quality, non-hidden items.
+  const cardsItems = useMemo(() => {
+    let filtered = items.filter((item) => !suppressedIds.has(item.id));
+    if (viewMode === "cards") {
+      filtered = filtered.filter((item) => {
+        const conf = (item as any).normalized_confidence as number | null | undefined;
+        return conf == null || conf >= 55;
+      });
+    }
+    return filtered;
+  }, [items, viewMode, suppressedIds]);
+
+  const groupingResult = useGroupedExplore({
+    items: cardsItems,
+    postableNowItems: postableNowScored,
+    weather: weather
+      ? { isRaining: weather.isRaining, isSunny: weather.isSunny, temperature: weather.temperature }
+      : null,
+    userLocation,
+    kindFilter: filters.kindFilter as "all" | "event" | "activity",
+  });
+
   // Build set of postable IDs for deduplication and badge display
   const postableIds = useMemo(() => {
     return new Set(postableNow.map((p) => p.id));
   }, [postableNow]);
 
-  // Regular items = paginated items minus any that are already in Postable Now
+  // Regular items = paginated items minus postable now and suppressed items
   const regularItems = useMemo(() => {
-    return items.filter((item) => !postableIds.has(item.id));
-  }, [items, postableIds]);
+    return items.filter((item) => !postableIds.has(item.id) && !suppressedIds.has(item.id));
+  }, [items, postableIds, suppressedIds]);
 
   // Combine into ordered list: postable now items first, then the rest
   const orderedItems = useMemo(() => {
@@ -521,6 +603,26 @@ export default function Explore() {
       router.push(`/event/${itemId}` as any);
     },
     [user, orderedItems],
+  );
+
+  // Suppress item ("Not Interested") — long-press on cards/list items
+  const handleSuppressItem = useCallback(
+    (itemId: string) => {
+      const item = orderedItems.find((i) => i.id === itemId);
+      Alert.alert(
+        "Not Interested",
+        item ? `Hide "${item.title}" from your feed?` : "Hide this item from your feed?",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Hide",
+            style: "destructive",
+            onPress: () => suppressItem(itemId),
+          },
+        ],
+      );
+    },
+    [suppressItem, orderedItems],
   );
 
   return (
@@ -574,35 +676,38 @@ export default function Explore() {
         )}
       </View>
 
-      {/* Kind Toggle (All / Activities / Events) + Filter Button */}
+      {/* Action Bar: Kind filter pills + View mode icons + Filter button */}
       <View
         style={{
           flexDirection: "row",
+          alignItems: "center",
           paddingHorizontal: 16,
           paddingVertical: 8,
-          gap: 8,
+          gap: 6,
           backgroundColor: colors.background,
           borderBottomWidth: 1,
           borderBottomColor: colors.border,
-          alignItems: "center",
         }}
       >
+        {/* Kind filter pills */}
         {(["all", "activity", "event"] as KindFilter[]).map((kind) => (
           <Pressable
             key={kind}
             onPress={() => setKindFilter(kind)}
+            accessibilityLabel={kind === "all" ? "All" : kind === "activity" ? "Activities" : "Events"}
+            accessibilityRole="button"
+            accessibilityState={{ selected: filters.kindFilter === kind }}
             style={{
-              flex: 1,
-              paddingVertical: 8,
-              borderRadius: 8,
+              paddingHorizontal: 14,
+              paddingVertical: 6,
+              borderRadius: 16,
               backgroundColor:
                 filters.kindFilter === kind ? Colors.primary : colors.surfaceVariant,
-              alignItems: "center",
             }}
           >
             <Text
               style={{
-                fontSize: 14,
+                fontSize: 13,
                 fontWeight: "600",
                 color: filters.kindFilter === kind ? "#fff" : colors.textSecondary,
               }}
@@ -612,70 +717,19 @@ export default function Explore() {
           </Pressable>
         ))}
 
-        {/* Map / List Toggle */}
-        <Pressable
-          onPress={() => setViewMode(viewMode === "list" ? "map" : "list")}
-          style={{
-            width: 40,
-            height: 36,
-            borderRadius: 8,
-            backgroundColor: viewMode === "map" ? Colors.primary : colors.surfaceVariant,
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <Ionicons
-            name={viewMode === "list" ? "map-outline" : "list-outline"}
-            size={20}
-            color={viewMode === "map" ? "#fff" : colors.textSecondary}
-          />
-        </Pressable>
+        {/* Spacer */}
+        <View style={{ flex: 1 }} />
 
-        {/* Filter Button */}
-        <Pressable
-          onPress={() => setShowFilterSheet(true)}
-          style={{
-            width: 40,
-            height: 36,
-            borderRadius: 8,
-            backgroundColor: activeFilterCount > 0 ? Colors.primary : colors.surfaceVariant,
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <Ionicons
-            name="options-outline"
-            size={20}
-            color={activeFilterCount > 0 ? "#fff" : colors.textSecondary}
-          />
-          {activeFilterCount > 0 && (
-            <View
-              style={{
-                position: "absolute",
-                top: -4,
-                right: -4,
-                width: 18,
-                height: 18,
-                borderRadius: 9,
-                backgroundColor: Colors.gray[800],
-                justifyContent: "center",
-                alignItems: "center",
-              }}
-            >
-              <Text style={{ fontSize: 10, fontWeight: "700", color: "#fff" }}>
-                {activeFilterCount}
-              </Text>
-            </View>
-          )}
-        </Pressable>
+        {/* View mode icons */}
+        <ViewModeToggle value={viewMode} onChange={setViewMode} />
       </View>
 
-      {/* Results count / filter summary - Shows accurate count immediately */}
+      {/* Results bar: filter summary + count on left, filter button on right */}
       {(hasFilters || totalCount > 0) && !loading && (
         <View
           style={{
             paddingHorizontal: 16,
-            paddingVertical: 8,
+            paddingVertical: 6,
             backgroundColor: colors.surfaceVariant,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
@@ -686,16 +740,43 @@ export default function Explore() {
         >
           <Text style={{ fontSize: 13, color: colors.textSecondary }}>
             {filterSummary}
+            <Text style={{ color: colors.textTertiary }}>
+              {"  ·  "}
+              {items.length < totalCount
+                ? `${items.length} of ${totalCount}`
+                : `${totalCount} result${totalCount !== 1 ? "s" : ""}`}
+            </Text>
           </Text>
-          <Text style={{ fontSize: 13, color: colors.textTertiary }}>
-            {items.length < totalCount
-              ? `Showing ${items.length} of ${totalCount}`
-              : `${totalCount} result${totalCount !== 1 ? "s" : ""}`}
-          </Text>
+          <Pressable
+            onPress={() => setShowFilterSheet(true)}
+            accessibilityLabel={activeFilterCount > 0 ? `Filters, ${activeFilterCount} active` : "Filters"}
+            accessibilityRole="button"
+            hitSlop={8}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 4,
+              paddingHorizontal: 8,
+              paddingVertical: 4,
+              borderRadius: 8,
+              backgroundColor: activeFilterCount > 0 ? Colors.primary : colors.background,
+            }}
+          >
+            <Ionicons
+              name="options-outline"
+              size={16}
+              color={activeFilterCount > 0 ? "#fff" : colors.textSecondary}
+            />
+            {activeFilterCount > 0 && (
+              <Text style={{ fontSize: 12, fontWeight: "600", color: "#fff" }}>
+                {activeFilterCount}
+              </Text>
+            )}
+          </Pressable>
         </View>
       )}
 
-      {/* Content: Map or List */}
+      {/* Content: Map, Cards, or List */}
       {viewMode === "map" ? (
         <ExploreMapView
           items={orderedItems}
@@ -706,6 +787,16 @@ export default function Explore() {
           timeWindow={effectiveFilters.timeWindow}
           distance={effectiveFilters.distance}
           tags={effectiveFilters.tags}
+        />
+      ) : viewMode === "cards" ? (
+        <GroupedExploreFeed
+          groupingResult={groupingResult}
+          userLocation={userLocation}
+          onItemPress={handleItemPress}
+          onSuppressItem={handleSuppressItem}
+          onRefresh={handleRefresh}
+          refreshing={refreshing}
+          loading={loading}
         />
       ) : (
       <View style={{ flex: 1 }}>
@@ -725,6 +816,8 @@ export default function Explore() {
             <Text style={{ textAlign: "center", color: colors.textSecondary }}>{error}</Text>
             <Pressable
               onPress={refresh}
+              accessibilityLabel="Retry"
+              accessibilityRole="button"
               style={{
                 padding: 16,
                 borderRadius: 12,
@@ -760,6 +853,8 @@ export default function Explore() {
             {hasFilters && (
               <Pressable
                 onPress={resetAdvancedFilters}
+                accessibilityLabel="Clear filters"
+                accessibilityRole="button"
                 style={{
                   marginTop: 16,
                   padding: 12,
@@ -842,6 +937,7 @@ export default function Explore() {
                 isFirstRegular={index === postableNow.length && postableNow.length > 0}
                 kindFilter={filters.kindFilter}
                 onPress={handleItemPress}
+                onLongPress={handleSuppressItem}
                 colors={colors}
                 currentUserId={user?.id}
               />
@@ -867,9 +963,11 @@ export default function Explore() {
       {/* Create Event FAB */}
       <Pressable
         onPress={() => router.push("/create-event")}
+        accessibilityLabel="Create event"
+        accessibilityRole="button"
         style={{
           position: "absolute",
-          bottom: 24,
+          bottom: 32,
           right: 24,
           width: 56,
           height: 56,

@@ -6,8 +6,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { Colors } from "../config/theme";
 import { useTheme } from "../contexts/ThemeContext";
-import { getDistanceInMeters, getDistanceInMiles } from "../utils/location";
+import { getDistanceInMeters, getDistanceInMiles, isLocationOverridden } from "../utils/location";
+import { formatOpeningHours } from "../utils/formatOpeningHours";
 import { CHECK_IN_RADIUS_METERS } from "../config/constants";
+import { getFallbackImage } from "../lib/categoryFallbackImages";
 import type { ExploreItem } from "../types/database";
 import type {
   KindFilter,
@@ -322,6 +324,7 @@ export function ExploreMapView({
             .from("explore_items")
             .select("*")
             .eq("kind", "event")
+            .is("deleted_at", null)
             .gte("starts_at", startDate.toISOString())
             .lte("starts_at", endDate.toISOString())
             .not("lat", "is", null)
@@ -341,6 +344,7 @@ export function ExploreMapView({
             .from("explore_items")
             .select("*")
             .is("starts_at", null)
+            .is("deleted_at", null)
             .not("lat", "is", null)
             .not("lng", "is", null)
             .gte("priority", 0)
@@ -379,6 +383,7 @@ export function ExploreMapView({
               .from("explore_items")
               .select("*")
               .eq("kind", "activity")
+              .is("deleted_at", null)
               .gte("lat", userLocation.lat - degreeRadius)
               .lte("lat", userLocation.lat + degreeRadius)
               .gte("lng", userLocation.lng - degreeRadius)
@@ -416,6 +421,7 @@ export function ExploreMapView({
               .from("explore_items")
               .select("*")
               .eq("kind", "activity")
+              .is("deleted_at", null)
               .gte("lat", userLocation.lat - degreeRadius)
               .lte("lat", userLocation.lat + degreeRadius)
               .gte("lng", userLocation.lng - degreeRadius)
@@ -448,7 +454,15 @@ export function ExploreMapView({
         }
 
         const combined = [...events, ...activities];
-        setMapItems(combined);
+        // Deduplicate — recurring items can match both dated-event and recurring queries,
+        // and "all" mode recurring query can overlap with the activities query.
+        const seen = new Set<string>();
+        const deduped = combined.filter((item) => {
+          if (seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        });
+        setMapItems(deduped);
 
         // Update cache
         lastFetchRef.current = {
@@ -533,7 +547,12 @@ export function ExploreMapView({
         minute: "2-digit",
       });
     }
-    return item.schedule_text || item.time_text || "Ongoing";
+    // For activities with weekly hours, show compact "Open/Closed" summary
+    if (item.schedule_text) {
+      const { summaryLine } = formatOpeningHours(item.schedule_text);
+      if (summaryLine) return summaryLine;
+    }
+    return item.time_text || "Ongoing";
   }
 
   // Count by type for badge
@@ -558,8 +577,8 @@ export function ExploreMapView({
         style={{ flex: 1 }}
         provider={PROVIDER_DEFAULT}
         initialRegion={initialRegion}
-        showsUserLocation
-        showsMyLocationButton
+        showsUserLocation={!isLocationOverridden()}
+        showsMyLocationButton={!isLocationOverridden()}
         onPress={() => selectItem(null)}
         onMarkerPress={(e) => {
           // Use identifier from marker for reliable iOS tap handling
@@ -579,6 +598,27 @@ export function ExploreMapView({
             isSelected={selectedItemId === item.id}
           />
         ))}
+        {/* Custom "You are here" dot for review account (native blue dot disabled) */}
+        {isLocationOverridden() && userLocation && (
+          <Marker
+            coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <View style={{
+              width: 20,
+              height: 20,
+              borderRadius: 10,
+              backgroundColor: "#007AFF",
+              borderWidth: 3,
+              borderColor: "#fff",
+              shadowColor: "#007AFF",
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.4,
+              shadowRadius: 4,
+              elevation: 3,
+            }} />
+          </Marker>
+        )}
       </MapView>
 
       {/* Item count badge */}
@@ -707,21 +747,19 @@ export function ExploreMapView({
               gap: 12,
             }}
           >
-            {/* Thumbnail in preview card */}
-            {(selectedItem.image_thumb_url || selectedItem.image_url) && (
-              <Image
-                source={{
-                  uri: selectedItem.image_thumb_url || selectedItem.image_url!,
-                }}
-                style={{
-                  width: 60,
-                  height: 60,
-                  borderRadius: 8,
-                  backgroundColor: colors.surfaceVariant,
-                }}
-                resizeMode="cover"
-              />
-            )}
+            {/* Thumbnail in preview card — cached image or category fallback */}
+            <Image
+              source={{
+                uri: selectedItem.image_thumb_url || selectedItem.image_url || getFallbackImage(selectedItem.category),
+              }}
+              style={{
+                width: 60,
+                height: 60,
+                borderRadius: 8,
+                backgroundColor: colors.surfaceVariant,
+              }}
+              resizeMode="cover"
+            />
 
             <View style={{ flex: 1 }}>
               {/* Close button */}
@@ -801,39 +839,53 @@ export function ExploreMapView({
               </View>
 
               <Text
-                style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2 }}
+                style={{ fontSize: 13, color: colors.textSecondary, marginTop: 2, paddingRight: 56 }}
               >
                 {formatDateTime(selectedItem)}
+              </Text>
+
+              <Text
+                style={{ fontSize: 13, color: colors.textTertiary, marginTop: 2, paddingRight: 56 }}
+                numberOfLines={1}
+              >
+                {[selectedItem.location_name, selectedItem.town]
+                  .filter(Boolean)
+                  .join(" \u00B7 ")}
               </Text>
 
               <View
                 style={{
                   flexDirection: "row",
-                  justifyContent: "space-between",
                   alignItems: "center",
-                  marginTop: 2,
+                  marginTop: 6,
+                  gap: 4,
                 }}
               >
-                <Text
-                  style={{ fontSize: 13, color: colors.textTertiary, flex: 1 }}
-                  numberOfLines={1}
-                >
-                  {[selectedItem.location_name, selectedItem.town]
-                    .filter(Boolean)
-                    .join(" \u00B7 ")}
-                </Text>
                 {formatDistance(selectedItem) && (
                   <Text
                     style={{
                       fontSize: 12,
                       fontWeight: "600",
                       color: Colors.primary,
-                      marginLeft: 8,
                     }}
                   >
                     {formatDistance(selectedItem)}
                   </Text>
                 )}
+                {formatDistance(selectedItem) && (
+                  <Text style={{ fontSize: 12, color: colors.textTertiary }}>
+                    ·
+                  </Text>
+                )}
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "600",
+                    color: Colors.primary,
+                  }}
+                >
+                  View details &rsaquo;
+                </Text>
               </View>
             </View>
           </Pressable>

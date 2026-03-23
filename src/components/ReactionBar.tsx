@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import * as Haptics from "expo-haptics";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../contexts/ThemeContext";
+import { reactionSync } from "../utils/reactionSync";
 import type { PostReaction } from "../types/database";
 
 type ReactionBarProps = {
@@ -24,8 +25,9 @@ export function ReactionBar({ postId, initialReactions }: ReactionBarProps) {
   const [reactions, setReactions] = useState<PostReaction[]>([]);
   const [userReaction, setUserReaction] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const isSelfEmit = useRef(false);
 
-  // Seed from batch-loaded data or fetch individually (fallback for non-feed usage)
+  // Seed from batch-loaded data or fetch individually
   useEffect(() => {
     if (initialReactions) {
       const seeded = initialReactions.map((r) => ({
@@ -38,6 +40,15 @@ export function ReactionBar({ postId, initialReactions }: ReactionBarProps) {
     } else {
       loadReactions();
     }
+  }, [postId]);
+
+  // Subscribe to cross-instance reaction sync (e.g. feed ↔ post detail)
+  useEffect(() => {
+    return reactionSync.subscribe(postId, ({ reactions: r, userReaction: ur }) => {
+      if (isSelfEmit.current) { isSelfEmit.current = false; return; }
+      setReactions(r as PostReaction[]);
+      setUserReaction(ur);
+    });
   }, [postId]);
 
   async function loadReactions() {
@@ -70,8 +81,11 @@ export function ReactionBar({ postId, initialReactions }: ReactionBarProps) {
           .eq("user_id", user.id);
 
         if (!error) {
+          const updated = reactions.filter((r) => r.user_id !== user.id);
           setUserReaction(null);
-          setReactions((prev) => prev.filter((r) => r.user_id !== user.id));
+          setReactions(updated);
+          isSelfEmit.current = true;
+          reactionSync.emit(postId, { reactions: updated, userReaction: null });
         }
       } else {
         // Add or update reaction (UPSERT via unique constraint)
@@ -85,12 +99,11 @@ export function ReactionBar({ postId, initialReactions }: ReactionBarProps) {
           .single();
 
         if (!error && data) {
+          const updated = [...reactions.filter((r) => r.user_id !== user.id), data] as PostReaction[];
           setUserReaction(emoji);
-          // Update reactions list
-          setReactions((prev) => {
-            const filtered = prev.filter((r) => r.user_id !== user.id);
-            return [...filtered, data] as any;
-          });
+          setReactions(updated);
+          isSelfEmit.current = true;
+          reactionSync.emit(postId, { reactions: updated, userReaction: emoji });
         }
       }
     } catch (error) {

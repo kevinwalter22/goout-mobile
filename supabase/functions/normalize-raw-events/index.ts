@@ -42,6 +42,53 @@ interface ProcessResult {
   error?: string;
 }
 
+// ============================================================================
+// Relevance Tier Computation
+// ============================================================================
+// 3 = premium (curated, high-quality venues)
+// 2 = standard (API-sourced, passes quality gates)
+// 1 = marginal (low quality, may be irrelevant)
+// 0 = suppressed (don't show in cards)
+function computeRelevanceTier(
+  sourceType: string,
+  normalized: NormalizedEvent,
+  confidence: number
+): number {
+  // Curated / premium sources
+  if (sourceType === "curated_csv") return 3;
+  if (sourceType === "api_ticketmaster") return 3;
+
+  // PredictHQ: generally high quality events
+  if (sourceType === "api_predicthq") {
+    return confidence >= 60 ? 3 : 2;
+  }
+
+  // Very low confidence → suppressed from cards
+  if (confidence < 42) return 0;
+
+  // Low confidence → marginal
+  if (confidence < 55) return 1;
+
+  // Google Places with high rating/reviews → premium
+  if (sourceType === "api_google_places") {
+    const raw = normalized as Record<string, any>;
+    const rating = raw.google_rating ?? raw.rating;
+    const reviewCount = raw.google_review_count ?? raw.review_count;
+    if (rating >= 4.5 && reviewCount >= 50) return 3;
+    if (rating >= 4.0 && reviewCount >= 20) return 2;
+    // Standard Google Places item
+    return confidence >= 65 ? 2 : 1;
+  }
+
+  // Web collector items
+  if (sourceType === "web_collector") {
+    return confidence >= 65 ? 2 : 1;
+  }
+
+  // Default: standard
+  return 2;
+}
+
 Deno.serve(async (req) => {
   const preflight = handleCorsPreflightIfNeeded(req);
   if (preflight) return preflight;
@@ -243,12 +290,16 @@ Deno.serve(async (req) => {
           continue;
         }
 
+        // Compute relevance tier based on source type and item quality
+        const relevanceTier = computeRelevanceTier(sourceType, normalized, fieldNorm.normalized_confidence);
+
         // Strip null image fields to avoid overwriting existing cached images
         // during re-normalization (e.g., Google Places items already have images)
         const upsertPayload: Record<string, any> = {
           source_id: rawData.source_id,
           external_id: rawData.external_id,
           ...normalized,
+          relevance_tier: relevanceTier,
           last_refreshed_at: new Date().toISOString(),
         };
         if (!upsertPayload.image_url) {

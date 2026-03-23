@@ -11,6 +11,7 @@
     "node_modules",
     "supabase/functions",
     "security-tests",
+    "preflight-tests",
     "scripts",
     "dist",
     "dist-check",

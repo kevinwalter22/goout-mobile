@@ -15,6 +15,8 @@ import { createLLMProvider } from "../_shared/llm-provider.ts";
 import {
   buildEnrichmentPrompt,
   validateEnrichmentResponse,
+  buildEnrichmentProvenance,
+  ENRICHMENT_SYSTEM_PROMPT,
 } from "../_shared/enrichment-schema.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
@@ -97,22 +99,22 @@ Deno.serve(async (req) => {
       recurrence: item.recurrence,
       season: item.season,
       tags: item.tags,
+      location_name: item.location_name,
+      town: item.town,
+      price_bucket: item.price_bucket,
+      kind: item.kind,
     });
 
     // Call LLM
     const llmResponse = await llm.chat(
       [
-        {
-          role: "system",
-          content:
-            "You are a helpful assistant that enriches event data. Always respond with valid JSON only, no markdown or explanation.",
-        },
+        { role: "system", content: ENRICHMENT_SYSTEM_PROMPT },
         { role: "user", content: prompt },
       ],
       {
-        maxTokens: 512,
+        maxTokens: 1024,
         temperature: 0.3,
-        jsonMode: llm.name === "openai", // OpenAI supports native JSON mode
+        jsonMode: llm.name === "openai",
       }
     );
 
@@ -157,6 +159,12 @@ Deno.serve(async (req) => {
     const startsAt = enrichment.availability?.next_occurrence || enrichment.next_occurrence?.starts_at;
     const endsAt = enrichment.next_occurrence?.ends_at;
 
+    // Build per-field provenance for confidence tracking
+    const provenance = buildEnrichmentProvenance(
+      enrichment,
+      item.provenance as Record<string, unknown> | null
+    );
+
     const { error: updateError } = await supabase.rpc("apply_enrichment", {
       p_explore_item_id: body.explore_item_id,
       p_hook_line: enrichment.hook_line,
@@ -168,6 +176,7 @@ Deno.serve(async (req) => {
       p_price_bucket: enrichment.price_bucket || null,
       p_description: enrichment.description || null,
       p_time_text: enrichment.short_schedule || null,
+      p_provenance: provenance,
     });
 
     if (updateError) {
@@ -175,6 +184,14 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: `Failed to apply enrichment: ${updateError.message}` }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // Apply suggested category correction if provided
+    if (enrichment.suggested_category) {
+      await supabase
+        .from("explore_items")
+        .update({ category: enrichment.suggested_category })
+        .eq("id", body.explore_item_id);
     }
 
     return new Response(

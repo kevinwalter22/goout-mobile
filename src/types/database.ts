@@ -15,6 +15,9 @@ export type Profile = PublicProfile & {
   phone_number: string | null;
   phone_hash: string | null;
   phone_verified_at: string | null;
+  contacts_synced_at: string | null;
+  notify_event_reminders: boolean;
+  notify_friend_requests: boolean;
 };
 
 export type Event = {
@@ -189,7 +192,7 @@ export type Friendship = {
 
 export type ReportReason = "spam" | "harassment" | "hate_speech" | "sexual_content" | "other";
 export type ReportStatus = "pending" | "reviewed" | "dismissed" | "actioned";
-export type ReportTargetType = "post" | "comment" | "user";
+export type ReportTargetType = "post" | "comment" | "user" | "explore_item";
 
 export type ContentReport = {
   id: string;

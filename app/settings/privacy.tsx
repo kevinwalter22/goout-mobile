@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import { Linking, Platform, Pressable, Text, View } from "react-native";
 import { router } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { ScreenHeader } from "../../src/components/ScreenHeader";
 import * as Location from "expo-location";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
 
 export default function PrivacySettings() {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const [locationStatus, setLocationStatus] = useState<string | null>(null);
 
@@ -28,25 +27,7 @@ export default function PrivacySettings() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Header */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          padding: 16,
-          paddingTop: insets.top + 16,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border,
-          gap: 12,
-        }}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
-          Privacy
-        </Text>
-      </View>
+      <ScreenHeader title="Privacy" />
 
       <View style={{ padding: 16, gap: 24 }}>
         {/* Permissions */}
@@ -74,6 +55,8 @@ export default function PrivacySettings() {
           >
             <Pressable
               onPress={openAppSettings}
+              accessibilityLabel={`Location permission: ${locationStatus === "granted" ? "allowed" : "denied"} — tap to open settings`}
+              accessibilityRole="button"
               style={{
                 flexDirection: "row",
                 alignItems: "center",
@@ -107,6 +90,8 @@ export default function PrivacySettings() {
 
             <Pressable
               onPress={() => router.push("/settings/find-contacts" as any)}
+              accessibilityLabel="Contacts — find friends from contacts"
+              accessibilityRole="button"
               style={{
                 flexDirection: "row",
                 alignItems: "center",
@@ -142,6 +127,8 @@ export default function PrivacySettings() {
 
           <Pressable
             onPress={() => router.push("/settings/blocked-users" as any)}
+            accessibilityLabel="Blocked Users"
+            accessibilityRole="button"
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -162,6 +149,8 @@ export default function PrivacySettings() {
         {/* Privacy Policy link */}
         <Pressable
           onPress={() => Linking.openURL("https://links.euda.live/privacy")}
+          accessibilityLabel="View Privacy Policy"
+          accessibilityRole="link"
           style={{
             flexDirection: "row",
             alignItems: "center",

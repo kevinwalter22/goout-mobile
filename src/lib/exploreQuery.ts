@@ -369,6 +369,7 @@ export async function queryExploreItems(
       .from("explore_items")
       .select("*", { count: "exact" })
       .is("deleted_at", null) // Soft delete gate
+      .eq("is_admin_suppressed", false) // Admin suppression gate
       .gte("priority", 0) // Exclude stale/demoted items (priority = -1)
       .eq("is_duplicate", false) // Exclude cross-source duplicates
       .or("normalized_confidence.is.null,normalized_confidence.gte.40") // Quality gate

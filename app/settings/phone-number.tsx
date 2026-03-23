@@ -11,10 +11,10 @@ import {
   View,
 } from "react-native";
 import { router } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../src/lib/supabase";
 import { useAuth } from "../../src/hooks/useAuth";
+import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
 import { normalizePhone } from "../../src/utils/phoneHash";
@@ -22,7 +22,6 @@ import { captureError } from "../../src/lib/logger";
 import { friendlyMessage } from "../../src/lib/errorMessages";
 
 export default function PhoneNumber() {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { user, profile, refreshProfile } = useAuth();
 
@@ -117,39 +116,28 @@ export default function PhoneNumber() {
       style={{ flex: 1, backgroundColor: colors.background }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      {/* Header */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: 16,
-          paddingTop: insets.top + 16,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border,
-        }}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
-          Phone Number
-        </Text>
-        <Pressable
-          onPress={handleSave}
-          disabled={!canSave}
-          style={{
-            backgroundColor: canSave ? Colors.primary : colors.border,
-            paddingHorizontal: 16,
-            paddingVertical: 8,
-            borderRadius: 20,
-          }}
-        >
-          <Text style={{ color: "#fff", fontWeight: "600" }}>
-            {saving ? "Saving..." : "Save"}
-          </Text>
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title="Phone Number"
+        right={
+          <Pressable
+            onPress={handleSave}
+            disabled={!canSave}
+            accessibilityLabel="Save phone number"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canSave }}
+            style={{
+              backgroundColor: canSave ? Colors.primary : colors.border,
+              paddingHorizontal: 16,
+              paddingVertical: 8,
+              borderRadius: 20,
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "600" }}>
+              {saving ? "Saving..." : "Save"}
+            </Text>
+          </Pressable>
+        }
+      />
 
       <ScrollView
         style={{ flex: 1 }}
@@ -168,6 +156,7 @@ export default function PhoneNumber() {
             placeholderTextColor={colors.textTertiary}
             keyboardType="phone-pad"
             autoComplete="tel"
+            accessibilityLabel="Phone number"
             style={inputStyle}
           />
           <Text style={{ fontSize: 12, color: colors.textTertiary }}>
@@ -177,7 +166,7 @@ export default function PhoneNumber() {
 
         {/* Remove Button */}
         {hasExisting && (
-          <Pressable onPress={handleRemove} disabled={saving}>
+          <Pressable onPress={handleRemove} disabled={saving} accessibilityLabel="Remove phone number" accessibilityRole="button" accessibilityState={{ disabled: saving }}>
             <Text
               style={{
                 fontSize: 14,

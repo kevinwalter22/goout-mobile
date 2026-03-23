@@ -35,15 +35,17 @@ import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { getEffectiveStreak } from "../../src/utils/streak";
 import { useFriendRecommendations } from "../../src/hooks/useFriendRecommendations";
+import { useContactSync } from "../../src/hooks/useContactSync";
 
 export default function Profile() {
   const { profile, loading, signOut, user, refreshProfile } = useAuth();
   const insets = useSafeAreaInsets();
   const { friends, refresh: refreshFriends } = useFriendsList();
   const { requests, refresh: refreshRequests, removeRequest } = useFriendRequests();
-  const { recommendations, loading: recsLoading, sendRequest } = useFriendRecommendations(5);
+  const { recommendations, loading: recsLoading, sendRequest, refresh: refreshRecs } = useFriendRecommendations(5);
+  const { syncing: contactSyncing, needsSync, lastSyncedAt, contactsSyncEnabled, syncNow } = useContactSync();
   const { posts, loading: postsLoading, removePost, refresh: refreshPosts } = useUserPosts(user?.id || null);
-  const { plans, loading: plansLoading } = useUpcomingPlans(user?.id);
+  const { plans, loading: plansLoading, refresh: refreshPlans } = useUpcomingPlans(user?.id);
   const { showToast } = useToast();
   const { colors } = useTheme();
   const { width: screenWidth } = useWindowDimensions();
@@ -54,6 +56,7 @@ export default function Profile() {
   const [showFriends, setShowFriends] = useState(false);
   const [showFriendRequests, setShowFriendRequests] = useState(false);
   const [showBioEdit, setShowBioEdit] = useState(false);
+  const [dismissedSyncCard, setDismissedSyncCard] = useState(false);
   const [bio, setBio] = useState("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [savingBio, setSavingBio] = useState(false);
@@ -65,7 +68,18 @@ export default function Profile() {
       refreshPosts();
       refreshFriends();
       refreshRequests();
+      refreshRecs();
+      refreshPlans();
     }, [])
+  );
+
+  // Auto-sync contacts in background when stale (>7 days) and already synced before
+  useFocusEffect(
+    useCallback(() => {
+      if (lastSyncedAt && needsSync && contactsSyncEnabled) {
+        syncNow().then(() => refreshRecs());
+      }
+    }, [lastSyncedAt, needsSync, contactsSyncEnabled])
   );
 
   // Listen for scroll-to-top events
@@ -244,7 +258,7 @@ export default function Profile() {
           style={{ width: 120, height: 48, marginLeft: -8 }}
           resizeMode="contain"
         />
-        <Pressable onPress={() => router.push("/settings" as any)} hitSlop={8}>
+        <Pressable onPress={() => router.push("/settings" as any)} hitSlop={8} accessibilityLabel="Settings" accessibilityRole="button">
           <Ionicons name="settings-outline" size={24} color={colors.textSecondary} />
         </Pressable>
       </View>
@@ -253,7 +267,7 @@ export default function Profile() {
         <View style={{ padding: 24 }}>
         <View style={{ gap: 24 }}>
           {/* Avatar with upload button */}
-          <Pressable onPress={handleAvatarUpload} disabled={uploadingAvatar}>
+          <Pressable onPress={handleAvatarUpload} disabled={uploadingAvatar} accessibilityLabel="Change profile photo" accessibilityRole="button" accessibilityState={{ disabled: uploadingAvatar }}>
             <View style={{ alignSelf: "center", position: "relative" }}>
               <Avatar avatarUrl={profile.avatar_url} size={80} />
               {uploadingAvatar && (
@@ -295,13 +309,13 @@ export default function Profile() {
           <View style={{ gap: 8, alignItems: "center" }}>
             <Text style={{ fontSize: 24, fontWeight: "700", color: colors.text }}>{profile.username}</Text>
             {profile.bio ? (
-              <Pressable onPress={handleEditBio}>
+              <Pressable onPress={handleEditBio} accessibilityLabel="Edit bio" accessibilityRole="button">
                 <Text style={{ fontSize: 14, color: colors.textSecondary, textAlign: "center" }}>
                   {profile.bio}
                 </Text>
               </Pressable>
             ) : (
-              <Pressable onPress={handleEditBio}>
+              <Pressable onPress={handleEditBio} accessibilityLabel="Add a bio" accessibilityRole="button">
                 <Text style={{ fontSize: 14, color: colors.textTertiary, textAlign: "center" }}>
                   Add a bio
                 </Text>
@@ -332,6 +346,8 @@ export default function Profile() {
             </View>
             <Pressable
               onPress={() => setShowFriends(true)}
+              accessibilityLabel={`${friends.length} friends — tap to view`}
+              accessibilityRole="button"
               style={{ alignItems: "center", gap: 4, flex: 1 }}
             >
               <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text }}>{friends.length}</Text>
@@ -347,6 +363,8 @@ export default function Profile() {
             {requests.length > 0 && (
               <Pressable
                 onPress={() => setShowFriendRequests(true)}
+                accessibilityLabel={`${requests.length} friend request${requests.length === 1 ? "" : "s"}`}
+                accessibilityRole="button"
                 style={{
                   paddingVertical: 12,
                   paddingHorizontal: 16,
@@ -384,7 +402,74 @@ export default function Profile() {
                 People You May Know
               </Text>
 
-              {recsLoading ? (
+              {/* Contact sync prompt — first time only */}
+              {!lastSyncedAt && !dismissedSyncCard && contactsSyncEnabled && (
+                <View
+                  style={{
+                    padding: 16,
+                    borderRadius: 12,
+                    backgroundColor: colors.surface,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    gap: 10,
+                  }}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    <Ionicons name="people-outline" size={22} color={Colors.primary} />
+                    <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text, flex: 1 }}>
+                      Find friends from your contacts
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 18 }}>
+                    We&apos;ll match phone numbers privately — only hashes are sent, never your actual contacts.
+                  </Text>
+                  <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
+                    <Pressable
+                      onPress={async () => {
+                        const ok = await syncNow();
+                        if (ok) refreshRecs();
+                      }}
+                      disabled={contactSyncing}
+                      accessibilityLabel="Find friends from contacts"
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: contactSyncing }}
+                      style={{
+                        flex: 1,
+                        paddingVertical: 10,
+                        borderRadius: 10,
+                        backgroundColor: Colors.primary,
+                        alignItems: "center",
+                        opacity: contactSyncing ? 0.6 : 1,
+                      }}
+                    >
+                      {contactSyncing ? (
+                        <ActivityIndicator color={Colors.white} size="small" />
+                      ) : (
+                        <Text style={{ fontSize: 14, fontWeight: "600", color: Colors.white }}>
+                          Find Friends
+                        </Text>
+                      )}
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setDismissedSyncCard(true)}
+                      accessibilityLabel="Not now"
+                      accessibilityRole="button"
+                      style={{
+                        paddingVertical: 10,
+                        paddingHorizontal: 16,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        alignItems: "center",
+                      }}
+                    >
+                      <Text style={{ fontSize: 14, color: colors.textSecondary }}>Not Now</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {recsLoading || contactSyncing ? (
                 <ActivityIndicator />
               ) : recommendations.length > 0 ? (
                 recommendations.map((rec) => (
@@ -398,11 +483,15 @@ export default function Profile() {
                         {rec.username}
                       </Text>
                       <Text style={{ fontSize: 13, color: colors.textSecondary }}>
-                        {rec.mutual_count} mutual friend{rec.mutual_count !== 1 ? "s" : ""}
+                        {rec.source === "contact"
+                          ? "From your contacts"
+                          : `${rec.mutual_count} mutual friend${rec.mutual_count !== 1 ? "s" : ""}`}
                       </Text>
                     </View>
                     <Pressable
                       onPress={() => sendRequest(rec.user_id)}
+                      accessibilityLabel={`Add ${rec.username}`}
+                      accessibilityRole="button"
                       style={{
                         paddingVertical: 6,
                         paddingHorizontal: 14,
@@ -423,7 +512,7 @@ export default function Profile() {
               )}
 
               {/* Search CTA */}
-              <Pressable onPress={() => setShowUserSearch(true)}>
+              <Pressable onPress={() => setShowUserSearch(true)} accessibilityLabel="Search for friends" accessibilityRole="button">
                 <Text
                   style={{
                     fontSize: 14,
@@ -441,6 +530,8 @@ export default function Profile() {
           {/* Sign Out Button */}
           <Pressable
             onPress={handleSignOut}
+            accessibilityLabel="Sign out"
+            accessibilityRole="button"
             style={{
               padding: 16,
               borderRadius: 12,
@@ -470,6 +561,8 @@ export default function Profile() {
                 <Pressable
                   key={plan.id}
                   onPress={() => router.push(`/event/${plan.id}` as any)}
+                  accessibilityLabel={plan.title}
+                  accessibilityRole="button"
                   style={{
                     width: 200,
                     borderRadius: 12,
@@ -539,6 +632,9 @@ export default function Profile() {
                   key={post.id}
                   onPress={() => router.push(`/post/${post.id}` as any)}
                   onLongPress={() => handleDeletePost(post.id, post.photo_path, post.front_photo_path)}
+                  accessibilityLabel="View post"
+                  accessibilityRole="button"
+                  accessibilityHint="Long press to delete"
                   style={{
                     width: postSize,
                     height: postSize,
@@ -604,11 +700,11 @@ export default function Profile() {
               borderBottomColor: colors.separator,
             }}
           >
-            <Pressable onPress={() => setShowBioEdit(false)}>
+            <Pressable onPress={() => setShowBioEdit(false)} accessibilityLabel="Cancel" accessibilityRole="button">
               <Text style={{ fontSize: 16, color: Colors.primary }}>Cancel</Text>
             </Pressable>
             <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>Edit Bio</Text>
-            <Pressable onPress={handleSaveBio} disabled={savingBio}>
+            <Pressable onPress={handleSaveBio} disabled={savingBio} accessibilityLabel="Save bio" accessibilityRole="button" accessibilityState={{ disabled: savingBio }}>
               <Text
                 style={{
                   fontSize: 16,
@@ -629,6 +725,7 @@ export default function Profile() {
               placeholderTextColor={colors.textTertiary}
               multiline
               maxLength={150}
+              accessibilityLabel="Bio"
               style={{
                 padding: 12,
                 borderRadius: 8,

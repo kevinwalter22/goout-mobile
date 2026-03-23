@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   View,
@@ -47,13 +48,14 @@ export default function SignIn() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={{ flex: 1, backgroundColor: colors.background }}
     >
-      <View
-        style={{
-          flex: 1,
+      <ScrollView
+        contentContainerStyle={{
+          flexGrow: 1,
           padding: Spacing.xl,
           justifyContent: "center",
           gap: Spacing.lg,
         }}
+        keyboardShouldPersistTaps="handled"
       >
         <View style={{ alignItems: "center", gap: Spacing.sm }}>
           <Image
@@ -81,6 +83,7 @@ export default function SignIn() {
               autoCapitalize="none"
               autoComplete="email"
               keyboardType="email-address"
+              accessibilityLabel="Email address"
               style={{
                 padding: Spacing.md,
                 borderRadius: BorderRadius.sm,
@@ -105,6 +108,7 @@ export default function SignIn() {
               secureTextEntry
               autoCapitalize="none"
               autoComplete="password"
+              accessibilityLabel="Password"
               style={{
                 padding: Spacing.md,
                 borderRadius: BorderRadius.sm,
@@ -120,6 +124,9 @@ export default function SignIn() {
           <Pressable
             onPress={handleSignIn}
             disabled={loading}
+            accessibilityLabel="Sign in"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: loading }}
             style={({ pressed }) => ({
               marginTop: Spacing.sm,
               padding: Spacing.lg,
@@ -148,7 +155,7 @@ export default function SignIn() {
           >
             <Text style={{ color: colors.textSecondary }}>Don&apos;t have an account?</Text>
             <Link href="/(auth)/signup" asChild>
-              <Pressable>
+              <Pressable accessibilityLabel="Sign up" accessibilityRole="link">
                 <Text style={{ fontWeight: FontWeight.semibold, color: Colors.primary }}>
                   Sign Up
                 </Text>
@@ -156,7 +163,7 @@ export default function SignIn() {
             </Link>
           </View>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }

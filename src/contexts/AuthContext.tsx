@@ -6,6 +6,7 @@ import { clearExpiredUrlCache } from "../utils/storage";
 import { setSentryUser } from "../lib/sentry";
 import { logAnalyticsEvent } from "../lib/analyticsLogger";
 import { captureError } from "../lib/logger";
+import { setLocationOverride } from "../utils/location";
 import type { Profile } from "../types/database";
 
 type AuthContextType = {
@@ -49,6 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
+      setLocationOverride(session?.user?.email ?? null);
       if (session?.user) {
         loadProfile(session.user.id);
       } else {
@@ -63,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       setSentryUser(session?.user?.id ?? null);
+      setLocationOverride(session?.user?.email ?? null);
 
       if (event === "SIGNED_OUT") {
         setProfile(null);

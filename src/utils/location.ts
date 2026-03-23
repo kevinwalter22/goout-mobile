@@ -4,6 +4,34 @@ import { CHECK_IN_RADIUS_METERS } from "../config/constants";
 // Conversion constants
 const METERS_PER_MILE = 1609.344;
 
+// ── Review account location override ───────────────────────────
+// Downtown Potsdam, NY — Market St & Main St intersection
+const REVIEW_LOCATION = { latitude: 44.6697, longitude: -74.9811 };
+const REVIEW_EMAIL = "developer@euda.live";
+
+// Module-level override: set by calling setLocationOverride()
+let _overrideEmail: string | null = null;
+
+/**
+ * Call once after login to enable location override for the review account.
+ * Pass null on sign-out to clear.
+ */
+export function setLocationOverride(email: string | null) {
+  _overrideEmail = email;
+}
+
+function isReviewAccount(): boolean {
+  return _overrideEmail === REVIEW_EMAIL;
+}
+
+/**
+ * Returns true when the current user has a location override active.
+ * Used by map components to hide native blue dot and show a custom marker.
+ */
+export function isLocationOverridden(): boolean {
+  return isReviewAccount();
+}
+
 /**
  * Calculate distance between two coordinates using Haversine formula
  * Returns distance in meters
@@ -43,6 +71,16 @@ export function getDistanceInMiles(
 }
 
 /**
+ * Get the current foreground location permission status without triggering a prompt.
+ * Returns "granted", "denied", "undetermined", or "restricted".
+ */
+export async function getLocationPermissionStatus(): Promise<string> {
+  if (isReviewAccount()) return "granted";
+  const { status } = await Location.getForegroundPermissionsAsync();
+  return status;
+}
+
+/**
  * Request location permissions from the user.
  * Returns `denied: true` when the user has previously denied permission
  * and the OS will no longer show the permission prompt.
@@ -52,6 +90,9 @@ export async function requestLocationPermission(): Promise<{
   denied?: boolean;
   error?: string;
 }> {
+  // Review account always has "permission"
+  if (isReviewAccount()) return { granted: true };
+
   try {
     // Check current status without triggering a prompt
     const { status: currentStatus } =
@@ -98,6 +139,9 @@ export async function getCurrentLocation(): Promise<{
   longitude: number;
   error?: string;
 }> {
+  // Review account: always downtown Potsdam
+  if (isReviewAccount()) return REVIEW_LOCATION;
+
   try {
     const location = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.Balanced,

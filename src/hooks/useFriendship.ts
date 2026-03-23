@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
 import { mediumHaptic } from "../utils/haptics";
@@ -14,6 +14,8 @@ export function useFriendship(targetUserId: string | null) {
   const [status, setStatus] = useState<FriendshipStatus>("none");
   const [friendshipId, setFriendshipId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Track who initiated the friendship (for accept notifications)
+  const initiatorId = useRef<string | null>(null);
 
   useEffect(() => {
     if (!user || !targetUserId) {
@@ -40,8 +42,10 @@ export function useFriendship(targetUserId: string | null) {
     if (!data) {
       setStatus("none");
       setFriendshipId(null);
+      initiatorId.current = null;
     } else {
       const friendship = data as any;
+      initiatorId.current = friendship.user_id;
       if (friendship.status === "accepted") {
         setStatus("accepted");
         setFriendshipId(friendship.id);
@@ -79,6 +83,14 @@ export function useFriendship(targetUserId: string | null) {
         mediumHaptic();
         setStatus("pending_sent");
         setFriendshipId((data as any).id);
+        initiatorId.current = user.id;
+
+        // Fire-and-forget notification
+        supabase.functions
+          .invoke("send-notification", {
+            body: { type: "friend_request", recipient_id: targetUserId },
+          })
+          .catch(() => {});
       }
     } catch (error) {
       console.error("Error sending friend request:", error);
@@ -101,6 +113,16 @@ export function useFriendship(targetUserId: string | null) {
       if (!error) {
         mediumHaptic();
         setStatus("accepted");
+
+        // Notify the original requester that their request was accepted
+        const senderId = initiatorId.current;
+        if (senderId && senderId !== user.id) {
+          supabase.functions
+            .invoke("send-notification", {
+              body: { type: "friend_accepted", recipient_id: senderId },
+            })
+            .catch(() => {});
+        }
       }
     } catch (error) {
       console.error("Error accepting friend request:", error);

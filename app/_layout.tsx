@@ -1,12 +1,28 @@
+import { Component, useEffect, useRef, useState } from "react";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { Text, View } from "react-native";
+import { Alert, Platform, Pressable, Text, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthProvider } from "../src/contexts/AuthContext";
+import { useAuth } from "../src/hooks/useAuth";
 import { ToastProvider } from "../src/context/ToastContext";
 import { ThemeProvider, useTheme } from "../src/contexts/ThemeContext";
 import { validateEnv } from "../src/config/env";
 import { initSentry, SentryWrap } from "../src/lib/sentry";
 import { captureWarning } from "../src/lib/logger";
+import {
+  registerForPushNotifications,
+  removePushToken,
+  addNotificationResponseListener,
+  handleNotificationResponse,
+  getPushPermissionStatus,
+} from "../src/lib/notifications";
+import {
+  getSimMode,
+  subscribeSimMode,
+  simModeDisplay,
+  type SimMode,
+} from "../src/lib/devNetworkSim";
 
 // Initialize Sentry before any component renders
 initSentry();
@@ -21,6 +37,8 @@ function ThemedStack() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.background },
+          gestureEnabled: true,
+          gestureDirection: "horizontal",
         }}
       />
     </>
@@ -69,6 +87,151 @@ function EnvErrorScreen({ missing }: { missing: string[] }) {
   );
 }
 
+function DevSimBanner() {
+  const [mode, setMode] = useState<SimMode>(getSimMode());
+
+  useEffect(() => {
+    return subscribeSimMode(setMode);
+  }, []);
+
+  const display = simModeDisplay(mode);
+  if (!display) return null;
+
+  return (
+    <View
+      style={{
+        backgroundColor: display.color,
+        paddingVertical: 4,
+        paddingHorizontal: 12,
+        alignItems: "center",
+      }}
+    >
+      <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700", letterSpacing: 1 }}>
+        {display.label}
+      </Text>
+    </View>
+  );
+}
+
+async function initPushNotifications(userId: string) {
+  if (Platform.OS === "web") return;
+
+  const status = await getPushPermissionStatus();
+
+  if (status === "undetermined") {
+    // Soft-ask: show in-app explanation before the OS permission dialog fires.
+    // Users who understand the value are far more likely to tap "Allow".
+    Alert.alert(
+      "Stay in the Loop",
+      "Get notified when friends are going to events nearby or when you receive a friend request.",
+      [
+        { text: "Not Now", style: "cancel" },
+        {
+          text: "Enable Notifications",
+          onPress: () => registerForPushNotifications(userId),
+        },
+      ],
+    );
+  } else {
+    // Permission already determined — register directly (no OS prompt will re-fire).
+    registerForPushNotifications(userId);
+  }
+}
+
+function NotificationInitializer() {
+  const { user } = useAuth();
+  const prevUserId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (user) {
+      initPushNotifications(user.id);
+      prevUserId.current = user.id;
+    } else if (prevUserId.current) {
+      // User signed out — remove token
+      removePushToken(prevUserId.current);
+      prevUserId.current = null;
+    }
+  }, [user]);
+
+  useEffect(() => {
+    // Handle notification taps (deep-link to relevant screen)
+    const unsub = addNotificationResponseListener(handleNotificationResponse);
+    return () => unsub?.();
+  }, []);
+
+  return null;
+}
+
+function FallbackScreen({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 32,
+        backgroundColor: "#fff",
+        gap: 16,
+      }}
+    >
+      <View
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 16,
+          backgroundColor: "#7C3AED",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <Text style={{ fontSize: 32 }}>E</Text>
+      </View>
+      <Text style={{ fontSize: 22, fontWeight: "700", color: "#111", textAlign: "center" }}>
+        Something went wrong
+      </Text>
+      <Text style={{ fontSize: 15, color: "#666", textAlign: "center", lineHeight: 22 }}>
+        Euda ran into an unexpected error. Your data is safe — tap below to try again.
+      </Text>
+      {onRetry && (
+        <Pressable
+          onPress={onRetry}
+          accessibilityLabel="Try again"
+          accessibilityRole="button"
+          style={{
+            marginTop: 8,
+            paddingHorizontal: 32,
+            paddingVertical: 14,
+            borderRadius: 12,
+            backgroundColor: "#7C3AED",
+          }}
+        >
+          <Text style={{ fontSize: 16, fontWeight: "600", color: "#fff" }}>Try Again</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+class AppErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <FallbackScreen onRetry={() => this.setState({ hasError: false })} />
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function RootLayout() {
   const missingVars = validateEnv();
 
@@ -83,6 +246,8 @@ function RootLayout() {
     <ThemeProvider>
       <AuthProvider>
         <ToastProvider>
+          <NotificationInitializer />
+          {__DEV__ && <DevSimBanner />}
           <ThemedStack />
         </ToastProvider>
       </AuthProvider>
@@ -90,4 +255,14 @@ function RootLayout() {
   );
 }
 
-export default SentryWrap(RootLayout);
+const WrappedRootLayout = SentryWrap(RootLayout);
+
+export default function App() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppErrorBoundary>
+        <WrappedRootLayout />
+      </AppErrorBoundary>
+    </GestureHandlerRootView>
+  );
+}

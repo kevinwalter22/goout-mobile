@@ -143,6 +143,17 @@ export interface Availability {
 // ENRICHMENT RESPONSE
 // ============================================================================
 
+// Audience fit classification
+export const VALID_AUDIENCE_FITS = [
+  "youth_general",  // Broadly appealing to 18-35 (bars, restaurants, parks, concerts)
+  "family",         // Family-oriented (kid-friendly museums, playgrounds)
+  "business",       // Business/professional (conference centers, co-working)
+  "tourist",        // Primarily tourist attractions (souvenir shops, tour buses)
+  "niche",          // Very specific hobby/interest
+  "unknown",        // Cannot determine
+] as const;
+export type ValidAudienceFit = (typeof VALID_AUDIENCE_FITS)[number];
+
 export interface EnrichmentResponse {
   hook_line?: string | null;
   tags?: string[];
@@ -150,6 +161,11 @@ export interface EnrichmentResponse {
   price_bucket?: ValidPriceBucket;
   description?: string | null;
   short_schedule?: string | null;
+  suggested_category?: string | null;
+
+  // Classification fields (v2)
+  audience_fit?: ValidAudienceFit;
+  is_event_venue?: boolean;
 
   // Legacy fields (still supported for backwards compat)
   recurrence?: ValidRecurrence;
@@ -263,6 +279,44 @@ export function validateEnrichmentResponse(raw: unknown): ValidationResult {
         result.short_schedule = sched.substring(0, 97) + "...";
         errors.push("short_schedule truncated to 100 chars");
       }
+    }
+  }
+
+  // Validate suggested_category
+  if ("suggested_category" in response && response.suggested_category !== null) {
+    if (typeof response.suggested_category === "string") {
+      const VALID_CATEGORIES = [
+        "Outdoor", "Nightlife", "Winter Activities",
+        "Arts & Culture", "Sports & Recreation", "Food & Drink", "Anchor",
+      ];
+      const suggested = response.suggested_category.trim();
+      // Case-insensitive match
+      const matched = VALID_CATEGORIES.find(
+        (c) => c.toLowerCase() === suggested.toLowerCase()
+      );
+      if (matched) {
+        result.suggested_category = matched;
+      } else {
+        errors.push(`Invalid suggested_category "${suggested}", ignoring`);
+      }
+    }
+  }
+
+  // Validate audience_fit
+  if ("audience_fit" in response && typeof response.audience_fit === "string") {
+    const fit = response.audience_fit.toLowerCase().trim();
+    if (VALID_AUDIENCE_FITS.includes(fit as ValidAudienceFit)) {
+      result.audience_fit = fit as ValidAudienceFit;
+    } else {
+      result.audience_fit = "unknown";
+      errors.push(`Invalid audience_fit "${response.audience_fit}", defaulting to unknown`);
+    }
+  }
+
+  // Validate is_event_venue
+  if ("is_event_venue" in response) {
+    if (typeof response.is_event_venue === "boolean") {
+      result.is_event_venue = response.is_event_venue;
     }
   }
 
@@ -405,11 +459,24 @@ export function validateEnrichmentResponse(raw: unknown): ValidationResult {
 }
 
 // ============================================================================
+// ENRICHMENT SYSTEM PROMPT (shared by both single-item and queue worker)
+// ============================================================================
+
+export const ENRICHMENT_SYSTEM_PROMPT = `You are a classification and enrichment engine for Euda, a local discovery app that helps people find things to do. Your job is to produce RICH, ACCURATE metadata so items appear in the right themed cards in the app feed.
+
+CRITICAL: You must assign 5-10 tags per item from the allowed list. Tags drive the entire card-based UI — items with too few tags become invisible to users. Think about EVERY dimension: what type of activity is it, who is it for, what's the vibe, is it indoors or outdoors, and what's the price?
+
+Always respond with valid JSON only, no markdown or explanation.`;
+
+// ============================================================================
 // PROMPT BUILDER
 // ============================================================================
 
 /**
- * Build the enrichment prompt for an explore item
+ * Build the enrichment prompt for an explore item.
+ *
+ * The prompt is structured to produce rich, multi-dimensional tags that feed
+ * into the 37 themed card groups in the explore feed.
  */
 export function buildEnrichmentPrompt(item: {
   title: string;
@@ -421,6 +488,10 @@ export function buildEnrichmentPrompt(item: {
   recurrence?: string | null;
   season?: string | null;
   tags?: string[];
+  location_name?: string | null;
+  town?: string | null;
+  price_bucket?: string | null;
+  kind?: string | null;
 }): string {
   const today = new Date();
   const todayStr = today.toISOString().split("T")[0];
@@ -433,71 +504,294 @@ export function buildEnrichmentPrompt(item: {
   else if (month >= 5 && month <= 7) currentSeason = "summer";
   else if (month >= 8 && month <= 10) currentSeason = "fall";
 
-  return `You are enriching event/activity data for a local discovery app.
+  return `Enrich this item for the Euda local discovery app.
 
 ITEM DATA:
 - Title: ${item.title}
 - Category: ${item.category || "unknown"}
+- Kind: ${item.kind || "unknown"}
 - Description: ${item.description || "none"}
+- Location: ${item.location_name || "unknown"}${item.town ? `, ${item.town}` : ""}
 - Current hook_line: ${item.hook_line || "none"}
 - Schedule: ${item.schedule_text || "none"}
 - Time: ${item.time_text || "none"}
-- Recurrence info: ${item.recurrence || "unknown"}
+- Recurrence: ${item.recurrence || "unknown"}
 - Season: ${item.season || "year-round"}
+- Current price_bucket: ${item.price_bucket || "unknown"}
 - Current tags: ${item.tags?.length ? item.tags.join(", ") : "none"}
 
 TODAY: ${todayStr} (${dayOfWeek}), current season: ${currentSeason}
 
-TASK:
-1. Determine if this is an EVENT (specific date/time) or ACTIVITY (ongoing, repeatable)
-2. Extract structured availability from the schedule/time/season info
-3. If hook_line is missing or weak, generate a compelling 10-20 word hook
-4. Suggest relevant tags (be generous - assign all that apply)
-5. Infer price_bucket from the title, description, and category
-6. If description is "none", write a concise 1-2 sentence description of the place or event
-7. If schedule info is verbose (long weekday listings), generate a condensed "short_schedule" (e.g., "Mon-Fri 8AM-8PM" or "Daily 10AM-6PM, Sun closed")
+═══════════════════════════════════════════════════════════════
+TAG TAXONOMY — assign 5-10 tags from ONLY these values.
+Think about EVERY applicable dimension for this item.
+═══════════════════════════════════════════════════════════════
 
-PRICING RULES:
-- Public parks, trails, scenic overlooks, playgrounds = "free"
-- Free community events, volunteer activities = "free"
-- Casual restaurants, coffee shops, bars, breweries = "$"
-- Mid-range dining, shows, attractions with admission = "$$"
-- Upscale dining, concerts, premium experiences = "$$$"
-- If unsure, use "unknown"
+SETTING (pick at least 1):
+  "outdoors" — any outdoor activity, park, trail, beach, garden, sports field
+  "indoors" — any indoor venue: restaurant, museum, theater, gym, shop, bar
 
-IMPORTANT RULES:
+ACTIVITY TYPE (pick all that apply):
+  "hiking" — trails, hikes, walks in nature
+  "camping" — campgrounds, RV parks, glamping
+  "swimming" — pools, beaches, water parks, swim spots
+  "water_activity" — kayaking, fishing, boating, canoeing, paddle boarding
+  "winter_activity" — any cold-weather activity
+  "skiing" — downhill or cross-country skiing
+  "snowboarding" — snowboarding specifically
+  "ice_skating" — ice rinks, frozen ponds
+
+FOOD & DRINK (pick all that apply):
+  "coffee" — coffee shops, cafes, tea houses, bakeries with coffee
+  "food" — any place that serves food
+  "dining" — sit-down restaurants (not fast food)
+  "drinks" — places focused on beverages (bars, pubs, wine bars, juice bars)
+  "bar" — bars, pubs, taverns, wine bars
+  "brewery" — breweries, taprooms, cideries, distilleries
+
+ENTERTAINMENT (pick all that apply):
+  "live_music" — live bands, open mic, DJ nights, karaoke
+  "concert" — ticketed music performances, symphony, orchestra
+  "theater" — plays, musicals, comedy shows, improv, spoken word
+  "museum" — museums, galleries, exhibitions, historical sites
+  "festival" — multi-day or large-scale community celebrations
+  "fair" — county fairs, carnivals, craft fairs
+  "market" — farmers markets, flea markets, holiday markets, pop-ups
+
+NATURE (pick all that apply):
+  "nature" — natural settings, forests, lakes, rivers, mountains
+  "parks" — public parks, gardens, playgrounds, recreation areas
+  "scenic" — viewpoints, overlooks, scenic drives, photo-worthy spots
+  "trail" — marked trails (hiking, biking, nature walks)
+
+AUDIENCE — who is this best for? (pick ALL that genuinely apply):
+  "family_friendly" — safe and fun for parents + kids of any age
+  "kids" — specifically designed for or appealing to children
+  "adults_only" — 21+, bars, clubs, wine tastings, adult content
+  "date_night" — romantic, intimate, good for couples (nice restaurants, wine bars, sunset spots, shows)
+  "solo_friendly" — enjoyable alone (cafes, museums, trails, bookstores)
+  "group_activity" — best with a group (team sports, group tours, escape rooms)
+
+VIBE (pick all that apply):
+  "nightlife" — evening/night entertainment (bars, clubs, late-night shows)
+  "relaxing" — calm, peaceful, restorative (spas, gardens, quiet cafes, scenic drives)
+  "adventure" — exciting, adrenaline (rock climbing, zip lines, skydiving, mountain biking)
+  "cultural" — arts, heritage, traditions, ethnic food, historical
+  "educational" — learning opportunities (workshops, classes, lectures, nature centers)
+  "social" — good for meeting people (meetups, group classes, community events)
+  "fitness" — physical exercise (gyms, running groups, yoga, sports leagues)
+  "wellness" — health-focused (spas, meditation, yoga, health food)
+
+PRICE & VALUE:
+  "free" — no cost to participate/visit (public parks, free events, free museums)
+  "budget_friendly" — under $15 per person, or cheap for its category
+
+SPECIAL ATTRIBUTES:
+  "local_favorite" — well-known locally, community institution, "everyone knows this place"
+  "seasonal" — only available certain times of year, or has seasonal specials
+  "pet_friendly" — dogs/pets welcome
+  "accessible" — wheelchair accessible, ADA compliant
+  "shopping" — retail, boutiques, gift shops, bookstores
+  "volunteer" — community service, cleanups, charity events
+
+═══════════════════════════════════════════════════════════════
+TAGGING EXAMPLES (to calibrate your decisions):
+═══════════════════════════════════════════════════════════════
+
+"Starbucks" → coffee, food, indoors, solo_friendly, budget_friendly
+"Central Park" → outdoors, parks, nature, free, family_friendly, solo_friendly, pet_friendly, scenic
+"Joe's Bar & Grill" → food, dining, bar, drinks, indoors, social, adults_only
+"Sunset Yoga in the Park" → outdoors, parks, fitness, wellness, relaxing, free, solo_friendly
+"Live Jazz at Blue Note" → live_music, indoors, nightlife, date_night, adults_only, cultural
+"Kids Science Museum" → museum, indoors, educational, family_friendly, kids, cultural
+"Farmers Market Saturday" → market, outdoors, food, shopping, family_friendly, social, free
+"Cascade Mountain Trail" → hiking, trail, outdoors, nature, adventure, scenic, free, solo_friendly, fitness
+"Craft Beer Festival" → festival, brewery, drinks, outdoors, social, food, adults_only
+"Community Cleanup Day" → volunteer, outdoors, social, free, group_activity, family_friendly
+
+═══════════════════════════════════════════════════════════════
+CATEGORY VALIDATION
+═══════════════════════════════════════════════════════════════
+
+Valid categories: Outdoor, Nightlife, Winter Activities, Arts & Culture, Sports & Recreation, Food & Drink, Anchor
+
+If the current category is wrong or "unknown", suggest the correct one in "suggested_category".
+Examples of miscategorization to fix:
+- A restaurant listed as "Outdoor" → should be "Food & Drink"
+- A museum listed as "Anchor" → should be "Arts & Culture"
+- A ski resort listed as "Outdoor" → should be "Winter Activities"
+- A bar listed as "Anchor" → should be "Nightlife"
+
+═══════════════════════════════════════════════════════════════
+AUDIENCE & VENUE CLASSIFICATION
+═══════════════════════════════════════════════════════════════
+
+AUDIENCE FIT — who is this PRIMARILY for? Pick ONE:
+  "youth_general" — broadly appealing to people 18-35 looking for things to do
+    (bars, restaurants, concerts, parks, hiking, breweries, coffee shops, festivals)
+  "family" — specifically family-oriented, designed for parents + kids
+    (children's museums, playgrounds, family restaurants, kid-friendly events)
+  "business" — business/professional venues NOT relevant for going out
+    (conference centers, co-working spaces, business hotels, office buildings)
+  "tourist" — primarily tourist traps, not places locals actually go
+    (souvenir shops, tour buses, tourist-only attractions)
+  "niche" — very specialized hobby that most people wouldn't seek out
+    (RC car tracks, stamp collecting clubs, specialty trade suppliers)
+  "unknown" — genuinely cannot determine
+
+IMPORTANT: Default to "youth_general" for most places. A good restaurant, bar,
+park, museum, trail, or event is "youth_general" even if families also go there.
+Only use "family" if it's SPECIFICALLY kid-oriented. Only use "business"/"tourist"
+if it's clearly NOT a place someone would go for fun.
+
+IS_EVENT_VENUE — does this place regularly host events/performances?
+  true: bars with live music nights, concert halls, theaters, comedy clubs,
+        event spaces, nightclubs with DJ nights, community centers with regular events
+  false: restaurants (unless they have regular live music), parks, trails,
+         shops, most activities
+
+═══════════════════════════════════════════════════════════════
+OTHER FIELDS
+═══════════════════════════════════════════════════════════════
+
+HOOK LINE: If missing or under 10 chars, write a compelling 10-20 word hook.
+  Good: "Award-winning craft brews in a cozy taproom with mountain views"
+  Bad: "A nice place" or "Come visit us"
+
+PRICE BUCKET:
+  "free" — public parks, trails, playgrounds, free community events, volunteer
+  "$" — coffee shops, fast casual, cheap bars, budget activities (<$30)
+  "$$" — sit-down restaurants, shows, attractions with admission ($30-75)
+  "$$$" — upscale dining, premium concerts, exclusive experiences ($75+)
+  "unknown" — genuinely cannot determine from available info
+
+DESCRIPTION: If missing, write 1-2 concise sentences about the place/event.
+
+SHORT SCHEDULE: If schedule_text is verbose, condense to short form.
+  "Mon-Fri 8AM-5PM" or "Daily 10AM-6PM, Sun closed" or "Weekends only"
+
+AVAILABILITY RULES:
 - Most items without a specific date are ACTIVITIES (hikes, restaurants, trails)
-- "Daily" or "Any day" means available_days: ["daily"]
-- "Year-round" or no season restriction means available_seasons: ["year_round"]
-- "Dawn to dusk" or outdoor activities = available_times: "daylight"
-- Weekly events (e.g., "Wing Night Wednesday") = type: "activity", available_days: ["wed"]
-- Parse durations like "2-3 hours" into typical_duration
+- "Daily" means available_days: ["daily"]
+- "Year-round" means available_seasons: ["year_round"]
+- "Dawn to dusk" = available_times: "daylight"
 
 VALID VALUES:
 - available_days: ${VALID_DAYS.join(", ")}
 - available_seasons: ${VALID_SEASONS.join(", ")}
 - best_time_of_day: ${VALID_TIMES_OF_DAY.join(", ")}
-- recurrence (for events): ${VALID_RECURRENCE.join(", ")}
+- recurrence (events): ${VALID_RECURRENCE.join(", ")}
 - price_bucket: ${VALID_PRICE_BUCKETS.join(", ")}
-- tags: ${VALID_TAGS.join(", ")}
+- audience_fit: ${VALID_AUDIENCE_FITS.join(", ")}
 
 RESPOND WITH VALID JSON ONLY:
 {
   "hook_line": "string or null if current one is good",
-  "tags": ["tag1", "tag2"],
-  "price_bucket": "free" or "$" or "$$" or "$$$" or "unknown",
-  "description": "1-2 sentence description (or null if description already exists)",
-  "short_schedule": "Mon-Fri 8AM-5PM" (condensed from verbose schedule, or null if not needed),
+  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
+  "suggested_category": "Food & Drink" (or null if current category is correct),
+  "price_bucket": "free" | "$" | "$$" | "$$$" | "unknown",
+  "description": "1-2 sentence description, or null if already exists",
+  "short_schedule": "condensed schedule string, or null if not needed",
+  "audience_fit": "youth_general" | "family" | "business" | "tourist" | "niche" | "unknown",
+  "is_event_venue": true or false,
   "availability": {
     "type": "event" or "activity",
-    "available_days": ["daily"] or ["mon", "wed", "fri"] etc,
+    "available_days": ["daily"],
     "available_times": "anytime" or "daylight" or {"start": "09:00", "end": "17:00"},
-    "available_seasons": ["year_round"] or ["summer", "fall"] etc,
-    "typical_duration": "2-3 hours" or "full day" or "multi-day",
-    "best_time_of_day": "morning" or "afternoon" or "evening" or "anytime",
-    "recurrence": "none" or "weekly" or "annual" (for events only),
-    "next_occurrence": "ISO8601 datetime" (for events only, null for activities),
+    "available_seasons": ["year_round"],
+    "typical_duration": "2-3 hours",
+    "best_time_of_day": "morning" | "afternoon" | "evening" | "anytime",
+    "recurrence": "none" | "weekly" | "annual" (events only),
+    "next_occurrence": "ISO8601 datetime" (events only, null for activities),
     "confidence": 85
   }
 }`;
+}
+
+// ============================================================================
+// PROVENANCE BUILDER
+// ============================================================================
+
+/**
+ * Build per-field provenance entries for LLM-enriched fields.
+ * Merges with existing provenance, only overwriting when new confidence
+ * exceeds existing. Returns the full provenance object to pass to
+ * apply_enrichment's p_provenance parameter.
+ */
+export function buildEnrichmentProvenance(
+  enrichment: EnrichmentResponse,
+  existingProvenance: Record<string, unknown> | null
+): Record<string, unknown> {
+  const now = new Date().toISOString();
+  const existing = existingProvenance || {};
+  const existingFields = (existing.fields || {}) as Record<string, Record<string, unknown>>;
+  const newFields: Record<string, Record<string, unknown>> = { ...existingFields };
+
+  const setField = (
+    field: string,
+    confidence: number,
+    method = "ai_inferred"
+  ) => {
+    const current = existingFields[field];
+    // Only overwrite if new confidence exceeds existing
+    if (current && typeof current.confidence === "number" && current.confidence >= confidence) {
+      return;
+    }
+    newFields[field] = {
+      confidence,
+      source_type: "ai_enrichment",
+      set_at: now,
+      method,
+    };
+  };
+
+  // hook_line — AI always generates this
+  if (enrichment.hook_line) {
+    setField("hook_line", 0.70);
+  }
+
+  // tags — higher confidence with more tags
+  if (enrichment.tags && enrichment.tags.length > 0) {
+    setField("tags", enrichment.tags.length >= 5 ? 0.75 : 0.60);
+  }
+
+  // price_bucket — moderate AI inference
+  if (enrichment.price_bucket && enrichment.price_bucket !== "unknown") {
+    setField("price_bucket", 0.60);
+  }
+
+  // availability_json — use the enrichment's own confidence if available
+  if (enrichment.availability) {
+    const conf = typeof enrichment.availability.confidence === "number"
+      ? enrichment.availability.confidence / 100
+      : 0.65;
+    setField("availability_json", Math.min(conf, 0.85));
+  }
+
+  // description — moderate confidence
+  if (enrichment.description) {
+    setField("description", 0.65);
+  }
+
+  // suggested_category — fairly reliable AI corrections
+  if (enrichment.suggested_category) {
+    setField("category", 0.72);
+  }
+
+  // audience_fit — AI classification
+  if (enrichment.audience_fit && enrichment.audience_fit !== "unknown") {
+    setField("audience_fit", 0.75);
+  }
+
+  // is_event_venue — AI detection
+  if (enrichment.is_event_venue !== undefined) {
+    setField("is_event_venue", 0.70);
+  }
+
+  return {
+    ...existing,
+    schema_version: 2,
+    fields: newFields,
+    confirmations: (existing.confirmations as unknown[]) || [],
+  };
 }

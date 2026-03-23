@@ -16,6 +16,8 @@ import { createLLMProvider } from "../_shared/llm-provider.ts";
 import {
   buildEnrichmentPrompt,
   validateEnrichmentResponse,
+  buildEnrichmentProvenance,
+  ENRICHMENT_SYSTEM_PROMPT,
 } from "../_shared/enrichment-schema.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
@@ -24,6 +26,7 @@ interface WorkerConfig {
   batch_size?: number;
   max_items?: number;
   dry_run?: boolean;
+  force_enrich?: boolean;
 }
 
 interface ProcessResult {
@@ -63,6 +66,7 @@ Deno.serve(async (req) => {
     const batchSize = config.batch_size || 5;
     const maxItems = config.max_items || 50;
     const dryRun = config.dry_run || false;
+    const forceEnrich = config.force_enrich || false;
 
     // Create Supabase client with service role
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -87,6 +91,27 @@ Deno.serve(async (req) => {
     let processedCount = 0;
     let totalTokensUsed = { input: 0, output: 0 };
 
+    // Check daily LLM budget before starting
+    const maxDailyCalls = parseInt(Deno.env.get("LLM_DAILY_MAX_CALLS") || "1000", 10);
+    const { data: budgetCheck } = await supabase.rpc("check_llm_daily_budget", {
+      p_max_calls: maxDailyCalls,
+    });
+
+    if (budgetCheck && budgetCheck.length > 0 && !budgetCheck[0].allowed) {
+      console.log(
+        `Daily LLM budget exhausted: ${budgetCheck[0].calls_today}/${maxDailyCalls} calls used today. Skipping run.`
+      );
+      return new Response(
+        JSON.stringify({
+          success: true,
+          budget_exhausted: true,
+          calls_today: budgetCheck[0].calls_today,
+          max_daily_calls: maxDailyCalls,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     console.log(`Starting enrichment worker: batch_size=${batchSize}, max_items=${maxItems}, dry_run=${dryRun}`);
 
     // Process in batches
@@ -108,11 +133,14 @@ Deno.serve(async (req) => {
       console.log(`Processing: ${job.item_title} (${job.explore_item_id})`);
 
       // Check if enrichment is actually needed
+      // Require at least 5 tags for the card feed to work well
+      // force_enrich bypasses this check (used for v2 backfill)
       const needsEnrichment =
+        forceEnrich ||
         !job.item_hook_line ||
         job.item_hook_line.length < 10 ||
         !job.item_tags ||
-        job.item_tags.length === 0 ||
+        job.item_tags.length < 5 ||
         !job.item_availability_json ||
         job.item_price_bucket === "unknown" ||
         !job.item_description ||
@@ -176,20 +204,20 @@ Deno.serve(async (req) => {
           recurrence: job.item_recurrence,
           season: job.item_season,
           tags: job.item_tags,
+          location_name: job.item_location_name,
+          town: job.item_town,
+          price_bucket: job.item_price_bucket,
+          kind: job.item_kind,
         });
 
         // Call LLM
         const llmResponse = await llm.chat(
           [
-            {
-              role: "system",
-              content:
-                "You are a helpful assistant that enriches event data. Always respond with valid JSON only, no markdown or explanation.",
-            },
+            { role: "system", content: ENRICHMENT_SYSTEM_PROMPT },
             { role: "user", content: prompt },
           ],
           {
-            maxTokens: 512,
+            maxTokens: 1024,
             temperature: 0.3,
             jsonMode: llm.name === "openai",
           }
@@ -199,6 +227,12 @@ Deno.serve(async (req) => {
         if (llmResponse.usage) {
           totalTokensUsed.input += llmResponse.usage.input_tokens;
           totalTokensUsed.output += llmResponse.usage.output_tokens;
+
+          // Record usage in daily budget tracker
+          await supabase.rpc("record_llm_usage", {
+            p_input_tokens: llmResponse.usage.input_tokens,
+            p_output_tokens: llmResponse.usage.output_tokens,
+          });
         }
 
         // Parse response
@@ -223,6 +257,14 @@ Deno.serve(async (req) => {
         const startsAt = enrichment.availability?.next_occurrence || enrichment.next_occurrence?.starts_at;
         const endsAt = enrichment.next_occurrence?.ends_at;
 
+        // Build per-field provenance for confidence tracking
+        const provenance = buildEnrichmentProvenance(
+          enrichment,
+          job.item_provenance as Record<string, unknown> | null
+        );
+
+        const CURRENT_ENRICHMENT_VERSION = 2;
+
         const { error: applyError } = await supabase.rpc("apply_enrichment", {
           p_explore_item_id: job.explore_item_id,
           p_hook_line: enrichment.hook_line,
@@ -234,10 +276,22 @@ Deno.serve(async (req) => {
           p_price_bucket: enrichment.price_bucket || null,
           p_description: enrichment.description || null,
           p_time_text: enrichment.short_schedule || null,
+          p_provenance: provenance,
+          p_audience_fit: enrichment.audience_fit || null,
+          p_is_event_venue: enrichment.is_event_venue ?? null,
+          p_enrichment_version: CURRENT_ENRICHMENT_VERSION,
         });
 
         if (applyError) {
           throw new Error(`Failed to apply: ${applyError.message}`);
+        }
+
+        // Apply suggested category correction if provided
+        if (enrichment.suggested_category) {
+          await supabase
+            .from("explore_items")
+            .update({ category: enrichment.suggested_category })
+            .eq("id", job.explore_item_id);
         }
 
         // Mark job complete
@@ -276,6 +330,15 @@ Deno.serve(async (req) => {
       }
 
       processedCount++;
+
+      // Re-check daily budget after each LLM call
+      const { data: midRunBudget } = await supabase.rpc("check_llm_daily_budget", {
+        p_max_calls: maxDailyCalls,
+      });
+      if (midRunBudget && midRunBudget.length > 0 && !midRunBudget[0].allowed) {
+        console.log(`Daily LLM budget reached mid-batch (${midRunBudget[0].calls_today}/${maxDailyCalls}). Stopping.`);
+        break;
+      }
 
       // Small delay between items to avoid rate limits
       await new Promise((resolve) => setTimeout(resolve, 200));

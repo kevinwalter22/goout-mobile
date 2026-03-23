@@ -24,7 +24,7 @@ const PLACES_API_BASE = "https://places.googleapis.com/v1/";
 const BUCKET_NAME = "explore-images";
 const FULL_SIZE = { maxWidth: 1200, maxHeight: 800 };
 const THUMB_SIZE = { maxWidth: 400, maxHeight: 300 };
-const CONFIDENCE_THRESHOLD = 0.6;
+const CONFIDENCE_THRESHOLD = 0.5;
 
 interface ItemNeedingImage {
   id: string;
@@ -93,7 +93,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const maxItems = Math.min(body.max_items || 25, 100);
+    const maxItems = Math.min(body.max_items || 50, 200);
     const dryRun = body.dry_run || false;
     const sourceType = body.source_type || null; // e.g. "curated_csv"
 
@@ -187,8 +187,12 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Build search query from location name + town
-        const searchQuery = [item.location_name || item.title, item.town]
+        // Build search query — use location_name if meaningful, otherwise title
+        // Short location names (1-2 words) are often too generic, so combine with title
+        const locName = item.location_name || "";
+        const useLocName = locName.length > 3 && locName.split(/\s+/).length >= 2;
+        const primaryQuery = useLocName ? locName : item.title;
+        const searchQuery = [primaryQuery, item.town]
           .filter(Boolean)
           .join(", ");
 

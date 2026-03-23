@@ -79,7 +79,7 @@ export function FriendsGoingSheet({ visible, onClose, eventId, eventTitle }: Fri
             <Text style={[styles.title, { color: colors.text }]}>Friends Going</Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{eventTitle}</Text>
           </View>
-          <Pressable onPress={onClose} style={styles.closeButton}>
+          <Pressable onPress={onClose} style={styles.closeButton} accessibilityLabel="Close" accessibilityRole="button">
             <Text style={[styles.closeText, { color: colors.textSecondary }]}>✕</Text>
           </Pressable>
         </View>
@@ -110,6 +110,8 @@ export function FriendsGoingSheet({ visible, onClose, eventId, eventTitle }: Fri
                   onClose();
                   router.push(`/user/${item.id}` as any);
                 }}
+                accessibilityLabel={`View ${item.username}'s profile`}
+                accessibilityRole="button"
                 style={[styles.friendItem, { borderBottomColor: colors.borderLight }]}
               >
                 <Avatar avatarUrl={item.avatar_url} size={40} />

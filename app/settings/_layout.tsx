@@ -5,6 +5,8 @@ export default function SettingsLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
+        gestureEnabled: true,
+        gestureDirection: "horizontal",
       }}
     />
   );

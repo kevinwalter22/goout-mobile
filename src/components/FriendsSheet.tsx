@@ -35,7 +35,7 @@ export function FriendsSheet({ visible, onClose, onFriendTap }: FriendsSheetProp
         {/* Header */}
         <View style={[styles.header, { borderBottomColor: colors.separator }]}>
           <Text style={[styles.title, { color: colors.text }]}>Friends ({friends.length})</Text>
-          <Pressable onPress={onClose} style={styles.closeButton}>
+          <Pressable onPress={onClose} style={styles.closeButton} accessibilityLabel="Close" accessibilityRole="button">
             <Text style={[styles.closeText, { color: colors.textSecondary }]}>✕</Text>
           </Pressable>
         </View>
@@ -104,12 +104,17 @@ function FriendListItem({
       style={[styles.friendItem, { borderBottomColor: colors.borderLight }]}
       onPress={() => onTap?.(friend.id)}
       disabled={!onTap}
+      accessibilityLabel={onTap ? `View ${friend.username}'s profile` : friend.username}
+      accessibilityRole={onTap ? "button" : "text"}
     >
       <Avatar avatarUrl={friend.avatar_url} size={40} />
       <Text style={[styles.friendUsername, { color: colors.text }]}>{friend.username}</Text>
       <Pressable
         onPress={handleRemove}
         disabled={loading}
+        accessibilityLabel={`Remove ${friend.username}`}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: loading }}
         style={styles.removeButton}
       >
         <Text style={[styles.removeButtonText, { color: Colors.error }]}>

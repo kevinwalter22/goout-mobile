@@ -170,7 +170,8 @@ serve(async (req) => {
           venue_name,
           default_category,
           content_types,
-          site_config
+          site_config,
+          source_type
         `)
         .eq("id", targetId)
         .single();
@@ -199,6 +200,7 @@ serve(async (req) => {
         default_category: data.default_category || null,
         content_types: data.content_types || ["events"],
         site_config: data.site_config || {},
+        source_type: data.source_type || null,
       }];
     } else {
       // Get all enabled targets that are due

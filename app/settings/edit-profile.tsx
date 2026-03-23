@@ -179,26 +179,33 @@ export default function EditProfile() {
           borderBottomColor: colors.border,
         }}
       >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Ionicons name="close" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
+        <View style={{ minWidth: 80 }}>
+          <Pressable onPress={() => router.back()} hitSlop={8} accessibilityLabel="Dismiss" accessibilityRole="button">
+            <Ionicons name="close" size={24} color={colors.text} />
+          </Pressable>
+        </View>
+        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text, flex: 1, textAlign: "center" }}>
           Edit Profile
         </Text>
-        <Pressable
-          onPress={handleSave}
-          disabled={!canSave}
-          style={{
-            backgroundColor: canSave ? Colors.primary : colors.border,
-            paddingHorizontal: 16,
-            paddingVertical: 8,
-            borderRadius: 20,
-          }}
-        >
-          <Text style={{ color: "#fff", fontWeight: "600" }}>
-            {saving ? "Saving..." : "Save"}
-          </Text>
-        </Pressable>
+        <View style={{ minWidth: 80, alignItems: "flex-end" }}>
+          <Pressable
+            onPress={handleSave}
+            disabled={!canSave}
+            accessibilityLabel="Save profile"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canSave }}
+            style={{
+              backgroundColor: canSave ? Colors.primary : colors.border,
+              paddingHorizontal: 16,
+              paddingVertical: 8,
+              borderRadius: 20,
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "600" }}>
+              {saving ? "Saving..." : "Save"}
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
@@ -228,7 +235,7 @@ export default function EditProfile() {
               </View>
             )}
           </View>
-          <Pressable onPress={pickImage} disabled={uploadingImage}>
+          <Pressable onPress={pickImage} disabled={uploadingImage} accessibilityLabel="Change profile photo" accessibilityRole="button" accessibilityState={{ disabled: uploadingImage }}>
             <Text style={{ fontSize: 16, fontWeight: "600", color: Colors.primary }}>
               Change Photo
             </Text>
@@ -248,6 +255,7 @@ export default function EditProfile() {
             autoCapitalize="none"
             autoCorrect={false}
             maxLength={30}
+            accessibilityLabel="Username"
             style={inputStyle}
           />
           <Text style={{ fontSize: 12, color: colors.textTertiary }}>
@@ -269,6 +277,7 @@ export default function EditProfile() {
             numberOfLines={4}
             textAlignVertical="top"
             maxLength={160}
+            accessibilityLabel="Bio"
             style={[inputStyle, { minHeight: 100 }]}
           />
           <Text style={{ fontSize: 12, color: colors.textTertiary }}>

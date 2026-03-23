@@ -22,6 +22,8 @@ export interface ScoringContext {
   userTypeAffinity?: { eventBias: number; activityBias: number; totalInteractions: number } | null;
   weather?: WeatherCondition | null;
   featureFlags: Map<string, boolean>;
+  /** Community feedback net scores: item_id -> net_score */
+  communityFeedbackMap?: Map<string, number>;
   /** Current explore toggle: "all" | "event" | "activity". Context intent + type affinity only apply to "all". */
   kindFilter?: string;
 }
@@ -41,6 +43,9 @@ export interface ScoreBreakdown {
   weather: number;
   contextIntent: number;
   typeAffinity: number;
+  quality: number;
+  communityFeedback: number;
+  freshness: number;
   total: number;
   /** Dev-only: which intent bucket matched */
   _intentBucket?: string;
@@ -84,6 +89,13 @@ export function scoreItem(
     typeAffinity: context.featureFlags.get(FLAGS.TYPE_AFFINITY_LEARNING)
       ? computeTypeAffinityScore(item, context)
       : 0.5,
+    quality: computeQualityScore(item),
+    communityFeedback: context.featureFlags.get(FLAGS.COMMUNITY_FEEDBACK)
+      ? computeCommunityFeedbackScore(item, context)
+      : 0.5,
+    freshness: context.featureFlags.get(FLAGS.FRESHNESS)
+      ? computeFreshnessScore(item)
+      : 0.5,
     total: 0,
     _intentBucket: intentResult.bucketName,
   };
@@ -97,7 +109,10 @@ export function scoreItem(
     breakdown.tagAffinity * WEIGHTS.TAG_AFFINITY +
     breakdown.weather * WEIGHTS.WEATHER +
     breakdown.contextIntent * WEIGHTS.CONTEXT_INTENT +
-    breakdown.typeAffinity * WEIGHTS.TYPE_AFFINITY;
+    breakdown.typeAffinity * WEIGHTS.TYPE_AFFINITY +
+    breakdown.quality * WEIGHTS.QUALITY +
+    breakdown.communityFeedback * WEIGHTS.COMMUNITY_FEEDBACK +
+    breakdown.freshness * WEIGHTS.FRESHNESS;
 
   return {
     ...item,
@@ -130,7 +145,8 @@ export function scoreAndRankItems(
         `  ${i + 1}. [${b.total.toFixed(3)}] "${item.title}" ` +
           `D=${b.distance.toFixed(2)} T=${b.timeMatch.toFixed(2)} W=${b.weather.toFixed(2)} ` +
           `CI=${b.contextIntent.toFixed(2)}${b._intentBucket ? ` (${b._intentBucket})` : ""} ` +
-          `TyA=${b.typeAffinity.toFixed(2)} ` +
+          `TyA=${b.typeAffinity.toFixed(2)} CF=${b.communityFeedback.toFixed(2)} ` +
+          `FN=${b.freshness.toFixed(2)} ` +
           `ON=${b.openNow.toFixed(2)} FR=${b.friendsGoing.toFixed(2)} TA=${b.tagAffinity.toFixed(2)}`
       );
     });
@@ -150,6 +166,7 @@ export function createDefaultContext(
     friendsGoingMap: new Map(),
     userTagAffinity: new Map(),
     userTypeAffinity: null,
+    communityFeedbackMap: new Map(),
     kindFilter: "all",
     featureFlags: new Map([
       [RECOMMENDER_CONFIG.FLAGS.WEATHER_BOOST, true],
@@ -157,6 +174,8 @@ export function createDefaultContext(
       [RECOMMENDER_CONFIG.FLAGS.TAG_AFFINITY, true],
       [RECOMMENDER_CONFIG.FLAGS.TYPE_AFFINITY_LEARNING, true],
       [RECOMMENDER_CONFIG.FLAGS.LLM_RERANKER, false],
+      [RECOMMENDER_CONFIG.FLAGS.COMMUNITY_FEEDBACK, true],
+      [RECOMMENDER_CONFIG.FLAGS.FRESHNESS, true],
     ]),
     ...overrides,
   };
@@ -594,6 +613,131 @@ function computeTypeAffinityScore(
   const isEvent = item.kind === "event";
   const rawScore = isEvent ? eventBias : activityBias;
   return Math.max(rawScore, TYPE_AFFINITY.SCORE_FLOOR);
+}
+
+// ============================================================================
+// Quality Scoring (Item Confidence / Relevance)
+// ============================================================================
+
+/**
+ * Compute quality score (0-1) based on normalized_confidence and audience_fit.
+ *
+ * Confidence tiers push high-quality items up and generic POIs down.
+ * Audience fit acts as a multiplier: business/tourist items get heavily
+ * penalized, youth_general gets a small boost, event venues get a boost.
+ */
+function computeQualityScore(item: ExploreItem): number {
+  const confidence = (item as any).normalized_confidence as number | null | undefined;
+
+  let baseScore: number;
+  if (confidence == null) baseScore = 0.4;
+  else if (confidence >= 80) baseScore = 1.0;
+  else if (confidence >= 70) baseScore = 0.8;
+  else if (confidence >= 60) baseScore = 0.6;
+  else if (confidence >= 50) baseScore = 0.45;
+  else baseScore = 0.25;
+
+  // Audience fit multiplier
+  const audienceFit = (item as any).audience_fit as string | null | undefined;
+  let audienceMultiplier = 1.0;
+  switch (audienceFit) {
+    case "youth_general":
+      audienceMultiplier = 1.1; // Small boost
+      break;
+    case "family":
+      audienceMultiplier = 0.95; // Slight penalty (still relevant, just not primary audience)
+      break;
+    case "business":
+      audienceMultiplier = 0.3; // Heavy penalty — business venues aren't for "going out"
+      break;
+    case "tourist":
+      audienceMultiplier = 0.4; // Heavy penalty — tourist traps
+      break;
+    case "niche":
+      audienceMultiplier = 0.7; // Moderate penalty
+      break;
+    // "unknown" or null → neutral (1.0)
+  }
+
+  // Event venue bonus: places that host events are more discovery-worthy
+  const isEventVenue = (item as any).is_event_venue as boolean | null | undefined;
+  if (isEventVenue) {
+    audienceMultiplier *= 1.08;
+  }
+
+  return Math.min(baseScore * audienceMultiplier, 1.0);
+}
+
+// ============================================================================
+// Freshness Scoring (Kind-Aware Recency)
+// ============================================================================
+
+/**
+ * Compute freshness score (0-1) based on item age.
+ * Kind-aware: activities get a recency curve; events stay neutral
+ * (time signals already handle event urgency via starts_at).
+ */
+export function computeFreshnessScore(item: ExploreItem): number {
+  const { FRESHNESS } = RECOMMENDER_CONFIG;
+
+  // Events: neutral — timeMatch + openNow already handle urgency
+  if (item.kind === "event") {
+    return FRESHNESS.EVENT_SCORE;
+  }
+
+  // Activities: decay curve based on created_at
+  if (!item.created_at) {
+    return FRESHNESS.NULL_SCORE;
+  }
+
+  const createdAt = new Date(item.created_at);
+  const now = new Date();
+  const ageDays = (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+
+  for (const tier of FRESHNESS.ACTIVITY_TIERS) {
+    if (ageDays <= tier.maxDays) {
+      return tier.score;
+    }
+  }
+
+  return FRESHNESS.ACTIVITY_DEFAULT;
+}
+
+// ============================================================================
+// Community Feedback Scoring
+// ============================================================================
+
+/**
+ * Compute community feedback score (0-1)
+ * Linear interpolation from MIN_NET_SCORE→0.0 through 0→0.5 to MAX_NET_SCORE→1.0.
+ * Clamped to [SCORE_FLOOR, SCORE_CEILING].
+ * No feedback → 0.5 (neutral).
+ */
+export function computeCommunityFeedbackScore(
+  item: ExploreItem,
+  context: ScoringContext
+): number {
+  const { COMMUNITY_FEEDBACK } = RECOMMENDER_CONFIG;
+  const map = context.communityFeedbackMap;
+
+  if (!map || !map.has(item.id)) {
+    return 0.5; // Neutral when no feedback
+  }
+
+  const netScore = map.get(item.id)!;
+
+  // Linear interpolation: MIN→0.0, 0→0.5, MAX→1.0
+  let normalized: number;
+  if (netScore >= 0) {
+    normalized = 0.5 + (netScore / COMMUNITY_FEEDBACK.MAX_NET_SCORE) * 0.5;
+  } else {
+    normalized = 0.5 + (netScore / Math.abs(COMMUNITY_FEEDBACK.MIN_NET_SCORE)) * 0.5;
+  }
+
+  return Math.max(
+    COMMUNITY_FEEDBACK.SCORE_FLOOR,
+    Math.min(COMMUNITY_FEEDBACK.SCORE_CEILING, normalized)
+  );
 }
 
 // ============================================================================

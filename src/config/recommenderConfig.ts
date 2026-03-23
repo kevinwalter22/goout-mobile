@@ -17,18 +17,23 @@ export const RECOMMENDER_CONFIG = {
     TYPE_AFFINITY_LEARNING: "type_affinity_learning",
     CONTACTS_SYNC: "contacts_sync",
     INGESTION: "ingestion",
+    COMMUNITY_FEEDBACK: "community_feedback",
+    FRESHNESS: "freshness_signal",
   },
 
   // Scoring weights (sum to 1.0 for normalized score)
   WEIGHTS: {
-    TIME_MATCH: 0.18, // Time of day / event timing match
-    DISTANCE: 0.28, // Closer = higher score (strongest signal)
-    OPEN_NOW: 0.10, // Currently available/happening
-    FRIENDS_GOING: 0.14, // Friends RSVP boost
-    TAG_AFFINITY: 0.06, // User preference match (was 0.08, -0.02 to type affinity)
-    WEATHER: 0.15, // Weather/season-appropriate
-    CONTEXT_INTENT: 0.03, // Day/time context bias (was 0.07, -0.04 to type affinity)
+    TIME_MATCH: 0.15, // Time of day / event timing match
+    DISTANCE: 0.20, // Closer = higher score (was 0.21, -0.01 for freshness)
+    OPEN_NOW: 0.08, // Currently available/happening
+    FRIENDS_GOING: 0.13, // Friends RSVP boost
+    TAG_AFFINITY: 0.06, // User preference match
+    WEATHER: 0.10, // Weather/season-appropriate (was 0.11, -0.01 for freshness)
+    CONTEXT_INTENT: 0.03, // Day/time context bias
     TYPE_AFFINITY: 0.06, // Learned event-vs-activity preference (All toggle only)
+    QUALITY: 0.12, // Item confidence / data quality
+    COMMUNITY_FEEDBACK: 0.05, // Community upvote/confirm/downvote/closed signal
+    FRESHNESS: 0.02, // Recency boost for recently added items
   },
 
   // Distance scoring thresholds
@@ -112,6 +117,30 @@ export const RECOMMENDER_CONFIG = {
   TYPE_AFFINITY: {
     MIN_INTERACTIONS: 3, // Minimum interactions before signal has effect
     SCORE_FLOOR: 0.3, // Never push score below this (prevent full penalization)
+  },
+
+  // Freshness scoring — kind-aware recency boost
+  FRESHNESS: {
+    // Activities: decay curve based on created_at age
+    ACTIVITY_TIERS: [
+      { maxDays: 3, score: 1.0 },
+      { maxDays: 7, score: 0.8 },
+      { maxDays: 14, score: 0.6 },
+      { maxDays: 30, score: 0.3 },
+    ] as const,
+    ACTIVITY_DEFAULT: 0.1, // Older than 30 days
+    // Events: neutral (time signals already handle urgency)
+    EVENT_SCORE: 0.5,
+    // Fallback when created_at is null
+    NULL_SCORE: 0.5,
+  },
+
+  // Community feedback scoring
+  COMMUNITY_FEEDBACK: {
+    MAX_NET_SCORE: 15,   // Maps to 1.0
+    MIN_NET_SCORE: -10,  // Maps to 0.0
+    SCORE_FLOOR: 0.1,
+    SCORE_CEILING: 1.0,
   },
 
   // Friends going scoring

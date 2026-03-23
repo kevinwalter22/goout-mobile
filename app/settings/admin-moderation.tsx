@@ -7,13 +7,14 @@ import {
   Text,
   View,
 } from "react-native";
-import { Stack } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
   useModerationInbox,
   type ModerationFlag,
 } from "../../src/hooks/useModerationInbox";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 
@@ -308,8 +309,8 @@ function FlagCard({
 /* ------------------------------------------------------------------ */
 
 export default function AdminModeration() {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const {
     flags,
     loading,
@@ -420,12 +421,7 @@ export default function AdminModeration() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <Stack.Screen
-        options={{
-          title: "Moderation Inbox",
-          headerShown: true,
-        }}
-      />
+      <ScreenHeader title="Moderation Inbox" />
 
       {/* Filter chips */}
       <View style={{ paddingHorizontal: 16, paddingTop: 12, gap: 8 }}>

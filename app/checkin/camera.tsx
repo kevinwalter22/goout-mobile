@@ -359,6 +359,8 @@ export default function CameraCapture() {
         </Text>
         <Pressable
           onPress={requestPermission}
+          accessibilityLabel="Grant camera permission"
+          accessibilityRole="button"
           style={{
             padding: 16,
             borderRadius: 12,
@@ -393,6 +395,9 @@ export default function CameraCapture() {
         <Pressable
           onPress={handleCancel}
           disabled={uploading}
+          accessibilityLabel="Cancel"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: uploading }}
           style={{
             position: "absolute",
             top: Platform.OS === "ios" ? 60 : 40,
@@ -432,6 +437,7 @@ export default function CameraCapture() {
             placeholder="Optional"
             placeholderTextColor={colors.textTertiary}
             maxLength={MAX_CAPTION_LENGTH}
+            accessibilityLabel="Add a caption"
             style={{
               padding: 12,
               borderRadius: 8,
@@ -447,6 +453,9 @@ export default function CameraCapture() {
             <Pressable
               onPress={retake}
               disabled={uploading}
+              accessibilityLabel="Retake photo"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: uploading }}
               style={{
                 flex: 1,
                 padding: 16,
@@ -463,6 +472,9 @@ export default function CameraCapture() {
             <Pressable
               onPress={handlePost}
               disabled={uploading}
+              accessibilityLabel="Post"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: uploading }}
               style={{
                 flex: 1,
                 padding: 16,
@@ -494,6 +506,8 @@ export default function CameraCapture() {
         {/* Back/Cancel button - top left */}
         <Pressable
           onPress={handleCancel}
+          accessibilityLabel="Cancel"
+          accessibilityRole="button"
           style={{
             position: "absolute",
             top: Platform.OS === "ios" ? 60 : 40,
@@ -529,6 +543,8 @@ export default function CameraCapture() {
 
           <Pressable
             onPress={takePhoto}
+            accessibilityLabel="Take photo"
+            accessibilityRole="button"
             style={{
               width: 70,
               height: 70,

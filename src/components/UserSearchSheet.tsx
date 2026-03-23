@@ -73,7 +73,7 @@ export function UserSearchSheet({ visible, onClose, onViewProfile }: UserSearchS
         {/* Header */}
         <View style={[styles.header, { borderBottomColor: colors.separator }]}>
           <Text style={[styles.title, { color: colors.text }]}>Add Friends</Text>
-          <Pressable onPress={onClose} style={styles.closeButton}>
+          <Pressable onPress={onClose} style={styles.closeButton} accessibilityLabel="Close" accessibilityRole="button">
             <Text style={[styles.closeText, { color: colors.textSecondary }]}>✕</Text>
           </Pressable>
         </View>
@@ -87,6 +87,7 @@ export function UserSearchSheet({ visible, onClose, onViewProfile }: UserSearchS
             placeholderTextColor={colors.textTertiary}
             autoCapitalize="none"
             autoCorrect={false}
+            accessibilityLabel="Search by username"
             style={[styles.searchInput, { backgroundColor: colors.inputBg, color: colors.text }]}
           />
         </View>
@@ -143,6 +144,8 @@ function UserSearchResultItem({ user, onViewProfile }: { user: User; onViewProfi
       <Pressable
         style={styles.resultProfile}
         onPress={() => onViewProfile?.(user.id)}
+        accessibilityLabel={`View ${user.username}'s profile`}
+        accessibilityRole="button"
       >
         <Avatar avatarUrl={user.avatar_url} size={40} />
         <Text style={[styles.resultUsername, { color: colors.text }]}>{user.username}</Text>
@@ -150,6 +153,9 @@ function UserSearchResultItem({ user, onViewProfile }: { user: User; onViewProfi
       <Pressable
         onPress={handlePress}
         disabled={loading || status === "pending_received"}
+        accessibilityLabel={getButtonText()}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: loading || status === "pending_received" }}
         style={[
           styles.friendButton,
           (status === "accepted" || status === "pending_sent") && [styles.friendButtonActive, { backgroundColor: colors.surfaceVariant }],

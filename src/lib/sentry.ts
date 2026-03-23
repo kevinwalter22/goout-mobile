@@ -41,7 +41,7 @@ export function initSentry(): void {
 
     // Integrations: replay + feedback widget
     integrations: [
-      Sentry.mobileReplayIntegration(),
+      Sentry.mobileReplayIntegration({ maskAllText: true }),
       Sentry.feedbackIntegration(),
     ],
 

@@ -20,6 +20,8 @@ const DEFAULT_FLAGS = new Map<string, boolean>([
   [RECOMMENDER_CONFIG.FLAGS.FRIENDS_BOOST, true],
   [RECOMMENDER_CONFIG.FLAGS.TAG_AFFINITY, true],
   [RECOMMENDER_CONFIG.FLAGS.TYPE_AFFINITY_LEARNING, true],
+  [RECOMMENDER_CONFIG.FLAGS.COMMUNITY_FEEDBACK, true],
+  [RECOMMENDER_CONFIG.FLAGS.FRESHNESS, true],
   ["contacts_sync", true],
   ["ingestion", true],
   ["image_moderation_enabled", true],

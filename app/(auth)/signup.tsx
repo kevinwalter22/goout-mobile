@@ -114,6 +114,7 @@ export default function SignUp() {
               placeholderTextColor={colors.textTertiary}
               autoCapitalize="none"
               autoComplete="username"
+              accessibilityLabel="Username"
               style={{
                 padding: Spacing.md,
                 borderRadius: BorderRadius.sm,
@@ -138,6 +139,7 @@ export default function SignUp() {
               autoCapitalize="none"
               autoComplete="email"
               keyboardType="email-address"
+              accessibilityLabel="Email address"
               style={{
                 padding: Spacing.md,
                 borderRadius: BorderRadius.sm,
@@ -162,6 +164,7 @@ export default function SignUp() {
               secureTextEntry
               autoCapitalize="none"
               autoComplete="password-new"
+              accessibilityLabel="Password"
               style={{
                 padding: Spacing.md,
                 borderRadius: BorderRadius.sm,
@@ -176,6 +179,9 @@ export default function SignUp() {
 
           <Pressable
             onPress={() => setAgeConfirmed((v) => !v)}
+            accessibilityLabel="I confirm I am 13 years of age or older"
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: ageConfirmed }}
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -209,6 +215,9 @@ export default function SignUp() {
           <Pressable
             onPress={handleSignUp}
             disabled={loading}
+            accessibilityLabel="Create account"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: loading }}
             style={({ pressed }) => ({
               marginTop: Spacing.sm,
               padding: Spacing.lg,
@@ -237,7 +246,7 @@ export default function SignUp() {
           >
             <Text style={{ color: colors.textSecondary }}>Already have an account?</Text>
             <Link href="/(auth)/signin" asChild>
-              <Pressable>
+              <Pressable accessibilityLabel="Sign in" accessibilityRole="link">
                 <Text style={{ fontWeight: FontWeight.semibold, color: Colors.primary }}>
                   Sign In
                 </Text>

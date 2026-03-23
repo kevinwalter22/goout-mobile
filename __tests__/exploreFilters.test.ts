@@ -193,9 +193,8 @@ describe("Filter State Management", () => {
   });
 
   describe("getFilterSummary", () => {
-    it("should return 'All Events' for default state", () => {
-      // The implementation returns "All Events" when no filters are active
-      expect(getFilterSummary(DEFAULT_FILTER_STATE)).toBe("All Events");
+    it("should return 'All' for default state", () => {
+      expect(getFilterSummary(DEFAULT_FILTER_STATE)).toBe("All");
     });
 
     it("should include quick filter name when active", () => {

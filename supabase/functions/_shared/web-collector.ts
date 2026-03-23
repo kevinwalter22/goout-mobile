@@ -58,6 +58,7 @@ export interface CollectorTarget {
   default_category: string | null;
   content_types: string[];
   site_config: Record<string, any>;
+  source_type: string | null;
 }
 
 export interface PageCacheEntry {

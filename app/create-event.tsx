@@ -9,7 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -30,6 +30,7 @@ export default function CreateEvent() {
   const [address, setAddress] = useState("");
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [visibility, setVisibility] = useState<"friends_only" | "public">("friends_only");
+  const [recurrence, setRecurrence] = useState<"none" | "weekly" | "monthly">("none");
 
   // Handle address selection from autocomplete
   function handleAddressSelect(suggestion: AddressSuggestion) {
@@ -59,6 +60,7 @@ export default function CreateEvent() {
       lat: selectedCoords?.lat,
       lng: selectedCoords?.lng,
       visibility,
+      recurrence: recurrence !== "none" ? recurrence : undefined,
     });
 
     if (result) {
@@ -92,6 +94,7 @@ export default function CreateEvent() {
       style={{ flex: 1, backgroundColor: colors.background }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      <Stack.Screen options={{ gestureEnabled: false }} />
       {/* Header */}
       <View
         style={{
@@ -104,26 +107,33 @@ export default function CreateEvent() {
           borderBottomColor: colors.border,
         }}
       >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Ionicons name="close" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
+        <View style={{ minWidth: 80 }}>
+          <Pressable onPress={() => router.back()} hitSlop={8} accessibilityLabel="Dismiss" accessibilityRole="button">
+            <Ionicons name="close" size={24} color={colors.text} />
+          </Pressable>
+        </View>
+        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text, flex: 1, textAlign: "center" }}>
           Create Event
         </Text>
-        <Pressable
-          onPress={handleSubmit}
-          disabled={!canSubmit}
-          style={{
-            backgroundColor: canSubmit ? Colors.primary : colors.border,
-            paddingHorizontal: 16,
-            paddingVertical: 8,
-            borderRadius: 20,
-          }}
-        >
-          <Text style={{ color: "#fff", fontWeight: "600" }}>
-            {loading ? "Creating..." : "Create"}
-          </Text>
-        </Pressable>
+        <View style={{ minWidth: 80, alignItems: "flex-end" }}>
+          <Pressable
+            onPress={handleSubmit}
+            disabled={!canSubmit}
+            accessibilityLabel="Create event"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canSubmit }}
+            style={{
+              backgroundColor: canSubmit ? Colors.primary : colors.border,
+              paddingHorizontal: 16,
+              paddingVertical: 8,
+              borderRadius: 20,
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "600" }}>
+              {loading ? "Creating..." : "Create"}
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
@@ -148,6 +158,7 @@ export default function CreateEvent() {
             placeholder="Event name"
             placeholderTextColor={colors.textTertiary}
             maxLength={100}
+            accessibilityLabel="Event title"
             style={{
               fontSize: 16,
               color: colors.text,
@@ -180,6 +191,7 @@ export default function CreateEvent() {
             multiline
             numberOfLines={4}
             textAlignVertical="top"
+            accessibilityLabel="Event description"
             style={{
               fontSize: 16,
               color: colors.text,
@@ -206,6 +218,8 @@ export default function CreateEvent() {
           </Text>
           <Pressable
             onPress={() => setShowStartPicker(true)}
+            accessibilityLabel={`Start time: ${formatDateTime(startDate)}`}
+            accessibilityRole="button"
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -250,6 +264,8 @@ export default function CreateEvent() {
           </Text>
           <Pressable
             onPress={() => setShowEndPicker(true)}
+            accessibilityLabel={endDate ? `End time: ${formatDateTime(endDate)}` : "Set end time"}
+            accessibilityRole="button"
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -285,7 +301,7 @@ export default function CreateEvent() {
             />
           )}
           {endDate && (
-            <Pressable onPress={() => setEndDate(null)}>
+            <Pressable onPress={() => setEndDate(null)} accessibilityLabel="Remove end time" accessibilityRole="button">
               <Text style={{ fontSize: 14, color: Colors.primary }}>
                 Remove end time
               </Text>
@@ -309,6 +325,7 @@ export default function CreateEvent() {
             onChangeText={setLocationName}
             placeholder="e.g., Central Park, Joe's Cafe"
             placeholderTextColor={colors.textTertiary}
+            accessibilityLabel="Location name"
             style={{
               fontSize: 16,
               color: colors.text,
@@ -344,6 +361,72 @@ export default function CreateEvent() {
           />
         </View>
 
+        {/* Repeats */}
+        <View style={{ gap: 8 }}>
+          <Text
+            style={{
+              fontSize: 14,
+              fontWeight: "600",
+              color: colors.textSecondary,
+            }}
+          >
+            Repeats
+          </Text>
+          <View
+            style={{
+              flexDirection: "row",
+              backgroundColor: colors.surface,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: colors.border,
+              overflow: "hidden",
+            }}
+          >
+            {([
+              { value: "none" as const, label: "Once" },
+              { value: "weekly" as const, label: "Weekly" },
+              { value: "monthly" as const, label: "Monthly" },
+            ]).map((option) => (
+              <Pressable
+                key={option.value}
+                onPress={() => setRecurrence(option.value)}
+                accessibilityLabel={option.label}
+                accessibilityRole="button"
+                accessibilityState={{ selected: recurrence === option.value }}
+                style={{
+                  flex: 1,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  paddingVertical: 12,
+                  backgroundColor:
+                    recurrence === option.value ? Colors.primary : "transparent",
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 14,
+                    fontWeight: "600",
+                    color:
+                      recurrence === option.value ? "#fff" : colors.textSecondary,
+                  }}
+                >
+                  {option.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          {recurrence === "weekly" && (
+            <Text style={{ fontSize: 12, color: colors.textTertiary, paddingHorizontal: 4 }}>
+              Repeats every {startDate.toLocaleDateString(undefined, { weekday: "long" })}
+            </Text>
+          )}
+          {recurrence === "monthly" && (
+            <Text style={{ fontSize: 12, color: colors.textTertiary, paddingHorizontal: 4 }}>
+              Repeats monthly on the {startDate.getDate()}{startDate.getDate() > 3 && startDate.getDate() < 21 ? "th" : startDate.getDate() % 10 === 1 ? "st" : startDate.getDate() % 10 === 2 ? "nd" : startDate.getDate() % 10 === 3 ? "rd" : "th"}
+            </Text>
+          )}
+        </View>
+
         {/* Visibility Toggle */}
         <View style={{ gap: 8 }}>
           <Text
@@ -367,6 +450,9 @@ export default function CreateEvent() {
           >
             <Pressable
               onPress={() => setVisibility("friends_only")}
+              accessibilityLabel="Friends only"
+              accessibilityRole="button"
+              accessibilityState={{ selected: visibility === "friends_only" }}
               style={{
                 flex: 1,
                 flexDirection: "row",
@@ -395,6 +481,9 @@ export default function CreateEvent() {
             </Pressable>
             <Pressable
               onPress={() => setVisibility("public")}
+              accessibilityLabel="Public"
+              accessibilityRole="button"
+              accessibilityState={{ selected: visibility === "public" }}
               style={{
                 flex: 1,
                 flexDirection: "row",

@@ -9,127 +9,54 @@ import {
   View,
 } from "react-native";
 import { router } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import * as Contacts from "expo-contacts";
-import { supabase } from "../../src/lib/supabase";
 import { useAuth } from "../../src/hooks/useAuth";
-import { useFeatureFlags } from "../../src/hooks/useFeatureFlags";
+import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
 import { Avatar } from "../../src/components/Avatar";
-import { normalizePhone, hashPhone } from "../../src/utils/phoneHash";
+import { useContactSync } from "../../src/hooks/useContactSync";
+import { useFriendRecommendations } from "../../src/hooks/useFriendRecommendations";
 import { mediumHaptic } from "../../src/utils/haptics";
-import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
-import { captureError } from "../../src/lib/logger";
-import { friendlyMessage } from "../../src/lib/errorMessages";
-
-type ContactMatch = {
-  user_id: string;
-  username: string;
-  avatar_url: string | null;
-};
+import { supabase } from "../../src/lib/supabase";
 
 export default function FindContacts() {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { user } = useAuth();
-  const { isEnabled } = useFeatureFlags();
-  const contactsSyncEnabled = isEnabled("contacts_sync");
-
-  const [permissionGranted, setPermissionGranted] = useState<boolean | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [matches, setMatches] = useState<ContactMatch[] | null>(null);
+  const {
+    syncing,
+    lastSyncedAt,
+    contactsSyncEnabled,
+    syncNow,
+    clearSuggestions,
+  } = useContactSync();
+  const { recommendations, refresh: refreshRecs } = useFriendRecommendations(20);
   const [sentRequests, setSentRequests] = useState<Set<string>>(new Set());
 
-  async function requestContactsPermission() {
-    const { status } = await Contacts.requestPermissionsAsync();
-    setPermissionGranted(status === "granted");
+  // Filter to contact-source suggestions only
+  const contactMatches = recommendations.filter((r) => r.source === "contact");
 
-    if (status !== "granted") {
-      Alert.alert(
-        "Permission Required",
-        "To find friends from your contacts, please allow access in your device Settings."
-      );
-    }
+  async function handleSync() {
+    const ok = await syncNow();
+    if (ok) refreshRecs();
   }
 
-  async function syncContacts() {
-    if (!user) return;
-
-    setSyncing(true);
-    logAnalyticsEvent(user.id, "contacts_sync_started");
-
-    let resultCount = 0;
-
-    try {
-      // 1. Read contacts (phone numbers only)
-      const { data } = await Contacts.getContactsAsync({
-        fields: [Contacts.Fields.PhoneNumbers],
-      });
-
-      if (!data || data.length === 0) {
-        setMatches([]);
-        return;
-      }
-
-      // 2. Extract and normalize phone numbers
-      const rawPhones: string[] = [];
-      for (const contact of data) {
-        if (contact.phoneNumbers) {
-          for (const pn of contact.phoneNumbers) {
-            if (pn.number) {
-              const normalized = normalizePhone(pn.number);
-              if (normalized) rawPhones.push(normalized);
-            }
-          }
-        }
-      }
-
-      // Dedupe
-      const uniquePhones = [...new Set(rawPhones)];
-
-      // Only log counts, never raw numbers
-      console.log(
-        `[Contacts] Found ${data.length} contacts, ${uniquePhones.length} valid numbers`
-      );
-
-      if (uniquePhones.length === 0) {
-        setMatches([]);
-        return;
-      }
-
-      // 3. Hash all numbers on-device
-      const hashedPhones = await Promise.all(uniquePhones.map(hashPhone));
-
-      // 4. Send hashes to server for matching
-      const { data: matchData, error } = await (supabase.rpc as any)(
-        "match_contacts",
+  async function handleClearSuggestions() {
+    Alert.alert(
+      "Remove Contact Matches",
+      "This will remove all contact-based friend suggestions. You can re-sync at any time.",
+      [
+        { text: "Cancel", style: "cancel" },
         {
-          p_user_id: user.id,
-          p_hashed_phones: hashedPhones,
-        }
-      );
-
-      if (error) {
-        captureError(error, { action: "matchContacts" });
-        Alert.alert("Error", friendlyMessage(error));
-        setMatches([]);
-      } else {
-        resultCount = (matchData || []).length;
-        console.log(`[Contacts] ${resultCount} matches found`);
-        setMatches(matchData || []);
-      }
-    } catch (err) {
-      captureError(err, { action: "contactsSync" });
-      Alert.alert("Error", friendlyMessage(err));
-      setMatches([]);
-    } finally {
-      logAnalyticsEvent(user.id, "contacts_sync_completed", {
-        matchCount: resultCount,
-      });
-      setSyncing(false);
-    }
+          text: "Remove",
+          style: "destructive",
+          onPress: async () => {
+            await clearSuggestions();
+            refreshRecs();
+          },
+        },
+      ],
+    );
   }
 
   async function sendFriendRequest(targetUserId: string) {
@@ -154,25 +81,7 @@ export default function FindContacts() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Header */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          padding: 16,
-          paddingTop: insets.top + 16,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border,
-          gap: 12,
-        }}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
-          Find Friends from Contacts
-        </Text>
-      </View>
+      <ScreenHeader title="Find Friends from Contacts" />
 
       <ScrollView
         style={{ flex: 1 }}
@@ -208,44 +117,6 @@ export default function FindContacts() {
           <Text style={{ fontSize: 14, color: colors.textSecondary, textAlign: "center" }}>
             Contact sync is only available on mobile devices.
           </Text>
-        ) : permissionGranted === null ? (
-          /* Permission not yet requested */
-          <Pressable
-            onPress={requestContactsPermission}
-            style={{
-              paddingVertical: 14,
-              paddingHorizontal: 24,
-              borderRadius: 12,
-              backgroundColor: Colors.primary,
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ fontSize: 16, fontWeight: "600", color: Colors.white }}>
-              Allow Contacts Access
-            </Text>
-          </Pressable>
-        ) : permissionGranted === false ? (
-          /* Permission denied */
-          <View style={{ gap: 12, alignItems: "center" }}>
-            <Ionicons name="lock-closed-outline" size={40} color={colors.textTertiary} />
-            <Text style={{ fontSize: 14, color: colors.textSecondary, textAlign: "center" }}>
-              Contacts access was denied. To enable it, go to your device Settings and allow contacts access for this app.
-            </Text>
-            <Pressable
-              onPress={requestContactsPermission}
-              style={{
-                paddingVertical: 10,
-                paddingHorizontal: 20,
-                borderRadius: 10,
-                borderWidth: 1,
-                borderColor: Colors.primary,
-              }}
-            >
-              <Text style={{ fontSize: 14, fontWeight: "600", color: Colors.primary }}>
-                Try Again
-              </Text>
-            </Pressable>
-          </View>
         ) : syncing ? (
           /* Syncing in progress */
           <View style={{ alignItems: "center", gap: 12, paddingVertical: 32 }}>
@@ -254,102 +125,133 @@ export default function FindContacts() {
               Matching contacts...
             </Text>
           </View>
-        ) : matches === null ? (
-          /* Permission granted, ready to sync */
-          <Pressable
-            onPress={syncContacts}
-            style={{
-              paddingVertical: 14,
-              paddingHorizontal: 24,
-              borderRadius: 12,
-              backgroundColor: Colors.primary,
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ fontSize: 16, fontWeight: "600", color: Colors.white }}>
-              Find Friends
-            </Text>
-          </Pressable>
-        ) : matches.length === 0 ? (
-          /* No matches */
-          <View style={{ alignItems: "center", gap: 12, paddingVertical: 24 }}>
-            <Ionicons name="people-outline" size={40} color={colors.textTertiary} />
-            <Text style={{ fontSize: 14, color: colors.textSecondary, textAlign: "center" }}>
-              No matches found. Invite your friends to join!
-            </Text>
+        ) : (
+          <View style={{ gap: 20 }}>
+            {/* Sync button */}
             <Pressable
-              onPress={syncContacts}
+              onPress={handleSync}
+              accessibilityLabel={lastSyncedAt ? "Sync contacts again" : "Find friends from contacts"}
+              accessibilityRole="button"
               style={{
-                paddingVertical: 10,
-                paddingHorizontal: 20,
-                borderRadius: 10,
-                borderWidth: 1,
-                borderColor: Colors.primary,
+                paddingVertical: 14,
+                paddingHorizontal: 24,
+                borderRadius: 12,
+                backgroundColor: Colors.primary,
+                alignItems: "center",
               }}
             >
-              <Text style={{ fontSize: 14, fontWeight: "600", color: Colors.primary }}>
-                Sync Again
+              <Text style={{ fontSize: 16, fontWeight: "600", color: Colors.white }}>
+                {lastSyncedAt ? "Sync Again" : "Find Friends"}
               </Text>
             </Pressable>
-          </View>
-        ) : (
-          /* Show matches */
-          <View style={{ gap: 16 }}>
-            <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>
-              {matches.length} friend{matches.length !== 1 ? "s" : ""} found
-            </Text>
 
-            {matches.map((match) => {
-              const alreadySent = sentRequests.has(match.user_id);
+            {/* Last synced timestamp */}
+            {lastSyncedAt && (
+              <Text style={{ fontSize: 13, color: colors.textTertiary, textAlign: "center" }}>
+                Last synced: {lastSyncedAt.toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}
+              </Text>
+            )}
 
-              return (
-                <View
-                  key={match.user_id}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
-                >
-                  <Avatar avatarUrl={match.avatar_url} size={40} />
-                  <Text
-                    style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}
-                  >
-                    {match.username}
-                  </Text>
-                  <Pressable
-                    onPress={() => sendFriendRequest(match.user_id)}
-                    disabled={alreadySent}
-                    style={{
-                      paddingVertical: 6,
-                      paddingHorizontal: 14,
-                      borderRadius: 16,
-                      backgroundColor: alreadySent ? colors.border : Colors.primary,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 14,
-                        fontWeight: "600",
-                        color: alreadySent ? colors.textSecondary : Colors.white,
-                      }}
+            {/* Contact match results */}
+            {contactMatches.length > 0 ? (
+              <View style={{ gap: 16 }}>
+                <Text style={{ fontSize: 16, fontWeight: "600", color: colors.text }}>
+                  {contactMatches.length} friend{contactMatches.length !== 1 ? "s" : ""} found from contacts
+                </Text>
+
+                {contactMatches.map((match) => {
+                  const alreadySent = sentRequests.has(match.user_id);
+
+                  return (
+                    <View
+                      key={match.user_id}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
                     >
-                      {alreadySent ? "Sent" : "Add"}
-                    </Text>
-                  </Pressable>
-                </View>
-              );
-            })}
+                      <Avatar avatarUrl={match.avatar_url} size={40} />
+                      <Text
+                        style={{ flex: 1, fontSize: 15, fontWeight: "600", color: colors.text }}
+                      >
+                        {match.username}
+                      </Text>
+                      <Pressable
+                        onPress={() => sendFriendRequest(match.user_id)}
+                        disabled={alreadySent}
+                        accessibilityLabel={alreadySent ? `Request sent to ${match.username}` : `Add ${match.username}`}
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: alreadySent }}
+                        style={{
+                          paddingVertical: 6,
+                          paddingHorizontal: 14,
+                          borderRadius: 16,
+                          backgroundColor: alreadySent ? colors.border : Colors.primary,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 14,
+                            fontWeight: "600",
+                            color: alreadySent ? colors.textSecondary : Colors.white,
+                          }}
+                        >
+                          {alreadySent ? "Sent" : "Add"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : lastSyncedAt ? (
+              <View style={{ alignItems: "center", gap: 12, paddingVertical: 12 }}>
+                <Ionicons name="people-outline" size={40} color={colors.textTertiary} />
+                <Text style={{ fontSize: 14, color: colors.textSecondary, textAlign: "center" }}>
+                  No matches found. Invite your friends to join!
+                </Text>
+              </View>
+            ) : null}
 
-            {/* Sync again link */}
-            <Pressable onPress={syncContacts} style={{ paddingVertical: 8 }}>
-              <Text
-                style={{
-                  fontSize: 14,
-                  fontWeight: "600",
-                  color: Colors.primary,
-                  textAlign: "center",
-                }}
-              >
-                Sync again
-              </Text>
-            </Pressable>
+            {/* Privacy controls — only shown after at least one sync */}
+            {lastSyncedAt && (
+              <View style={{ gap: 12, marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.separator }}>
+                <Text
+                  style={{
+                    fontSize: 14,
+                    fontWeight: "600",
+                    color: colors.textSecondary,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  Privacy
+                </Text>
+
+                <Pressable
+                  onPress={handleClearSuggestions}
+                  accessibilityLabel="Remove contact matches"
+                  accessibilityRole="button"
+                  style={{
+                    paddingVertical: 12,
+                    paddingHorizontal: 16,
+                    borderRadius: 10,
+                    backgroundColor: Colors.error + "12",
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: "600", color: Colors.error }}>
+                    Remove Contact Matches
+                  </Text>
+                </Pressable>
+
+                <Text style={{ fontSize: 12, color: colors.textTertiary, textAlign: "center", lineHeight: 16 }}>
+                  This removes all stored friend suggestions from contacts. No raw contact data is ever stored — only anonymous match results.
+                </Text>
+              </View>
+            )}
           </View>
         )}
       </ScrollView>

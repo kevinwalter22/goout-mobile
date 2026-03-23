@@ -42,6 +42,8 @@ export default function CheckInModeSelector() {
 
       <Pressable
         onPress={() => selectMode(CAMERA_MODES.BACK)}
+        accessibilityLabel="Use back camera"
+        accessibilityRole="button"
         style={{
           padding: 20,
           borderRadius: 12,
@@ -67,6 +69,8 @@ export default function CheckInModeSelector() {
 
       <Pressable
         onPress={() => selectMode(CAMERA_MODES.FRONT)}
+        accessibilityLabel="Use front camera"
+        accessibilityRole="button"
         style={{
           padding: 20,
           borderRadius: 12,
@@ -90,6 +94,8 @@ export default function CheckInModeSelector() {
 
       <Pressable
         onPress={() => selectMode(CAMERA_MODES.DUAL)}
+        accessibilityLabel="Use dual camera — capture back then front"
+        accessibilityRole="button"
         style={{
           padding: 20,
           borderRadius: 12,
@@ -113,6 +119,8 @@ export default function CheckInModeSelector() {
 
       <Pressable
         onPress={() => router.back()}
+        accessibilityLabel="Cancel"
+        accessibilityRole="button"
         style={{
           marginTop: 16,
           padding: 16,

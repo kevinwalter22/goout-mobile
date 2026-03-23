@@ -1,4 +1,4 @@
-import { Tabs, useRouter, usePathname } from "expo-router";
+import { Tabs, usePathname } from "expo-router";
 import { Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { scrollToTopEmitter } from "../../src/utils/scrollToTop";
@@ -6,9 +6,8 @@ import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 
 export default function TabsLayout() {
-  const router = useRouter();
-  const pathname = usePathname();
   const { colors } = useTheme();
+  const pathname = usePathname();
 
   return (
     <Tabs
@@ -77,20 +76,6 @@ export default function TabsLayout() {
             }
           },
         }}
-      />
-
-      {/* Hidden screens - part of tab navigator but not shown in tab bar */}
-      <Tabs.Screen
-        name="user/[id]"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
-        name="post/[id]"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{ href: null }}
       />
     </Tabs>
   );

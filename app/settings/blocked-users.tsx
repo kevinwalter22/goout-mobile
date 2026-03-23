@@ -1,13 +1,12 @@
 import { Alert, FlatList, Pressable, Text, View, ActivityIndicator } from "react-native";
 import { router } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { useBlockUser } from "../../src/hooks/useBlockUser";
 import { Avatar } from "../../src/components/Avatar";
 
 export default function BlockedUsers() {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { blockedUsers, loading, unblockUser } = useBlockUser();
 
@@ -32,25 +31,7 @@ export default function BlockedUsers() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Header */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          padding: 16,
-          paddingTop: insets.top + 16,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border,
-          gap: 12,
-        }}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
-          Blocked Users
-        </Text>
-      </View>
+      <ScreenHeader title="Blocked Users" />
 
       {loading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
@@ -120,6 +101,8 @@ export default function BlockedUsers() {
                     item.profile?.username || "this user"
                   )
                 }
+                accessibilityLabel={`Unblock ${item.profile?.username || "user"}`}
+                accessibilityRole="button"
                 style={{
                   paddingHorizontal: 16,
                   paddingVertical: 8,

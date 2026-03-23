@@ -121,31 +121,103 @@ const DEFAULT_TYPES = [
   "historical_landmark",
   "visitor_center",
   "community_center",
-  "church",
-  "clothing_store",
-  "florist",
-  "pet_store",
-  "lodging",
 ];
 
 // Text Search keywords for discovery gaps
+// Includes food/drink/nightlife keywords to maximize coverage without Yelp
 const DEFAULT_KEYWORDS = [
+  // Outdoor & Adventure
   "hiking trail",
   "trailhead",
-  "brewery",
-  "winery",
-  "farm stand",
-  "farmers market",
   "scenic overlook",
   "swimming hole",
   "canoe kayak launch",
+  // Food & Drink (niche types Google Nearby Search misses)
+  "brewery",
+  "winery",
+  "wine bar",
+  "cocktail bar",
+  "sports bar",
+  "food truck",
+  "ice cream shop",
+  "brunch",
+  "farm stand",
+  "farmers market",
+  // Nightlife & Entertainment
+  "live music venue",
+  "comedy club",
+  "karaoke",
+  // Recreation
   "disc golf",
   "mini golf",
   "escape room",
   "axe throwing",
+  "rock climbing gym",
+  "dance studio",
+  "martial arts",
+  // Wellness & Beauty
+  "nail salon",
+  "hair salon",
+  "pilates studio",
+  // Shopping
   "thrift store",
   "antique shop",
 ];
+
+// Title patterns to skip — businesses not appropriate for a discovery app
+const SKIP_TITLE_PATTERNS = [
+  /funeral/i, /mortuary/i, /cremation/i, /cemetery/i,
+  /self.storage/i, /storage.unit/i,
+  /tractor.supply/i, /dollar.(tree|general)/i,
+  /auto.parts/i, /tire.center/i,
+  /bail.bond/i, /pawn.shop/i,
+  /urgent.care/i, /medical.center/i, /\bhospital\b/i,
+  /dentist/i, /orthodont/i,
+  /insurance/i, /law.office/i, /attorney/i,
+  /tax.prep/i, /accounting/i,
+  /\bbank\b/i, /credit.union/i,
+  // Hotels & lodging
+  /\bhotel\b/i, /\bmotel\b/i, /\binn\b/i, /\bhostel\b/i,
+  /\bresort\b/i, /suites?\b/i, /lodge\b/i,
+  // Automotive
+  /car.wash/i, /car.repair/i, /auto.body/i, /car.dealer/i, /tire.shop/i,
+  /oil.change/i, /\bmuffler/i, /transmission/i,
+  // Gas stations & convenience
+  /gas.station/i, /\bshell\b/i, /\bsunoco\b/i, /\bmobil\b/i,
+  /\bcumberland.farms/i, /\bstewarts?\b.*shop/i,
+  // Personal services
+  /hair.salon/i, /\bbarber/i, /beauty.salon/i, /nail.salon/i,
+  /dry.clean/i, /laundromat/i, /laundry/i,
+  // Professional & medical
+  /pharmacy/i, /veterinar/i, /chiropract/i, /optometrist/i,
+  /real.estate/i, /\brealty\b/i,
+  // Misc non-discovery
+  /post.office/i, /\bups\b.store/i, /fedex/i,
+  /hardware.store/i, /lumber/i,
+  /school\b/i, /preschool/i, /daycare/i,
+];
+
+// Google Places types to skip — if primaryType matches, skip the place entirely
+const SKIP_PRIMARY_TYPES = new Set([
+  "lodging", "hotel", "motel", "extended_stay_hotel",
+  "gas_station", "electric_vehicle_charging_station",
+  "car_wash", "car_repair", "car_dealer",
+  "hair_salon", "beauty_salon",
+  "laundry", "dry_cleaner",
+  "real_estate_agency",
+  "pharmacy", "drugstore",
+  "veterinary_care",
+  "post_office",
+  "school", "preschool", "primary_school", "secondary_school",
+  "convenience_store",
+  "hardware_store",
+]);
+
+function shouldSkipPlace(title: string, primaryType?: string): boolean {
+  if (SKIP_TITLE_PATTERNS.some((pattern) => pattern.test(title))) return true;
+  if (primaryType && SKIP_PRIMARY_TYPES.has(primaryType)) return true;
+  return false;
+}
 
 const DEFAULT_REGIONS: Region[] = [
   { name: "potsdam", lat: 44.6697, lng: -74.9814, radius_m: 25000 },
@@ -466,6 +538,18 @@ Deno.serve(async (req) => {
           place.displayName?.text ||
           place.primaryTypeDisplayName?.text ||
           "Unknown";
+
+        // Skip inappropriate businesses (by title or Google primary type)
+        if (shouldSkipPlace(placeName, place.primaryType)) {
+          results.push({
+            external_id: externalId,
+            name: placeName,
+            search_label: searchLabel,
+            region: regionName,
+            status: "skipped" as any,
+          });
+          continue;
+        }
 
         if (dryRun) {
           results.push({

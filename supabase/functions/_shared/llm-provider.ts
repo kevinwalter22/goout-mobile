@@ -38,7 +38,7 @@ export class AnthropicProvider implements LLMProvider {
   private apiKey: string;
   private model: string;
 
-  constructor(apiKey: string, model: string = "claude-3-5-haiku-20241022") {
+  constructor(apiKey: string, model: string = "claude-haiku-4-5-20251001") {
     this.apiKey = apiKey;
     this.model = model;
   }
@@ -147,7 +147,7 @@ export function createLLMProvider(): LLMProvider {
   // Check for Anthropic key first (preferred for cost)
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (anthropicKey) {
-    const model = Deno.env.get("ANTHROPIC_MODEL") || "claude-3-5-haiku-20241022";
+    const model = Deno.env.get("ANTHROPIC_MODEL") || "claude-haiku-4-5-20251001";
     return new AnthropicProvider(anthropicKey, model);
   }
 

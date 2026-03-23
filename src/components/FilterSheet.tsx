@@ -99,10 +99,10 @@ export function FilterSheet({
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <Text style={[styles.title, { color: colors.text }]}>Filters</Text>
           <View style={styles.headerButtons}>
-            <Pressable onPress={handleReset} style={styles.resetButton}>
+            <Pressable onPress={handleReset} style={styles.resetButton} accessibilityLabel="Reset filters" accessibilityRole="button">
               <Text style={styles.resetText}>Reset</Text>
             </Pressable>
-            <Pressable onPress={handleClose} style={styles.closeButton}>
+            <Pressable onPress={handleClose} style={styles.closeButton} accessibilityLabel="Close filters" accessibilityRole="button">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -187,7 +187,7 @@ export function FilterSheet({
 
         {/* Apply button */}
         <View style={[styles.footer, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
-          <Pressable onPress={handleClose} style={styles.applyButton}>
+          <Pressable onPress={handleClose} style={styles.applyButton} accessibilityLabel="Show results" accessibilityRole="button">
             <Text style={styles.applyButtonText}>Show Results</Text>
           </Pressable>
         </View>
@@ -226,6 +226,9 @@ function OptionChip({ label, isSelected, onPress }: OptionChipProps) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      accessibilityState={{ selected: isSelected }}
       style={[
         styles.optionChip,
         { backgroundColor: colors.surfaceVariant, borderColor: colors.surfaceVariant },

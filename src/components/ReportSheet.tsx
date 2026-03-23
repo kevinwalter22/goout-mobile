@@ -80,7 +80,7 @@ export function ReportSheet({
     if (success) {
       Alert.alert(
         "Report Submitted",
-        "Thank you for reporting. Our team will review this content.",
+        "Thank you for reporting. Our team will review this content. For urgent issues, email support@euda.live.",
         [
           {
             text: targetUserId && onBlockUser ? "Block User Too" : "OK",
@@ -97,7 +97,7 @@ export function ReportSheet({
         ]
       );
     } else {
-      Alert.alert("Error", "Failed to submit report. Please try again.");
+      Alert.alert("Error", "Failed to submit report. Please try again or email support@euda.live.");
     }
   }
 

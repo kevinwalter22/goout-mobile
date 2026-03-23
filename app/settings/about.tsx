@@ -1,10 +1,10 @@
-import { Alert, Linking, Pressable, Text, View } from "react-native";
+import { Alert, Image, Linking, Pressable, Text, View } from "react-native";
 import { router } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { ScreenHeader } from "../../src/components/ScreenHeader";
 import Constants from "expo-constants";
 import { useTheme } from "../../src/contexts/ThemeContext";
-import { Colors } from "../../src/config/theme";
+
 
 const SUPPORT_EMAIL = "support@euda.live";
 const TERMS_URL = "https://links.euda.live/terms";
@@ -12,7 +12,6 @@ const PRIVACY_URL = "https://links.euda.live/privacy";
 const SUPPORT_URL = "https://links.euda.live/support";
 
 export default function About() {
-  const insets = useSafeAreaInsets();
   const { colors } = useTheme();
 
   const appVersion = Constants.expoConfig?.version || "1.0.0";
@@ -51,41 +50,19 @@ export default function About() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Header */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          padding: 16,
-          paddingTop: insets.top + 16,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border,
-          gap: 12,
-        }}
-      >
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
-          About & Support
-        </Text>
-      </View>
+      <ScreenHeader title="About & Support" />
 
       <View style={{ padding: 16, gap: 24 }}>
         {/* App Info */}
         <View style={{ alignItems: "center", paddingVertical: 24, gap: 8 }}>
-          <View
+          <Image
+            source={require("../../assets/images/icon.png")}
             style={{
               width: 80,
               height: 80,
               borderRadius: 20,
-              backgroundColor: Colors.primary,
-              justifyContent: "center",
-              alignItems: "center",
             }}
-          >
-            <Text style={{ fontSize: 32, color: "#fff", fontWeight: "700" }}>E</Text>
-          </View>
+          />
           <Text style={{ fontSize: 24, fontWeight: "700", color: colors.text }}>Euda</Text>
           <Text style={{ fontSize: 14, color: colors.textSecondary }}>
             Version {appVersion} ({buildNumber})
@@ -117,6 +94,8 @@ export default function About() {
           >
             <Pressable
               onPress={handleReportBug}
+              accessibilityLabel="Report a bug"
+              accessibilityRole="button"
               style={{
                 flexDirection: "row",
                 alignItems: "center",
@@ -133,6 +112,8 @@ export default function About() {
 
             <Pressable
               onPress={() => sendEmail("Feedback - Euda App")}
+              accessibilityLabel="Send feedback"
+              accessibilityRole="button"
               style={{
                 flexDirection: "row",
                 alignItems: "center",
@@ -149,6 +130,8 @@ export default function About() {
 
             <Pressable
               onPress={() => sendEmail("Support Request - Euda")}
+              accessibilityLabel="Contact support"
+              accessibilityRole="button"
               style={{
                 flexDirection: "row",
                 alignItems: "center",
@@ -188,6 +171,8 @@ export default function About() {
           >
             <Pressable
               onPress={() => openLink(TERMS_URL)}
+              accessibilityLabel="Terms of Service"
+              accessibilityRole="link"
               style={{
                 flexDirection: "row",
                 alignItems: "center",
@@ -204,6 +189,8 @@ export default function About() {
 
             <Pressable
               onPress={() => openLink(PRIVACY_URL)}
+              accessibilityLabel="Privacy Policy"
+              accessibilityRole="link"
               style={{
                 flexDirection: "row",
                 alignItems: "center",
