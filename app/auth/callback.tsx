@@ -6,15 +6,15 @@ import { supabase } from "../../src/lib/supabase";
 import { Colors } from "../../src/config/theme";
 
 /**
- * Auth callback screen — handles Supabase email verification redirects.
+ * Auth callback screen — handles Supabase email verification and password reset redirects.
  *
- * Supabase redirects the user here after clicking the email verification link.
- * Depending on the flow, the tokens arrive either as:
- *   1. Hash fragment: ...#access_token=...&refresh_token=...&type=signup
- *   2. Query param (PKCE): ...?code=...
+ * Supabase redirects the user here after clicking the email verification link
+ * OR a password reset link. Tokens arrive either as:
+ *   1. Hash fragment: ...#access_token=...&refresh_token=...&type=signup|recovery
+ *   2. Query param (PKCE): ...?code=...&type=signup|recovery
  *
- * This screen extracts the tokens, establishes the session, then navigates
- * to the sign-in screen (verified) or the main feed (auto-signed-in).
+ * type=recovery → routes to the reset-password screen.
+ * All other types → routes to the main feed (auto-signed-in).
  */
 export default function AuthCallback() {
   const params = useLocalSearchParams();
@@ -30,7 +30,9 @@ export default function AuthCallback() {
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (!error) {
-          router.replace("/(tabs)/feed");
+          // type=recovery → password reset flow; all others → main feed
+          const type = params.type as string | undefined;
+          router.replace(type === "recovery" ? "/(auth)/reset-password" : "/(tabs)/feed");
           return;
         }
       }
@@ -43,6 +45,7 @@ export default function AuthCallback() {
           const hashParams = new URLSearchParams(hash);
           const accessToken = hashParams.get("access_token");
           const refreshToken = hashParams.get("refresh_token");
+          const type = hashParams.get("type");
 
           if (accessToken && refreshToken) {
             const { error } = await supabase.auth.setSession({
@@ -50,7 +53,7 @@ export default function AuthCallback() {
               refresh_token: refreshToken,
             });
             if (!error) {
-              router.replace("/(tabs)/feed");
+              router.replace(type === "recovery" ? "/(auth)/reset-password" : "/(tabs)/feed");
               return;
             }
           }

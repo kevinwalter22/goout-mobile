@@ -22,8 +22,26 @@ import { useTheme } from "../../src/contexts/ThemeContext";
 /*  Filter chips                                                       */
 /* ------------------------------------------------------------------ */
 
-const TARGET_TYPES = ["All", "post", "comment", "event", "profile"] as const;
+const TARGET_TYPES = ["All", "post", "comment", "event", "profile", "Explore_Item"] as const;
 const SOURCES = ["All", "auto_text", "auto_image", "user_report"] as const;
+
+const TYPE_LABEL: Record<string, string> = {
+  post: "Post",
+  comment: "Comment",
+  event: "Event",
+  profile: "Profile",
+  explore_item: "Explore Item",
+  Explore_Item: "Explore Item",
+};
+
+/** Returns a route to navigate to the flagged content, if possible. */
+function contentRoute(targetType: string, targetId: string): string | null {
+  const t = targetType.toLowerCase();
+  if (t === "explore_item") return `/event/${targetId}`;
+  if (t === "post") return `/post/${targetId}`;
+  if (t === "profile") return `/user/${targetId}`;
+  return null;
+}
 
 function FilterChip({
   label,
@@ -164,7 +182,7 @@ function FlagCard({
         gap: 10,
       }}
     >
-      {/* Header: type icon + category + severity */}
+      {/* Header: type icon + label + category + severity */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Ionicons
           name={targetIcon(flag.target_type)}
@@ -177,14 +195,38 @@ function FlagCard({
             fontSize: 14,
             fontWeight: "600",
             color: colors.text,
-            textTransform: "capitalize",
           }}
         >
-          {flag.target_type}
+          {TYPE_LABEL[flag.target_type] ?? flag.target_type}
         </Text>
         <CategoryBadge category={flag.category} />
         <SeverityBadge severity={flag.severity} />
       </View>
+
+      {/* Content reference: target ID + author */}
+      <View style={{ gap: 2 }}>
+        <Text style={{ fontSize: 11, fontFamily: "monospace", color: colors.textTertiary }}>
+          ID: …{flag.target_id.slice(-8)}
+        </Text>
+        {flag.metadata?.author_id && (
+          <Text style={{ fontSize: 11, fontFamily: "monospace", color: colors.textTertiary }}>
+            Author: …{String(flag.metadata.author_id).slice(-8)}
+          </Text>
+        )}
+      </View>
+
+      {/* View content link */}
+      {contentRoute(flag.target_type, flag.target_id) && (
+        <Pressable
+          onPress={() => router.push(contentRoute(flag.target_type, flag.target_id) as string)}
+          style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+        >
+          <Ionicons name="open-outline" size={13} color={Colors.primary} />
+          <Text style={{ fontSize: 12, fontWeight: "600", color: Colors.primary }}>
+            View Content
+          </Text>
+        </Pressable>
+      )}
 
       {/* Source */}
       <Text style={{ fontSize: 12, color: colors.textTertiary }}>
@@ -433,7 +475,7 @@ export default function AdminModeration() {
           {TARGET_TYPES.map((t) => (
             <FilterChip
               key={t}
-              label={t === "All" ? "All types" : t}
+              label={t === "All" ? "All types" : (TYPE_LABEL[t] ?? t)}
               active={targetFilter === t}
               onPress={() => setTargetFilter(t)}
               colors={colors}

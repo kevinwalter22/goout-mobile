@@ -118,7 +118,7 @@ export default function Settings() {
           style: "destructive",
           onPress: async () => {
             await signOut();
-            router.replace("/signin");
+            router.replace("/(auth)/signin");
           },
         },
       ]
@@ -177,7 +177,7 @@ export default function Settings() {
       logSecurityEvent(SEC.AUTH_ACCOUNT_DELETE, "high");
       // Account deleted — sign out locally and go to signin
       await signOut();
-      router.replace("/signin");
+      router.replace("/(auth)/signin");
     } catch (err) {
       captureError(err, { action: "deleteAccount" });
       Alert.alert("Error", "Something went wrong. Please try again.");

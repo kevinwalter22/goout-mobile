@@ -94,9 +94,15 @@ export default function EventDetail() {
 
       if (now < startTime - preBufferMs) {
         const minutesUntil = Math.ceil((startTime - now) / (60 * 1000));
-        const timeText = minutesUntil > 60
-          ? `${Math.floor(minutesUntil / 60)}h ${minutesUntil % 60}m`
-          : `${minutesUntil} minutes`;
+        const totalHours = Math.floor(minutesUntil / 60);
+        const remMins = minutesUntil % 60;
+        const days = Math.floor(totalHours / 24);
+        const remHours = totalHours % 24;
+        const timeText = days >= 2
+          ? (remHours >= 2 ? `${days} days ${remHours} hours` : `${days} days`)
+          : totalHours >= 1
+            ? `${totalHours}h${remMins > 0 ? ` ${remMins}m` : ""}`
+            : `${minutesUntil} minutes`;
         Alert.alert(
           "Event Not Started",
           `This event starts in ${timeText}. You can check in starting 1 hour before it begins.`,

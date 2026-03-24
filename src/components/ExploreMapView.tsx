@@ -8,6 +8,7 @@ import { Colors } from "../config/theme";
 import { useTheme } from "../contexts/ThemeContext";
 import { getDistanceInMeters, getDistanceInMiles, isLocationOverridden } from "../utils/location";
 import { formatOpeningHours } from "../utils/formatOpeningHours";
+import { sanitizeTimeText } from "../utils/formatTimeText";
 import { CHECK_IN_RADIUS_METERS } from "../config/constants";
 import { getFallbackImage } from "../lib/categoryFallbackImages";
 import type { ExploreItem } from "../types/database";
@@ -552,7 +553,7 @@ export function ExploreMapView({
       const { summaryLine } = formatOpeningHours(item.schedule_text);
       if (summaryLine) return summaryLine;
     }
-    return item.time_text || "Ongoing";
+    return item.time_text ? sanitizeTimeText(item.time_text) : "Ongoing";
   }
 
   // Count by type for badge

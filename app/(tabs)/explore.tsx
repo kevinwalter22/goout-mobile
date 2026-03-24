@@ -32,6 +32,7 @@ import { addNavigationBreadcrumb } from "../../src/lib/sentry";
 import { getFallbackImage } from "../../src/lib/categoryFallbackImages";
 import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
 import { formatOpeningHours } from "../../src/utils/formatOpeningHours";
+import { sanitizeTimeText } from "../../src/utils/formatTimeText";
 import { useItemSuppressions } from "../../src/hooks/useItemSuppressions";
 import type { KindFilter } from "../../src/config/exploreFilters";
 import type { ExploreItem } from "../../src/types/database";
@@ -298,7 +299,7 @@ function formatItemDateTime(item: ExploreItem) {
     }
     return dateStr;
   }
-  if (item.time_text) return item.time_text;
+  if (item.time_text) return sanitizeTimeText(item.time_text);
   // For activities with weekly hours, show compact "Open/Closed" summary
   if (item.schedule_text) {
     const { summaryLine } = formatOpeningHours(item.schedule_text);

@@ -3,7 +3,7 @@
     "apps": [],
     "details": [
       {
-        "appIDs": ["4CLZQV3J6X.com.kevwalt22.mobile"],
+        "appIDs": ["4CLZQV3J6X.com.euda.app"],
         "components": [
           { "/": "/auth/callback", "comment": "Supabase email verification redirect" },
           { "/": "/event/*", "comment": "Event detail deep link" },

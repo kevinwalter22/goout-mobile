@@ -4,12 +4,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { scrollToTopEmitter } from "../../src/utils/scrollToTop";
 import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
+import { SwipeableTabsContainer } from "../../src/components/SwipeableTabsContainer";
 
 export default function TabsLayout() {
   const { colors } = useTheme();
   const pathname = usePathname();
 
   return (
+    <SwipeableTabsContainer>
     <Tabs
       backBehavior="history"
       screenOptions={{
@@ -78,5 +80,6 @@ export default function TabsLayout() {
         }}
       />
     </Tabs>
+    </SwipeableTabsContainer>
   );
 }

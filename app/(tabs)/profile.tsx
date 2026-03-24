@@ -38,7 +38,7 @@ import { useFriendRecommendations } from "../../src/hooks/useFriendRecommendatio
 import { useContactSync } from "../../src/hooks/useContactSync";
 
 export default function Profile() {
-  const { profile, loading, signOut, user, refreshProfile } = useAuth();
+  const { profile, loading, user, refreshProfile } = useAuth();
   const insets = useSafeAreaInsets();
   const { friends, refresh: refreshFriends } = useFriendsList();
   const { requests, refresh: refreshRequests, removeRequest } = useFriendRequests();
@@ -95,22 +95,6 @@ export default function Profile() {
     };
   }, []);
 
-  async function handleSignOut() {
-    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
-      {
-        text: "Cancel",
-        style: "cancel",
-      },
-      {
-        text: "Sign Out",
-        style: "destructive",
-        onPress: async () => {
-          await signOut();
-          router.replace("/(auth)/signin");
-        },
-      },
-    ]);
-  }
 
   async function handleAvatarUpload() {
     if (!user) return;
@@ -527,22 +511,6 @@ export default function Profile() {
             </View>
           </View>
 
-          {/* Sign Out Button */}
-          <Pressable
-            onPress={handleSignOut}
-            accessibilityLabel="Sign out"
-            accessibilityRole="button"
-            style={{
-              padding: 16,
-              borderRadius: 12,
-              backgroundColor: colors.text,
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ color: colors.background, fontSize: 16, fontWeight: "600" }}>
-              Sign Out
-            </Text>
-          </Pressable>
         </View>
 
         {/* Upcoming Plans */}

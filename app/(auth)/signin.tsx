@@ -145,6 +145,16 @@ export default function SignIn() {
             )}
           </Pressable>
 
+          <View style={{ alignItems: "center", marginTop: Spacing.sm }}>
+            <Link href="/(auth)/forgot-password" asChild>
+              <Pressable accessibilityLabel="Forgot password" accessibilityRole="link">
+                <Text style={{ color: colors.textSecondary, fontSize: FontSize.sm }}>
+                  Forgot password?
+                </Text>
+              </Pressable>
+            </Link>
+          </View>
+
           <View
             style={{
               marginTop: Spacing.lg,
