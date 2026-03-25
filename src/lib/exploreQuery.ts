@@ -284,8 +284,12 @@ export async function queryExploreItems(
     // Always pass season for availability-aware filtering
     const currentSeason = getCurrentSeason();
 
-    // Attempt RPC query when date range or tags are active
-    if (dateRange || dbTags) {
+    // When a text search is active, skip the RPC (it doesn't support text search)
+    // and fall through to the fallback query that supports ILIKE filtering.
+    const searchQuery = filters.searchQuery?.trim() ?? "";
+
+    // Attempt RPC query when date range or tags are active (and no text search)
+    if (!searchQuery && (dateRange || dbTags)) {
       try {
         const { data: rpcData, error: rpcError } = await supabase.rpc(
           "filter_explore_items",
@@ -349,7 +353,9 @@ export async function queryExploreItems(
           return {
             data: sortedData,
             count: isDistanceFiltering ? sortedData.length : dbTotalCount,
-            hasMore: isDistanceFiltering ? gotFullPage : offset + rpcData.length < dbTotalCount,
+            hasMore: isDistanceFiltering
+              ? gotFullPage
+              : filteredData.length > 0 && offset + rpcData.length < dbTotalCount,
             error: null,
           };
         }
@@ -430,6 +436,12 @@ export async function queryExploreItems(
           .order("priority", { ascending: false })
           .order("starts_at", { ascending: true, nullsFirst: false });
         break;
+    }
+
+    // Apply text search (title or location name ILIKE match)
+    if (searchQuery) {
+      const q = `%${searchQuery.replace(/%/g, "\\%")}%`;
+      query = query.or(`title.ilike.${q},location_name.ilike.${q}`);
     }
 
     // Apply pagination (overfetch when distance sorting for stable client-side order)

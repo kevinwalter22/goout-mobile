@@ -3,6 +3,7 @@ import * as Location from "expo-location";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
 import { checkBeforeSubmit, moderateText } from "../lib/moderation/textModeration";
+import { uploadEventImage } from "../utils/storage";
 import type { ExploreItem } from "../types/database";
 
 /**
@@ -36,6 +37,7 @@ export interface CreateEventInput {
   lng?: number;
   visibility?: "friends_only" | "public";
   recurrence?: "weekly" | "monthly";
+  imageUri?: string;
 }
 
 export function useCreateEvent() {
@@ -156,6 +158,18 @@ export function useCreateEvent() {
 
         if (insertError) {
           throw new Error(insertError.message);
+        }
+
+        // Upload cover image if provided
+        if (input.imageUri && newEvent) {
+          const imageUrl = await uploadEventImage(input.imageUri, user.id, newEvent.id);
+          if (imageUrl) {
+            await supabase
+              .from("explore_items")
+              .update({ image_url: imageUrl })
+              .eq("id", newEvent.id);
+            (newEvent as any).image_url = imageUrl;
+          }
         }
 
         return newEvent as ExploreItem;

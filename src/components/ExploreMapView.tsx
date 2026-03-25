@@ -23,6 +23,7 @@ import type {
 interface ExploreMapViewProps {
   items: ExploreItem[]; // Fallback items from parent
   userLocation: { lat: number; lng: number } | null;
+  userId?: string;
   // Filter props
   kindFilter: KindFilter;
   category?: CategoryId;
@@ -157,6 +158,7 @@ const ThumbnailMarker = React.memo(
 export function ExploreMapView({
   items: fallbackItems,
   userLocation,
+  userId,
   kindFilter,
   category = "all",
   priceBucket = "all",
@@ -321,6 +323,10 @@ export function ExploreMapView({
         // Fetch events for "all" and "event" modes
         if (kindFilter === "all" || kindFilter === "event") {
           // 1. Dated events within the time window
+          const reviewStatusFilter = userId
+            ? `review_status.is.null,review_status.in.(auto_approved,approved),and(review_status.eq.quarantined,created_by_user_id.eq.${userId})`
+            : "review_status.is.null,review_status.in.(auto_approved,approved)";
+
           let eventQuery = supabase
             .from("explore_items")
             .select("*")
@@ -332,7 +338,7 @@ export function ExploreMapView({
             .not("lng", "is", null)
             .gte("priority", 0)
             .eq("is_duplicate", false)
-            .or("review_status.is.null,review_status.in.(auto_approved,approved)");
+            .or(reviewStatusFilter);
 
           eventQuery = applyFilters(eventQuery);
           const { data: eventData } = await eventQuery.limit(300);
@@ -350,7 +356,7 @@ export function ExploreMapView({
             .not("lng", "is", null)
             .gte("priority", 0)
             .eq("is_duplicate", false)
-            .or("review_status.is.null,review_status.in.(auto_approved,approved)")
+            .or(reviewStatusFilter)
             .or("schedule_text.not.is.null,recurrence.not.is.null");
 
           if (kindFilter === "event") {

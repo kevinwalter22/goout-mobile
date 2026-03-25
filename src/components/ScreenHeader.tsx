@@ -19,7 +19,13 @@ export function ScreenHeader({ title, onBack, right }: ScreenHeaderProps) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
 
-  const handleBack = onBack ?? (() => router.back());
+  const handleBack = onBack ?? (() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)/feed" as any);
+    }
+  });
 
   const backButton = (
     <Pressable

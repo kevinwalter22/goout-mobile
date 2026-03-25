@@ -24,6 +24,8 @@ export interface ScoringContext {
   featureFlags: Map<string, boolean>;
   /** Community feedback net scores: item_id -> net_score */
   communityFeedbackMap?: Map<string, number>;
+  /** IDs of explore items created by friends of the current user */
+  friendCreatedItemIds?: Set<string>;
   /** Current explore toggle: "all" | "event" | "activity". Context intent + type affinity only apply to "all". */
   kindFilter?: string;
 }
@@ -46,6 +48,7 @@ export interface ScoreBreakdown {
   quality: number;
   communityFeedback: number;
   freshness: number;
+  friendCreated: number;
   total: number;
   /** Dev-only: which intent bucket matched */
   _intentBucket?: string;
@@ -96,6 +99,9 @@ export function scoreItem(
     freshness: context.featureFlags.get(FLAGS.FRESHNESS)
       ? computeFreshnessScore(item)
       : 0.5,
+    friendCreated: context.featureFlags.get(FLAGS.FRIEND_CREATED_BOOST)
+      ? computeFriendCreatedScore(item, context)
+      : 0,
     total: 0,
     _intentBucket: intentResult.bucketName,
   };
@@ -112,7 +118,8 @@ export function scoreItem(
     breakdown.typeAffinity * WEIGHTS.TYPE_AFFINITY +
     breakdown.quality * WEIGHTS.QUALITY +
     breakdown.communityFeedback * WEIGHTS.COMMUNITY_FEEDBACK +
-    breakdown.freshness * WEIGHTS.FRESHNESS;
+    breakdown.freshness * WEIGHTS.FRESHNESS +
+    breakdown.friendCreated * WEIGHTS.FRIEND_CREATED;
 
   return {
     ...item,
@@ -738,6 +745,20 @@ export function computeCommunityFeedbackScore(
     COMMUNITY_FEEDBACK.SCORE_FLOOR,
     Math.min(COMMUNITY_FEEDBACK.SCORE_CEILING, normalized)
   );
+}
+
+// ============================================================================
+// Friend Created Score
+// ============================================================================
+
+/**
+ * Returns 1.0 if this item was created by a friend of the current user, 0 otherwise.
+ */
+export function computeFriendCreatedScore(
+  item: ExploreItem,
+  context: ScoringContext
+): number {
+  return context.friendCreatedItemIds?.has(item.id) ? 1 : 0;
 }
 
 // ============================================================================

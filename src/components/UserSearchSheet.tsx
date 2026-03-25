@@ -11,12 +11,14 @@ import {
   Platform,
   StyleSheet,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../hooks/useAuth";
 import { useFriendship } from "../hooks/useFriendship";
 import { Avatar } from "./Avatar";
 import { Colors } from "../config/theme";
 import { useTheme } from "../contexts/ThemeContext";
+import { shareApp } from "../utils/share";
 
 type User = {
   id: string;
@@ -109,6 +111,22 @@ export function UserSearchSheet({ visible, onClose, onViewProfile }: UserSearchS
           data={results}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => <UserSearchResultItem user={item} onViewProfile={onViewProfile} />}
+          ListFooterComponent={
+            <View style={[styles.inviteFooter, { borderTopColor: colors.borderLight }]}>
+              <Text style={[styles.inviteHint, { color: colors.textSecondary }]}>
+                Can't find who you're looking for?
+              </Text>
+              <Pressable
+                onPress={() => shareApp()}
+                accessibilityLabel="Invite friend to Euda"
+                accessibilityRole="button"
+                style={styles.inviteButton}
+              >
+                <Ionicons name="share-outline" size={15} color={Colors.primary} />
+                <Text style={styles.inviteButtonText}>Invite them to Euda</Text>
+              </Pressable>
+            </View>
+          }
         />
       </KeyboardAvoidingView>
     </Modal>
@@ -261,5 +279,25 @@ const styles = StyleSheet.create({
   },
   friendButtonTextActive: {
     color: "#666",
+  },
+  inviteFooter: {
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+  },
+  inviteHint: {
+    fontSize: 13,
+  },
+  inviteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  inviteButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: Colors.primary,
   },
 });

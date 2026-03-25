@@ -46,6 +46,7 @@ export interface UseExploreFiltersReturn {
   setTimeWindow: (time: TimeWindow) => void;
   setDistance: (distance: DistanceRadius) => void;
   setSort: (sort: SortOption) => void;
+  setSearchQuery: (q: string) => void;
   resetFilters: () => void;
   resetAdvancedFilters: () => void;
 
@@ -372,6 +373,14 @@ export function useExploreFilters(
     [filters, updateFiltersAndQuery]
   );
 
+  const setSearchQuery = useCallback(
+    (searchQuery: string) => {
+      const newFilters: ExploreFilterState = { ...filters, searchQuery, page: 0 };
+      updateFiltersAndQuery(newFilters);
+    },
+    [filters, updateFiltersAndQuery]
+  );
+
   const resetFilters = useCallback(() => {
     updateFiltersAndQuery({ ...DEFAULT_FILTER_STATE });
   }, [updateFiltersAndQuery]);
@@ -430,6 +439,7 @@ export function useExploreFilters(
     setTimeWindow,
     setDistance,
     setSort,
+    setSearchQuery,
     resetFilters,
     resetAdvancedFilters,
 

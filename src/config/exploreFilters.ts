@@ -242,6 +242,9 @@ export interface ExploreFilterState {
   // Sorting
   sort: SortOption;
 
+  // Text search
+  searchQuery: string;
+
   // Pagination
   page: number;
   pageSize: number;
@@ -255,6 +258,7 @@ export const DEFAULT_FILTER_STATE: ExploreFilterState = {
   timeWindow: "all",
   distance: 50,
   sort: "soonest",
+  searchQuery: "",
   page: 0,
   pageSize: 20,
 };
@@ -280,7 +284,8 @@ export function hasActiveFilters(state: ExploreFilterState): boolean {
     state.category !== "all" ||
     state.priceBucket !== "all" ||
     state.timeWindow !== "all" ||
-    state.distance !== 50
+    state.distance !== 50 ||
+    state.searchQuery !== ""
   );
 }
 

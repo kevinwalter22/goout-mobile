@@ -608,6 +608,11 @@ TAGGING EXAMPLES (to calibrate your decisions):
 "Cascade Mountain Trail" → hiking, trail, outdoors, nature, adventure, scenic, free, solo_friendly, fitness
 "Craft Beer Festival" → festival, brewery, drinks, outdoors, social, food, adults_only
 "Community Cleanup Day" → volunteer, outdoors, social, free, group_activity, family_friendly
+"Board Game Night at Local Brewery" → indoors, social, group_activity, adults_only, date_night, budget_friendly
+"Tuesday Trivia Night" → indoors, social, group_activity, adults_only, budget_friendly
+"Escape Room Experience" → indoors, group_activity, adventure, social, adults_only
+"Open Mic Night" → theater, live_music, indoors, social, adults_only, cultural
+"Comedy Show at the Tap Room" → theater, indoors, social, adults_only, nightlife, cultural
 
 ═══════════════════════════════════════════════════════════════
 CATEGORY VALIDATION
@@ -621,6 +626,15 @@ Examples of miscategorization to fix:
 - A museum listed as "Anchor" → should be "Arts & Culture"
 - A ski resort listed as "Outdoor" → should be "Winter Activities"
 - A bar listed as "Anchor" → should be "Nightlife"
+
+CRITICAL RULE — Classify events by ACTIVITY TYPE, not venue type:
+- "Board Game Night at a Bar" → "Arts & Culture" (activity is gaming, not the bar)
+- "Trivia Night at a Brewery" → "Arts & Culture" (activity is trivia, not the brewery)
+- "Comedy Show at a Restaurant" → "Arts & Culture" (activity is comedy performance)
+- "Yoga Class at a Hotel" → "Sports & Recreation" (activity is yoga, not hotel services)
+- "Paint & Sip at a Winery" → "Arts & Culture" (activity is painting, not wine tasting)
+- Use "Food & Drink" ONLY when the event IS the food/drink experience: wine tastings, cooking classes, food festivals, chef dinners, restaurant openings.
+- Use "Nightlife" for bars/clubs as destinations, NOT for events that happen to be hosted at a bar.
 
 ═══════════════════════════════════════════════════════════════
 AUDIENCE & VENUE CLASSIFICATION

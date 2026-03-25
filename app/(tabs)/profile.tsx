@@ -36,6 +36,7 @@ import { useTheme } from "../../src/contexts/ThemeContext";
 import { getEffectiveStreak } from "../../src/utils/streak";
 import { useFriendRecommendations } from "../../src/hooks/useFriendRecommendations";
 import { useContactSync } from "../../src/hooks/useContactSync";
+import { shareApp } from "../../src/utils/share";
 
 export default function Profile() {
   const { profile, loading, user, refreshProfile } = useAuth();
@@ -506,6 +507,29 @@ export default function Profile() {
                   }}
                 >
                   Search for friends
+                </Text>
+              </Pressable>
+
+              {/* Invite CTA */}
+              <Pressable
+                onPress={() => shareApp()}
+                accessibilityLabel="Invite friends to Euda"
+                accessibilityRole="button"
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  paddingVertical: 11,
+                  paddingHorizontal: 20,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: Colors.primary,
+                }}
+              >
+                <Ionicons name="person-add-outline" size={15} color={Colors.primary} />
+                <Text style={{ fontSize: 14, fontWeight: "600", color: Colors.primary }}>
+                  Invite friends to Euda
                 </Text>
               </Pressable>
             </View>

@@ -3,8 +3,10 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Platform,
   Pressable,
   Text,
+  TextInput,
   View,
   Image,
   RefreshControl,
@@ -45,6 +47,23 @@ type ExploreItemWithRSVP = ExploreItem & {
 };
 
 type RSVPInfo = { count: number; userGoing: boolean; friendsGoing: number };
+
+// Returns approximate distance in meters between two lat/lng points.
+// Used to gate location state updates — only update when moved >50m.
+function haversineMeters(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number {
+  const R = 6371000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) *
+      Math.cos((b.lat * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
 
 // Stable separator — avoids creating a new component on every render
 const ItemSep = () => <View style={{ height: 10 }} />;
@@ -148,24 +167,6 @@ const ExploreCard = React.memo(function ExploreCard({
                   </Text>
                 </View>
               )}
-              {item.recurrence && !["none", ""].includes(item.recurrence) && (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 3,
-                    paddingHorizontal: 8,
-                    paddingVertical: 2,
-                    borderRadius: 4,
-                    backgroundColor: colors.surfaceVariant,
-                  }}
-                >
-                  <Ionicons name="repeat" size={10} color={colors.textSecondary} />
-                  <Text style={{ fontSize: 10, fontWeight: "700", color: colors.textSecondary }}>
-                    {item.recurrence === "weekly" ? "WEEKLY" : "MONTHLY"}
-                  </Text>
-                </View>
-              )}
             </View>
             {item.hook_line && (
               <Text
@@ -218,6 +219,24 @@ const ExploreCard = React.memo(function ExploreCard({
                 >
                   {item.price_bucket === "free" ? "Free" : item.price_bucket}
                 </Text>
+              )}
+              {item.recurrence && !["none", ""].includes(item.recurrence) && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 3,
+                    backgroundColor: colors.surfaceVariant,
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 4,
+                  }}
+                >
+                  <Ionicons name="repeat" size={11} color={colors.textSecondary} />
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textSecondary }}>
+                    {item.recurrence === "weekly" ? "Weekly" : "Monthly"}
+                  </Text>
+                </View>
               )}
             </View>
           </View>
@@ -317,6 +336,9 @@ export default function Explore() {
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [searchText, setSearchText] = useState("");
+  const [searchActive, setSearchActive] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // User location (for Postable Now feature)
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -345,6 +367,7 @@ export default function Explore() {
     setTimeWindow,
     setDistance,
     setSort,
+    setSearchQuery,
     resetAdvancedFilters,
     items,
     rawItems,
@@ -370,6 +393,7 @@ export default function Explore() {
 
     const handleScrollToTop = () => {
       flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+      refresh();
     };
 
     scrollToTopEmitter.on("scrollToTop:explore", handleScrollToTop);
@@ -377,7 +401,18 @@ export default function Explore() {
     return () => {
       scrollToTopEmitter.off("scrollToTop:explore", handleScrollToTop);
     };
-  }, []);
+  }, [refresh]);
+
+  // Debounce search text → trigger backend search query
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      setSearchQuery(searchText);
+    }, 300);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [searchText]);
 
   // Function to get current location (reusable for initial load, refresh, and periodic updates)
   const updateLocation = useCallback(async () => {
@@ -388,7 +423,11 @@ export default function Explore() {
       const { latitude, longitude, error } = await getCurrentLocation();
       if (error) return;
 
-      setUserLocation({ lat: latitude, lng: longitude });
+      const next = { lat: latitude, lng: longitude };
+      setUserLocation((prev) => {
+        if (prev && haversineMeters(prev, next) < 50) return prev;
+        return next;
+      });
     } catch (error) {
       console.log("[Explore] Could not get location:", error);
     }
@@ -725,29 +764,79 @@ export default function Explore() {
         <ViewModeToggle value={viewMode} onChange={setViewMode} />
       </View>
 
-      {/* Results bar: filter summary + count on left, filter button on right */}
-      {(hasFilters || totalCount > 0) && !loading && (
+      {/* Results bar: search / filter summary + count + filter button (hidden in map mode) */}
+      {(hasFilters || totalCount > 0 || searchActive) && !loading && viewMode !== "map" && (
         <View
           style={{
-            paddingHorizontal: 16,
+            paddingHorizontal: 12,
             paddingVertical: 6,
             backgroundColor: colors.surfaceVariant,
             borderBottomWidth: 1,
             borderBottomColor: colors.border,
             flexDirection: "row",
-            justifyContent: "space-between",
             alignItems: "center",
+            gap: 6,
           }}
         >
-          <Text style={{ fontSize: 13, color: colors.textSecondary }}>
-            {filterSummary}
-            <Text style={{ color: colors.textTertiary }}>
-              {"  ·  "}
-              {items.length < totalCount
-                ? `${items.length} of ${totalCount}`
-                : `${totalCount} result${totalCount !== 1 ? "s" : ""}`}
+          {searchActive ? (
+            /* Search active — TextInput fills the bar */
+            <>
+              <Ionicons name="search" size={14} color={colors.textSecondary} />
+              <TextInput
+                value={searchText}
+                onChangeText={setSearchText}
+                placeholder="Search places & events..."
+                placeholderTextColor={colors.textTertiary}
+                autoFocus
+                autoCapitalize="none"
+                returnKeyType="search"
+                style={{
+                  flex: 1,
+                  fontSize: 14,
+                  color: colors.text,
+                  paddingVertical: 0,
+                }}
+              />
+              <Pressable
+                onPress={() => {
+                  setSearchText("");
+                  setSearchQuery("");
+                  setSearchActive(false);
+                }}
+                hitSlop={8}
+                accessibilityLabel="Close search"
+                accessibilityRole="button"
+              >
+                <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+              </Pressable>
+            </>
+          ) : (
+            /* Normal state — count text + search icon */
+            <Text style={{ fontSize: 13, color: colors.textSecondary, flex: 1 }}>
+              {filterSummary}
+              <Text style={{ color: colors.textTertiary }}>
+                {"  ·  "}
+                {items.length < totalCount
+                  ? `${items.length} of ${totalCount}`
+                  : `${totalCount} result${totalCount !== 1 ? "s" : ""}`}
+              </Text>
             </Text>
-          </Text>
+          )}
+
+          {/* Search icon — only shown when not already searching */}
+          {!searchActive && (
+            <Pressable
+              onPress={() => setSearchActive(true)}
+              hitSlop={8}
+              accessibilityLabel="Search"
+              accessibilityRole="button"
+              style={{ padding: 4 }}
+            >
+              <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
+            </Pressable>
+          )}
+
+          {/* Filter button — always visible */}
           <Pressable
             onPress={() => setShowFilterSheet(true)}
             accessibilityLabel={activeFilterCount > 0 ? `Filters, ${activeFilterCount} active` : "Filters"}
@@ -782,6 +871,7 @@ export default function Explore() {
         <ExploreMapView
           items={orderedItems}
           userLocation={userLocation}
+          userId={user?.id}
           kindFilter={effectiveFilters.kindFilter}
           category={effectiveFilters.category}
           priceBucket={effectiveFilters.priceBucket}
@@ -883,6 +973,7 @@ export default function Explore() {
             ref={flatListRef}
             data={orderedItems}
             keyExtractor={(item) => item.id}
+            removeClippedSubviews={Platform.OS === "android"}
             contentContainerStyle={{ padding: 16 }}
             ItemSeparatorComponent={ItemSep}
             refreshControl={

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,17 +12,20 @@ import {
   View,
 } from "react-native";
 import { router, useLocalSearchParams, Stack } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as Location from "expo-location";
 import { supabase } from "../../src/lib/supabase";
+import { uploadEventImage } from "../../src/utils/storage";
 import { useAuth } from "../../src/hooks/useAuth";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors } from "../../src/config/theme";
 import { AddressAutocomplete, type AddressSuggestion } from "../../src/components/AddressAutocomplete";
 import type { ExploreItem } from "../../src/types/database";
 import { checkBeforeSubmit, moderateText } from "../../src/lib/moderation/textModeration";
+import { setLocationPickerCallback } from "../../src/utils/locationPickerStore";
 
 /**
  * Geocode an address to get lat/lng coordinates
@@ -52,6 +56,21 @@ export default function EditEvent() {
   const [loadingItem, setLoadingItem] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Cover image: null = no new image picked; string = local URI of new pick
+  const [imageUri, setImageUri] = useState<string | null>(null);
+
+  async function pickImage() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: "images",
+      quality: 0.9,
+      allowsEditing: true,
+      aspect: [16, 9],
+    });
+    if (!result.canceled && result.assets[0]) {
+      setImageUri(result.assets[0].uri);
+    }
+  }
 
   // Form state
   const [title, setTitle] = useState("");
@@ -164,6 +183,13 @@ export default function EditEvent() {
         }
       }
 
+      // Upload new cover image if picked
+      let imageUrl: string | undefined;
+      if (imageUri) {
+        const uploaded = await uploadEventImage(imageUri, user!.id, item.id);
+        if (uploaded) imageUrl = uploaded;
+      }
+
       // Determine review_status changes
       const updatePayload: Record<string, unknown> = {
         title: title.trim(),
@@ -176,6 +202,7 @@ export default function EditEvent() {
         lng,
         visibility,
         recurrence: recurrence !== "none" ? recurrence : null,
+        ...(imageUrl ? { image_url: imageUrl } : {}),
       };
 
       // Re-quarantine if switching to public or if text moderation flags content
@@ -326,6 +353,58 @@ export default function EditEvent() {
         contentContainerStyle={{ padding: 16, gap: 20 }}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Cover Photo */}
+        {(() => {
+          const displayUri = imageUri ?? item.image_url ?? null;
+          return (
+            <Pressable
+              onPress={pickImage}
+              accessibilityLabel={displayUri ? "Change cover photo" : "Add cover photo"}
+              accessibilityRole="button"
+              style={{
+                height: 160,
+                borderRadius: 12,
+                overflow: "hidden",
+                backgroundColor: colors.surface,
+                borderWidth: 1,
+                borderColor: displayUri ? "transparent" : colors.border,
+                borderStyle: displayUri ? "solid" : "dashed",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {displayUri ? (
+                <>
+                  <Image
+                    source={{ uri: displayUri }}
+                    style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+                    resizeMode="cover"
+                  />
+                  <View
+                    style={{
+                      backgroundColor: "rgba(0,0,0,0.45)",
+                      paddingHorizontal: 14,
+                      paddingVertical: 6,
+                      borderRadius: 20,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Ionicons name="camera-outline" size={16} color="#fff" />
+                    <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>Change Photo</Text>
+                  </View>
+                </>
+              ) : (
+                <View style={{ alignItems: "center", gap: 8 }}>
+                  <Ionicons name="image-outline" size={32} color={colors.textTertiary} />
+                  <Text style={{ fontSize: 14, color: colors.textTertiary }}>Add Cover Photo</Text>
+                </View>
+              )}
+            </Pressable>
+          );
+        })()}
+
         {/* Title */}
         <View style={{ gap: 8 }}>
           <Text
@@ -543,6 +622,41 @@ export default function EditEvent() {
             onSelectAddress={handleAddressSelect}
             placeholder="Search for an address..."
           />
+          <Pressable
+            onPress={() => {
+              const currentLat = selectedCoords?.lat ?? item.lat ?? undefined;
+              const currentLng = selectedCoords?.lng ?? item.lng ?? undefined;
+              setLocationPickerCallback(({ lat, lng }) => {
+                setSelectedCoords({ lat, lng });
+              });
+              router.push({
+                pathname: "/location-picker",
+                params: {
+                  lat: currentLat?.toString() ?? "",
+                  lng: currentLng?.toString() ?? "",
+                },
+              } as any);
+            }}
+            accessibilityLabel="Drop pin on map"
+            accessibilityRole="button"
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              alignSelf: "flex-start",
+              paddingVertical: 6,
+            }}
+          >
+            <Ionicons name="location-outline" size={16} color={Colors.primary} />
+            <Text style={{ fontSize: 14, color: Colors.primary, fontWeight: "600" }}>
+              {selectedCoords ? "Move pin" : "Drop pin on map"}
+            </Text>
+          </Pressable>
+          {selectedCoords && (
+            <Text style={{ fontSize: 12, color: colors.textTertiary }}>
+              Pin set: {selectedCoords.lat.toFixed(5)}, {selectedCoords.lng.toFixed(5)}
+            </Text>
+          )}
         </View>
 
         {/* Repeats */}

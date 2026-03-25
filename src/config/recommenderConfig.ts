@@ -19,21 +19,23 @@ export const RECOMMENDER_CONFIG = {
     INGESTION: "ingestion",
     COMMUNITY_FEEDBACK: "community_feedback",
     FRESHNESS: "freshness_signal",
+    FRIEND_CREATED_BOOST: "friend_created_boost",
   },
 
   // Scoring weights (sum to 1.0 for normalized score)
   WEIGHTS: {
     TIME_MATCH: 0.15, // Time of day / event timing match
-    DISTANCE: 0.20, // Closer = higher score (was 0.21, -0.01 for freshness)
+    DISTANCE: 0.20, // Closer = higher score
     OPEN_NOW: 0.08, // Currently available/happening
     FRIENDS_GOING: 0.13, // Friends RSVP boost
     TAG_AFFINITY: 0.06, // User preference match
-    WEATHER: 0.10, // Weather/season-appropriate (was 0.11, -0.01 for freshness)
+    WEATHER: 0.06, // Weather/season-appropriate
     CONTEXT_INTENT: 0.03, // Day/time context bias
     TYPE_AFFINITY: 0.06, // Learned event-vs-activity preference (All toggle only)
-    QUALITY: 0.12, // Item confidence / data quality
+    QUALITY: 0.10, // Item confidence / data quality
     COMMUNITY_FEEDBACK: 0.05, // Community upvote/confirm/downvote/closed signal
-    FRESHNESS: 0.02, // Recency boost for recently added items
+    FRESHNESS: 0.00, // Recency boost (disabled — absorbed by FRIEND_CREATED)
+    FRIEND_CREATED: 0.08, // Event created by a friend
   },
 
   // Distance scoring thresholds

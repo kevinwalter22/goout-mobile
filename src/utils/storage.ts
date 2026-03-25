@@ -73,6 +73,34 @@ export function getImageUrl(path: string): string {
 }
 
 /**
+ * Upload an event cover image to Supabase Storage.
+ * Returns the public URL on success, null on failure.
+ */
+export async function uploadEventImage(
+  uri: string,
+  userId: string,
+  eventId: string,
+): Promise<string | null> {
+  try {
+    const response = await fetch(uri);
+    const arrayBuffer = await response.arrayBuffer();
+    const path = `events/${userId}/${eventId}.jpg`;
+    const { data, error } = await supabase.storage.from(BUCKET_NAME).upload(path, arrayBuffer, {
+      contentType: "image/jpeg",
+      upsert: true,
+    });
+    if (error) {
+      console.error("[UploadEventImage] Failed:", error.message);
+      return null;
+    }
+    return getImageUrl(data.path);
+  } catch (error) {
+    console.error("[UploadEventImage] Exception:", error);
+    return null;
+  }
+}
+
+/**
  * Delete image from storage
  * Use this if post creation fails after upload
  */

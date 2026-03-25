@@ -76,6 +76,7 @@ export function useRecommender(
   } | null>(null);
   const [friendsGoingMap, setFriendsGoingMap] = useState<Map<string, number>>(new Map());
   const [communityFeedbackMap, setCommunityFeedbackMap] = useState<Map<string, number>>(new Map());
+  const [friendCreatedItemIds, setFriendCreatedItemIds] = useState<Set<string>>(new Set());
   const [rerankedItems, setRerankedItems] = useState<ScoredItem[] | null>(null);
   const [reranking, setReranking] = useState(false);
 
@@ -180,6 +181,46 @@ export function useRecommender(
   }, [user, exploreFilters.items, featureFlags]);
 
   // ========================================
+  // Load friend-created item IDs
+  // ========================================
+
+  useEffect(() => {
+    if (!user) return;
+    if (!featureFlags.get(RECOMMENDER_CONFIG.FLAGS.FRIEND_CREATED_BOOST)) return;
+
+    async function loadFriendCreated() {
+      try {
+        // Get accepted friend IDs
+        const { data: friendships } = await supabase
+          .from("friendships")
+          .select("user_id, friend_id")
+          .or(`user_id.eq.${user!.id},friend_id.eq.${user!.id}`)
+          .eq("status", "accepted");
+
+        if (!friendships || friendships.length === 0) return;
+
+        const friendIds = friendships.map((f) =>
+          f.user_id === user!.id ? f.friend_id : f.user_id
+        );
+
+        // Query explore_items created by those friends
+        const { data: friendItems } = await supabase
+          .from("explore_items")
+          .select("id")
+          .in("created_by_user_id", friendIds)
+          .is("deleted_at", null);
+
+        if (friendItems) {
+          setFriendCreatedItemIds(new Set(friendItems.map((r) => r.id)));
+        }
+      } catch (err) {
+        console.log("[useRecommender] Failed to load friend-created items:", err);
+      }
+    }
+    loadFriendCreated();
+  }, [user, featureFlags]);
+
+  // ========================================
   // Load community feedback scores for visible items
   // ========================================
 
@@ -226,6 +267,7 @@ export function useRecommender(
       userTagAffinity,
       userTypeAffinity,
       communityFeedbackMap,
+      friendCreatedItemIds,
       weather: weather
         ? {
             isRaining: weather.isRaining,
@@ -236,7 +278,7 @@ export function useRecommender(
       featureFlags,
       kindFilter,
     }),
-    [userLocation, friendsGoingMap, userTagAffinity, userTypeAffinity, communityFeedbackMap, weather, featureFlags, kindFilter]
+    [userLocation, friendsGoingMap, userTagAffinity, userTypeAffinity, communityFeedbackMap, friendCreatedItemIds, weather, featureFlags, kindFilter]
   );
 
   // ========================================
@@ -264,6 +306,7 @@ export function useRecommender(
           quality: 0,
           communityFeedback: 0,
           freshness: 0,
+          friendCreated: 0,
           total: 0,
         },
       }));

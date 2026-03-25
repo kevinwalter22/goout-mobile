@@ -67,6 +67,12 @@ const CATEGORY_SYNONYMS: Record<string, CanonicalCategory> = {
   "concerts": "Arts & Culture", "live music": "Arts & Culture",
   "performance": "Arts & Culture", "art": "Arts & Culture",
   "entertainment": "Arts & Culture",
+  // Social & gaming events (previously unmapped → fell to null)
+  "games": "Arts & Culture", "gaming": "Arts & Culture",
+  "comedy": "Arts & Culture", "improv": "Arts & Culture",
+  "trivia": "Arts & Culture", "karaoke": "Arts & Culture",
+  "escape room": "Arts & Culture", "film": "Arts & Culture",
+  "cinema": "Arts & Culture", "social": "Arts & Culture",
   "sports & recreation": "Sports & Recreation",
   "sports and recreation": "Sports & Recreation",
   "sports": "Sports & Recreation", "recreation": "Sports & Recreation",
@@ -82,6 +88,88 @@ const CATEGORY_SYNONYMS: Record<string, CanonicalCategory> = {
   "anchor": "Anchor", "community": "Anchor", "local": "Anchor",
   "landmark": "Anchor", "attraction": "Anchor",
 };
+
+// ============================================================================
+// TITLE-KEYWORD CATEGORY INFERENCE
+// ============================================================================
+// Fixes venue-type bleed: when a source assigns category based on WHERE an
+// event is held (e.g., "Food & Drink" for a board game night at a bar), these
+// rules assert the correct category based on WHAT THE EVENT ACTUALLY IS.
+// Title inference takes priority over source-provided category.
+
+interface TitleKeywordRule {
+  keywords: string[];
+  category: CanonicalCategory;
+}
+
+const TITLE_KEYWORD_RULES: TitleKeywordRule[] = [
+  // Social gaming — most common venue-bleed victim
+  {
+    keywords: [
+      "board game", "board games", "game night", "games night",
+      "trivia night", "trivia", "pub quiz", "pub trivia",
+      "escape room", "escape rooms",
+      "bingo night", "bingo",
+      "karaoke night", "karaoke",
+      "tabletop", "dungeons & dragons", "d&d night", "d&d ",
+      "game show night", "game show",
+    ],
+    category: "Arts & Culture",
+  },
+  // Performing arts & culture
+  {
+    keywords: [
+      "comedy show", "comedy night", "stand-up", "stand up comedy",
+      "improv show", "improv night",
+      "open mic", "open-mic",
+      "poetry slam", "poetry night",
+      "art exhibit", "art show", "art walk",
+      "film screening", "movie night", "movie screening",
+      "paint and sip", "paint & sip", "painting class",
+      "pottery class", "pottery workshop",
+      "craft night", "craft workshop",
+    ],
+    category: "Arts & Culture",
+  },
+  // Fitness events (often held at food/non-fitness venues)
+  {
+    keywords: [
+      "yoga class", "yoga session", "yoga in the",
+      "pilates class", "pilates session",
+      "fitness class", "fitness session",
+      "run club", "running club",
+      "cycling class", "spin class",
+      "boot camp class", "hiit class",
+    ],
+    category: "Sports & Recreation",
+  },
+];
+
+/**
+ * Infer category from event title and description keywords.
+ * Returns a category only when a strong activity-type signal is found.
+ * This OVERRIDES source-derived category to prevent venue-type bleed.
+ */
+function inferCategoryFromTitle(
+  title: string | null | undefined,
+  description?: string | null,
+): CanonicalCategory | null {
+  if (!title) return null;
+  // Use title + first 200 chars of description for matching
+  const searchText = [title, description?.slice(0, 200)]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  for (const rule of TITLE_KEYWORD_RULES) {
+    for (const keyword of rule.keywords) {
+      if (searchText.includes(keyword.toLowerCase())) {
+        return rule.category;
+      }
+    }
+  }
+  return null;
+}
 
 function normalizeCategory(category: string | null | undefined): CanonicalCategory | null {
   if (!category) return null;
@@ -254,14 +342,24 @@ export interface NormalizedFields {
 /**
  * Apply deterministic normalization to fields from a source adapter.
  * Returns normalized values + confidence score.
+ *
+ * Title-keyword inference takes priority over source-provided category
+ * to prevent venue-type bleed (e.g., "board game night at a bar" → Arts & Culture,
+ * not "Food & Drink" inherited from the bar's venue type).
  */
 export function normalizeFields(item: {
   category?: string | null;
   price_bucket?: string | null;
   tags?: string[] | null;
   town?: string | null;
+  title?: string | null;
+  description?: string | null;
 }): NormalizedFields {
-  const category = normalizeCategory(item.category);
+  // Title-keyword inference overrides venue-derived source category
+  const titleCategory = inferCategoryFromTitle(item.title, item.description);
+  const sourceCategory = normalizeCategory(item.category);
+  const category = titleCategory ?? sourceCategory;
+
   const price_bucket = normalizePrice(item.price_bucket);
   const tags = normalizeTags(item.tags);
   const town = normalizeTown(item.town);

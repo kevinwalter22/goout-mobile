@@ -65,33 +65,49 @@ interface WebCollectorCandidate {
 // Category Mapping (based on keywords in title/description)
 // ============================================================================
 
+// ORDERING MATTERS: Object.entries() iterates in insertion order.
+// Activity-type categories MUST come before venue-type categories (food, nightlife)
+// to prevent venue-type bleed (e.g., "board game night at a brewery" → "food").
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  // Food & Drink
-  food: ["dinner", "brunch", "lunch", "food", "tasting", "cooking", "chef", "cuisine", "restaurant"],
-  nightlife: ["bar", "cocktail", "happy hour", "pub", "brewery", "wine", "beer"],
+  // Activity-type categories FIRST — these identify WHAT the event IS
 
-  // Entertainment
-  entertainment: ["movie", "film", "cinema", "theater", "show", "performance", "comedy", "magic"],
+  // Recreation (social gaming, trivia — most common venue-bleed victims)
+  recreation: [
+    "board game", "board games", "game night", "games night",
+    "trivia night", "trivia", "pub quiz", "pub trivia",
+    "escape room", "escape rooms",
+    "bingo night", "bingo",
+    "karaoke night", "karaoke",
+    "tabletop", "dungeons & dragons", "d&d",
+    "game show", "bowling", "pool",
+  ],
+
+  // Music (strong activity signal)
   music: ["concert", "live music", "band", "musician", "orchestra", "jazz", "rock", "folk"],
 
   // Arts & Culture
   arts: ["art", "gallery", "exhibit", "museum", "painting", "sculpture", "photography"],
 
-  // Recreation
-  recreation: ["game", "trivia", "bingo", "karaoke", "bowling", "pool"],
+  // Entertainment (performing arts — checked after gaming/music to avoid false positives)
+  entertainment: ["movie", "film", "cinema", "theater", "show", "performance", "comedy", "magic"],
 
   // Sports & Fitness
   fitness: ["yoga", "fitness", "workout", "run", "walk", "hike", "bike", "gym"],
-  sports: ["game", "match", "tournament", "hockey", "basketball", "football", "soccer"],
+  sports: ["match", "tournament", "hockey", "basketball", "football", "soccer"],
 
   // Education
   education: ["workshop", "class", "lecture", "seminar", "talk", "learn", "training"],
 
+  // Outdoor
+  outdoor: ["outdoor", "park", "nature", "trail", "garden", "camping", "fishing"],
+
   // Community
   community: ["meeting", "club", "group", "volunteer", "charity", "fundraiser", "market", "fair"],
 
-  // Outdoor
-  outdoor: ["outdoor", "park", "nature", "trail", "garden", "camping", "fishing"],
+  // Venue-type categories LAST — only match if no activity-type keyword matched above.
+  // A board game night at a brewery will match "recreation" before reaching these.
+  nightlife: ["bar", "cocktail", "happy hour", "pub", "brewery", "wine", "beer"],
+  food: ["dinner", "brunch", "lunch", "food", "tasting", "cooking", "chef", "cuisine", "restaurant"],
 };
 
 const TAG_KEYWORDS: Record<string, string[]> = {

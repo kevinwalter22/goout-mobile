@@ -84,6 +84,28 @@ export async function shareItem(options: ShareItemOptions): Promise<boolean> {
 }
 
 /**
+ * The download/invite URL for the app.
+ * Update to the App Store URL after launch.
+ */
+export const APP_INVITE_URL = `https://${DOMAIN}/download`;
+
+/**
+ * Share the Euda app with a friend via the native share sheet.
+ * Used for inviting people who aren't on the app yet.
+ */
+export async function shareApp(): Promise<boolean> {
+  try {
+    const result = await Share.share({
+      message: `Hey! Join me on Euda — the best way to discover what's happening around you.\n\nDownload it: ${APP_INVITE_URL}`,
+    });
+    return result.action === Share.sharedAction;
+  } catch (error) {
+    console.error("[Share] Error sharing app:", error);
+    return false;
+  }
+}
+
+/**
  * Format an ISO date string for the share message.
  */
 function formatShareDate(isoDate: string): string {

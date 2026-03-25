@@ -573,6 +573,25 @@ export default function EventDetail() {
                 </Pressable>
               )}
             </View>
+
+            {item.source_url && /^https?:\/\//i.test(item.source_url) && (
+              <View style={{ gap: 4 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
+                  MORE INFO
+                </Text>
+                <Pressable
+                  onPress={() => Linking.openURL(item.source_url!)}
+                  accessibilityLabel="Learn more about this event"
+                  accessibilityRole="link"
+                  style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+                >
+                  <Text style={{ fontSize: 15, color: Colors.primary }} numberOfLines={1}>
+                    {item.source_url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}
+                  </Text>
+                  <Ionicons name="open-outline" size={14} color={Colors.primary} />
+                </Pressable>
+              </View>
+            )}
           </View>
 
           {/* Place Details (lazy-loaded for Google Places items) */}
