@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePosts, type PostWithDetails } from "../../src/hooks/usePosts";
 import { PostImage } from "../../src/components/PostImage";
 import { DualCameraPost } from "../../src/components/DualCameraPost";
+import { ZoomableImage } from "../../src/components/ZoomableImage";
 import { ReactionBar } from "../../src/components/ReactionBar";
 import { CommentSheet } from "../../src/components/CommentSheet";
 import { ContentActionMenu } from "../../src/components/ContentActionMenu";
@@ -145,28 +146,29 @@ const FeedItem = React.memo(function FeedItem({
       {/* Photo + Caption (hidden when blocked) */}
       {item.moderation_status !== "blocked" && (
         <>
-          {item.photo_path &&
-            (item.camera_mode === "dual" && item.front_photo_path ? (
-              <DualCameraPost
-                backPhotoPath={item.photo_path}
-                frontPhotoPath={item.front_photo_path}
-                style={{
-                  width: "100%",
-                  aspectRatio: 3 / 4,
-                  borderRadius: 12,
-                  overflow: "hidden",
-                }}
-              />
-            ) : (
-              <PostImage
-                photoPath={item.photo_path}
-                style={{
-                  width: "100%",
-                  aspectRatio: 3 / 4,
-                  borderRadius: 12,
-                }}
-              />
-            ))}
+          {item.photo_path && (
+            <ZoomableImage
+              style={{
+                width: "100%",
+                aspectRatio: 3 / 4,
+                borderRadius: 12,
+                overflow: "hidden",
+              }}
+            >
+              {item.camera_mode === "dual" && item.front_photo_path ? (
+                <DualCameraPost
+                  backPhotoPath={item.photo_path}
+                  frontPhotoPath={item.front_photo_path}
+                  style={{ width: "100%", height: "100%" }}
+                />
+              ) : (
+                <PostImage
+                  photoPath={item.photo_path}
+                  style={{ width: "100%", height: "100%" }}
+                />
+              )}
+            </ZoomableImage>
+          )}
           {item.caption && <Text style={{ fontSize: 14, color: colors.text }}>{item.caption}</Text>}
         </>
       )}

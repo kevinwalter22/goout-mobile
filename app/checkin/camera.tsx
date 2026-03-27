@@ -27,6 +27,7 @@ import { logInteraction } from "../../src/lib/interactionLogger";
 import { captureError } from "../../src/lib/logger";
 import { checkBeforeSubmit } from "../../src/lib/moderation/textModeration";
 import { requestImageModeration } from "../../src/utils/imageModeration";
+import { normalizePostImage } from "../../src/utils/imageTransform";
 import { useEnforcement } from "../../src/hooks/useEnforcement";
 
 export default function CameraCapture() {
@@ -105,13 +106,17 @@ export default function CameraCapture() {
 
     try {
       heavyHaptic(); // Haptic feedback on capture
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
-      });
+      // Capture at full quality — normalizePostImage applies the single compression pass
+      const photo = await cameraRef.current.takePictureAsync({ quality: 1 });
 
       if (!photo) return;
 
-      setPhotos((prev) => [...prev, photo.uri]);
+      // Normalize: crop landscape → 3:4, flip front camera, resize to 1080×1440
+      const normalizedUri = await normalizePostImage(photo.uri, {
+        isFromFrontCamera: facing === "front",
+      });
+
+      setPhotos((prev) => [...prev, normalizedUri]);
 
       // For dual mode, switch to front camera after back photo
       if (isDualMode && photos.length === 0) {
