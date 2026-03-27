@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +16,7 @@ import { useAuth } from "../../src/hooks/useAuth";
 import { friendlyMessage } from "../../src/lib/errorMessages";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors, Spacing, BorderRadius, FontSize, FontWeight } from "../../src/config/theme";
+import { supabase } from "../../src/lib/supabase";
 
 export default function SignUp() {
   const { signUp } = useAuth();
@@ -25,6 +26,24 @@ export default function SignUp() {
   const [password, setPassword] = useState("");
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [cooldownEnd, setCooldownEnd] = useState<Date | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+
+  useEffect(() => {
+    if (!cooldownEnd) return;
+    const tick = () => {
+      const remaining = Math.ceil((cooldownEnd.getTime() - Date.now()) / 1000);
+      if (remaining <= 0) {
+        setSecondsLeft(0);
+        setCooldownEnd(null);
+      } else {
+        setSecondsLeft(remaining);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [cooldownEnd]);
 
   async function handleSignUp() {
     if (!username || !email || !password) {
@@ -56,11 +75,36 @@ export default function SignUp() {
     }
 
     setLoading(true);
+
+    // Check username availability before creating the auth user.
+    // Without this, a taken username causes the DB trigger to fail with
+    // the opaque "Database error saving new user" Supabase error.
+    const { data: usernameAvailable, error: usernameCheckError } = await supabase.rpc(
+      "check_username_available",
+      { p_username: username },
+    );
+    if (usernameCheckError || usernameAvailable === false) {
+      setLoading(false);
+      Alert.alert("Error", "This username is already taken. Please choose a different one.");
+      return;
+    }
+
     const { error } = await signUp(email, password, username);
     setLoading(false);
 
     if (error) {
-      Alert.alert("Error", friendlyMessage(error));
+      const msg = error.message?.toLowerCase() ?? "";
+      if (msg.includes("rate limit")) {
+        // Lock the button for 5 minutes — retrying sooner won't help since the
+        // limit is project-wide. The real fix is a custom SMTP provider in Supabase.
+        setCooldownEnd(new Date(Date.now() + 5 * 60 * 1000));
+        Alert.alert(
+          "High Demand",
+          "We're receiving a lot of signups right now. Please wait a few minutes and try again.\n\nIf this keeps happening, contact support.",
+        );
+      } else {
+        Alert.alert("Error", friendlyMessage(error));
+      }
     } else {
       Alert.alert(
         "Success",
@@ -214,21 +258,25 @@ export default function SignUp() {
 
           <Pressable
             onPress={handleSignUp}
-            disabled={loading}
+            disabled={loading || cooldownEnd !== null}
             accessibilityLabel="Create account"
             accessibilityRole="button"
-            accessibilityState={{ disabled: loading }}
+            accessibilityState={{ disabled: loading || cooldownEnd !== null }}
             style={({ pressed }) => ({
               marginTop: Spacing.sm,
               padding: Spacing.lg,
               borderRadius: BorderRadius.md,
               backgroundColor: pressed ? Colors.primaryDark : Colors.primary,
               alignItems: "center",
-              opacity: loading ? 0.7 : 1,
+              opacity: loading || cooldownEnd !== null ? 0.5 : 1,
             })}
           >
             {loading ? (
               <ActivityIndicator color={Colors.white} />
+            ) : cooldownEnd !== null ? (
+              <Text style={{ color: Colors.white, fontSize: FontSize.md, fontWeight: FontWeight.semibold }}>
+                Try again in {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}
+              </Text>
             ) : (
               <Text style={{ color: Colors.white, fontSize: FontSize.md, fontWeight: FontWeight.semibold }}>
                 Sign Up

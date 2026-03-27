@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   Modal,
   View,
@@ -24,6 +25,12 @@ type FriendRequestsSheetProps = {
 export function FriendRequestsSheet({ visible, onClose, onViewProfile, onRequestHandled }: FriendRequestsSheetProps) {
   const { requests, loading, refresh } = useFriendRequests();
   const { colors } = useTheme();
+
+  // Refresh whenever the sheet opens so it always shows the latest requests,
+  // not the stale data from when the profile page first mounted.
+  useEffect(() => {
+    if (visible) refresh();
+  }, [visible]);
 
   return (
     <Modal

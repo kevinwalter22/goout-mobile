@@ -17,11 +17,11 @@ const SCHEME = "euda";
  * a universal link (https://links.euda.live/event/...) that opens the app
  * via iOS Universal Links.
  */
-export function buildDeepLink(itemId: string): string {
-  if (__DEV__) {
-    return `${SCHEME}://event/${itemId}`;
-  }
-  return `https://${DOMAIN}/event/${itemId}`;
+export function buildDeepLink(itemId: string, creatorId?: string): string {
+  const base = __DEV__
+    ? `${SCHEME}://event/${itemId}`
+    : `https://${DOMAIN}/event/${itemId}`;
+  return creatorId ? `${base}?creatorId=${creatorId}` : base;
 }
 
 interface ShareItemOptions {
@@ -31,6 +31,9 @@ interface ShareItemOptions {
   startsAt?: string | null;
   scheduleText?: string | null;
   itemId: string;
+  /** UUID of the user who created this event. Encoded in the link so
+   *  non-friends who open it see a "private event" screen with an add-friend CTA. */
+  creatorId?: string | null;
 }
 
 /**
@@ -44,7 +47,7 @@ interface ShareItemOptions {
  *   https://links.euda.live/event/{id}
  */
 export async function shareItem(options: ShareItemOptions): Promise<boolean> {
-  const { title, locationName, town, startsAt, scheduleText, itemId } = options;
+  const { title, locationName, town, startsAt, scheduleText, itemId, creatorId } = options;
 
   const lines: string[] = [];
 
@@ -67,9 +70,10 @@ export async function shareItem(options: ShareItemOptions): Promise<boolean> {
     lines.push(`📍 ${location}`);
   }
 
-  // Deep link
+  // Deep link — include creatorId for user-created events so non-friends
+  // see a contextual "private event" screen instead of a generic error.
   lines.push("");
-  lines.push(buildDeepLink(itemId));
+  lines.push(buildDeepLink(itemId, creatorId ?? undefined));
 
   const message = lines.join("\n");
 

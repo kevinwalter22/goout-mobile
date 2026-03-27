@@ -13,9 +13,16 @@ const SUPABASE_MAP: Record<string, string> = {
   "User already registered": "An account with this email already exists.",
   "Password should be at least 6 characters":
     "Password must be at least 6 characters.",
-  "Email rate limit exceeded": "Too many attempts. Please wait a moment.",
+  "Email rate limit exceeded": "Too many signups right now. Please try again in a few minutes.",
+  "email rate limit exceeded": "Too many signups right now. Please try again in a few minutes.",
   "For security purposes, you can only request this once every 60 seconds":
     "Please wait 60 seconds before trying again.",
+  // Redirect URL not in Supabase allowlist — Supabase project config issue
+  "Redirect URL not allowed": "Unable to create account. Please try again or contact support.",
+  // DB trigger failure creating the profile row
+  "Database error saving new user": "Unable to create your account. Please try again.",
+  // Signup disabled or CAPTCHA required in Supabase dashboard
+  "Signups not allowed for this instance": "Sign-ups are currently disabled.",
 
   // RLS / ownership
   "Forbidden: caller does not own this resource":
@@ -71,9 +78,10 @@ export function friendlyMessage(error: unknown): string {
     if (test(raw)) return friendly;
   }
 
-  // Check if any key is a substring of the raw message
+  // Check if any key is a substring of the raw message (case-insensitive)
+  const rawLower = raw.toLowerCase();
   for (const [key, friendly] of Object.entries(SUPABASE_MAP)) {
-    if (raw.includes(key)) return friendly;
+    if (rawLower.includes(key.toLowerCase())) return friendly;
   }
 
   return FALLBACK;

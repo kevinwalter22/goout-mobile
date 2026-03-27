@@ -11,7 +11,7 @@ import {
   Image,
   RefreshControl,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import * as Location from "expo-location";
 import { getCurrentLocation, requestLocationPermission } from "../../src/utils/location";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,6 +20,7 @@ import { supabase } from "../../src/lib/supabase";
 import { useAuth } from "../../src/hooks/useAuth";
 import { useRecommender } from "../../src/hooks/useRecommender";
 import { scrollToTopEmitter } from "../../src/utils/scrollToTop";
+import { didSwipeNavigateRecently } from "../../src/components/SwipeableTabsContainer";
 import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { FilterSheet } from "../../src/components/FilterSheet";
@@ -31,7 +32,7 @@ import { useGroupedExplore } from "../../src/hooks/useGroupedExplore";
 import { getEffectiveFilters } from "../../src/config/exploreFilters";
 import { logInteraction } from "../../src/lib/interactionLogger";
 import { addNavigationBreadcrumb } from "../../src/lib/sentry";
-import { getFallbackImage } from "../../src/lib/categoryFallbackImages";
+import { getCategoryPlaceholder } from "../../src/utils/categoryPlaceholder";
 import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
 import { formatOpeningHours } from "../../src/utils/formatOpeningHours";
 import { sanitizeTimeText } from "../../src/utils/formatTimeText";
@@ -90,6 +91,7 @@ const ExploreCard = React.memo(function ExploreCard({
   colors: any;
   currentUserId?: string;
 }) {
+  const [imgError, setImgError] = React.useState(false);
   return (
     <>
       {isFirstRegular && (
@@ -108,7 +110,7 @@ const ExploreCard = React.memo(function ExploreCard({
         onLongPress={() => onLongPress?.(item.id)}
         accessibilityLabel={item.title}
         accessibilityRole="button"
-        accessibilityHint="Double tap to view details"
+        accessibilityHint="Tap to view details"
         style={{
           padding: 14,
           borderRadius: 12,
@@ -209,17 +211,6 @@ const ExploreCard = React.memo(function ExploreCard({
                   {item.category}
                 </Text>
               )}
-              {item.price_bucket && item.price_bucket !== "unknown" && (
-                <Text
-                  style={{
-                    fontSize: 12,
-                    fontWeight: "600",
-                    color: item.price_bucket === "free" ? Colors.primary : colors.textSecondary,
-                  }}
-                >
-                  {item.price_bucket === "free" ? "Free" : item.price_bucket}
-                </Text>
-              )}
               {item.recurrence && !["none", ""].includes(item.recurrence) && (
                 <View
                   style={{
@@ -238,22 +229,58 @@ const ExploreCard = React.memo(function ExploreCard({
                   </Text>
                 </View>
               )}
+              {item.price_bucket && item.price_bucket !== "unknown" && (
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: "600",
+                    color: item.price_bucket === "free" ? Colors.primary : colors.textSecondary,
+                  }}
+                >
+                  {item.price_bucket === "free" ? "Free" : item.price_bucket}
+                </Text>
+              )}
             </View>
           </View>
 
-          {/* Thumbnail on right — cached image or category fallback */}
-          <Image
-            source={{ uri: item.image_thumb_url || getFallbackImage(item.category) }}
-            style={{
-              width: 72,
-              height: 72,
-              borderRadius: 36,
-              borderWidth: 2,
-              borderColor: colors.border,
-              backgroundColor: colors.surfaceVariant,
-            }}
-            resizeMode="cover"
-          />
+          {/* Thumbnail on right — image with inline icon fallback on error */}
+          {(() => {
+            const imgUrl = item.image_thumb_url || item.image_url;
+            const ph = getCategoryPlaceholder(item);
+            if (imgUrl && !imgError) {
+              return (
+                <Image
+                  source={{ uri: imgUrl }}
+                  style={{
+                    width: 72,
+                    height: 72,
+                    borderRadius: 36,
+                    borderWidth: 2,
+                    borderColor: colors.border,
+                    backgroundColor: colors.surfaceVariant,
+                  }}
+                  resizeMode="cover"
+                  onError={() => setImgError(true)}
+                />
+              );
+            }
+            return (
+              <View
+                style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: 36,
+                  borderWidth: 2,
+                  borderColor: colors.border,
+                  backgroundColor: ph.bg,
+                  justifyContent: "center",
+                  alignItems: "center",
+                }}
+              >
+                <Ionicons name={ph.icon as any} size={32} color={ph.fg} />
+              </View>
+            );
+          })()}
         </View>
 
         {(rsvpInfo.count > 0 || rsvpInfo.userGoing || rsvpInfo.friendsGoing > 0) && (
@@ -346,6 +373,20 @@ export default function Explore() {
   // Postable Now candidates (fetched independently of main sort/pagination)
   const [postableNowCandidates, setPostableNowCandidates] = useState<ExploreItem[]>([]);
   const [postableNowVersion, setPostableNowVersion] = useState(0);
+
+  // Refresh postable candidates whenever the screen regains focus (e.g., after
+  // creating an event or returning from another tab). Skip the very first focus
+  // because the initial fetch is already triggered by userLocation becoming set.
+  const hasHadFirstFocusRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasHadFirstFocusRef.current) {
+        hasHadFirstFocusRef.current = true;
+        return;
+      }
+      setPostableNowVersion((v) => v + 1);
+    }, []),
+  );
 
   // RSVP data (loaded separately for performance)
   const [rsvpData, setRsvpData] = useState<
@@ -629,6 +670,7 @@ export default function Explore() {
   // Stable callback for item press (used by memoized ExploreCard)
   const handleItemPress = useCallback(
     (itemId: string) => {
+      if (didSwipeNavigateRecently()) return;
       if (user) {
         const item = orderedItems.find((i) => i.id === itemId);
         if (item) {
@@ -765,7 +807,7 @@ export default function Explore() {
       </View>
 
       {/* Results bar: search / filter summary + count + filter button (hidden in map mode) */}
-      {(hasFilters || totalCount > 0 || searchActive) && !loading && viewMode !== "map" && (
+      {(searchActive || (!loading && (hasFilters || totalCount > 0))) && viewMode !== "map" && (
         <View
           style={{
             paddingHorizontal: 12,
@@ -881,6 +923,7 @@ export default function Explore() {
         />
       ) : viewMode === "cards" ? (
         <GroupedExploreFeed
+          flatListRef={flatListRef}
           groupingResult={groupingResult}
           userLocation={userLocation}
           onItemPress={handleItemPress}
@@ -974,6 +1017,7 @@ export default function Explore() {
             data={orderedItems}
             keyExtractor={(item) => item.id}
             removeClippedSubviews={Platform.OS === "android"}
+            keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ padding: 16 }}
             ItemSeparatorComponent={ItemSep}
             refreshControl={

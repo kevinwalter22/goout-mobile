@@ -184,7 +184,7 @@ export function useExploreFilters(
         }
       }
     },
-    [userLocation]
+    [userLocation, options?.pageSizeOverride]
   );
 
   // ========================================
@@ -195,6 +195,9 @@ export function useExploreFilters(
   const hasLoadedRef = useRef(false);
   // Track previous location for comparison
   const prevLocationRef = useRef<{ lat: number; lng: number } | null | undefined>(undefined);
+  // Always-current filters ref (avoids adding filters to pageSizeOverride effect deps)
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
 
   useEffect(() => {
     // Initial load (no location yet or location already available)
@@ -228,6 +231,22 @@ export function useExploreFilters(
 
     return () => clearTimeout(timeoutId);
   }, [userLocation, executeQuery, filters]);
+
+  // ========================================
+  // Page size override change handling
+  // ========================================
+
+  // Re-fetch when pageSizeOverride changes (e.g. user switches list ↔ card view).
+  // Uses filtersRef so this effect doesn't depend on `filters` directly and
+  // avoids double-fetching when filters change through normal filter actions.
+  const pageSizeOverride = options?.pageSizeOverride;
+  const prevPageSizeOverrideRef = useRef<number | undefined>(pageSizeOverride);
+  useEffect(() => {
+    if (!hasLoadedRef.current) return; // initial load handles first fetch
+    if (pageSizeOverride === prevPageSizeOverrideRef.current) return;
+    prevPageSizeOverrideRef.current = pageSizeOverride;
+    executeQuery({ ...filtersRef.current, page: 0 }, false);
+  }, [pageSizeOverride, executeQuery]);
 
   // ========================================
   // Filter update helper

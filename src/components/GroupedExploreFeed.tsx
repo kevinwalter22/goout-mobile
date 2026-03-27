@@ -138,6 +138,24 @@ function OverflowItem({
               {item.category}
             </Text>
           )}
+          {item.recurrence && !["none", ""].includes(item.recurrence) && (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 3,
+                backgroundColor: colors.surfaceVariant,
+                paddingHorizontal: 8,
+                paddingVertical: 2,
+                borderRadius: 4,
+              }}
+            >
+              <Ionicons name="repeat" size={11} color={colors.textSecondary} />
+              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textSecondary }}>
+                {item.recurrence === "weekly" ? "Weekly" : "Monthly"}
+              </Text>
+            </View>
+          )}
           {item.price_bucket &&
             item.price_bucket !== "unknown" && (
               <Text
@@ -156,9 +174,9 @@ function OverflowItem({
         </View>
       </View>
 
-      {item.image_thumb_url ? (
+      {(item.image_thumb_url || item.image_url) ? (
         <Image
-          source={{ uri: item.image_thumb_url }}
+          source={{ uri: item.image_thumb_url || item.image_url }}
           style={{
             width: 72,
             height: 72,
@@ -302,6 +320,7 @@ export function GroupedExploreFeed({
       data={feedData}
       keyExtractor={keyExtractor}
       renderItem={renderItem}
+      keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ padding: 16, gap: 12 }}
       refreshControl={
         <RefreshControl

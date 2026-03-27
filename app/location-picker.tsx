@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import MapView, { Marker, PROVIDER_DEFAULT } from "react-native-maps";
 import { router, useLocalSearchParams, Stack } from "expo-router";
@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../src/contexts/ThemeContext";
 import { Colors } from "../src/config/theme";
 import { resolveLocationPicker, cancelLocationPicker } from "../src/utils/locationPickerStore";
+import { requestLocationPermission, getCurrentLocation } from "../src/utils/location";
 
 const DEFAULT_LAT = 40.7128;
 const DEFAULT_LNG = -74.006;
@@ -22,6 +23,23 @@ export default function LocationPicker() {
 
   const [pinCoord, setPinCoord] = useState({ latitude: initialLat, longitude: initialLng });
   const mapRef = useRef<MapView>(null);
+
+  useEffect(() => {
+    // Only auto-center if no prior pin coords were passed
+    if (latParam || lngParam) return;
+
+    (async () => {
+      const { granted } = await requestLocationPermission();
+      if (!granted) return;
+      const { latitude, longitude, error } = await getCurrentLocation();
+      if (error) return;
+      setPinCoord({ latitude, longitude });
+      mapRef.current?.animateToRegion(
+        { latitude, longitude, latitudeDelta: DEFAULT_DELTA, longitudeDelta: DEFAULT_DELTA },
+        400,
+      );
+    })();
+  }, []);
 
   function handleDragEnd(e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) {
     setPinCoord(e.nativeEvent.coordinate);
@@ -81,6 +99,7 @@ export default function LocationPicker() {
           latitudeDelta: DEFAULT_DELTA,
           longitudeDelta: DEFAULT_DELTA,
         }}
+        showsUserLocation={true}
         onPress={(e) => setPinCoord(e.nativeEvent.coordinate)}
       >
         <Marker

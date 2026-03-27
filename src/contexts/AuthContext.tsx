@@ -140,6 +140,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       return { error: null };
     } catch (error) {
+      // Surface unexpected auth failures to Sentry — expected user errors
+      // (already registered, rate limit) are not bugs; everything else is.
+      const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+      const isExpectedUserError = [
+        "user already registered",
+        "email rate limit exceeded",
+        "password should be at least",
+        "for security purposes",
+        "over email send rate limit",
+      ].some((k) => msg.includes(k));
+      if (!isExpectedUserError) {
+        captureError(error, { action: "signUp" });
+      }
       return { error: error as Error };
     }
   }

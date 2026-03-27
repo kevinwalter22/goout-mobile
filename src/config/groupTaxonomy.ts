@@ -356,8 +356,9 @@ export const GROUP_TAXONOMY: GroupDefinition[] = [
     title: "Bars & Breweries",
     subtitle: "Drinks & nightlife",
     match: (item) =>
-      hasTag(item, "bar", "brewery", "drinks") ||
-      hasTag(item, "nightlife"),
+      hasTag(item, "bar", "brewery") ||
+      hasTag(item, "nightlife") ||
+      hasCategory(item, "Nightlife"),
     kindEligibility: ["all", "event", "activity"],
     diversityCategory: "food_drink",
     basePriority: 22,

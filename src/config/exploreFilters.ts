@@ -31,8 +31,6 @@ export const POSTABLE_NOW_CONFIG = {
   maxItems: 50,
   /** Time buffer before event start to consider it "postable" (minutes) */
   preEventBuffer: 60,
-  /** Time after event start to still consider it "postable" (minutes) */
-  postEventBuffer: 120,
 };
 
 // ============================================================================

@@ -39,6 +39,9 @@ function ThemedStack() {
           contentStyle: { backgroundColor: colors.background },
           gestureEnabled: true,
           gestureDirection: "horizontal",
+          // Default iOS edge zone is 50px — increase to 120 so the back swipe
+          // feels as forgiving as the full-screen tab swipe gesture.
+          gestureResponseDistance: 120,
         }}
       />
     </>
@@ -144,8 +147,12 @@ function NotificationInitializer() {
 
   useEffect(() => {
     if (user) {
-      initPushNotifications(user.id);
       prevUserId.current = user.id;
+      // Delay the notification soft-ask so it doesn't collide with the iOS
+      // location permission dialog that fires from Explore on first launch.
+      // Stacking two prompts immediately after login feels like a bug to users.
+      const t = setTimeout(() => initPushNotifications(user.id), 1500);
+      return () => clearTimeout(t);
     } else if (prevUserId.current) {
       // User signed out — remove token
       removePushToken(prevUserId.current);

@@ -36,7 +36,13 @@ import { friendlyMessage } from "../../src/lib/errorMessages";
 import { getFallbackImage } from "../../src/lib/categoryFallbackImages";
 
 export default function EventDetail() {
-  const { id, title: fallbackTitle } = useLocalSearchParams<{ id: string; title?: string }>();
+  const { id, title: fallbackTitle, creatorId } = useLocalSearchParams<{
+    id: string;
+    title?: string;
+    /** Present on user-created event share links — used to show an add-friend
+     *  CTA when the viewer doesn't have access (not friends with creator). */
+    creatorId?: string;
+  }>();
   const { user } = useAuth();
   const { isAdmin } = useAdmin();
   const { colors } = useTheme();
@@ -49,6 +55,7 @@ export default function EventDetail() {
   const [showAdminEdit, setShowAdminEdit] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [privateEventCreator, setPrivateEventCreator] = useState<{ username: string } | null>(null);
 
   // Check if current user is the creator of this event
   const isUserCreated = item?.created_by_user_id === user?.id;
@@ -68,7 +75,7 @@ export default function EventDetail() {
     submitFeedback,
   } = useItemFeedback(id || "");
 
-  // Determine if the event has ended (activities never "end")
+  // Determine if the event has ended (activities never "end").
   const isEnded = useMemo(() => {
     if (!item || !item.starts_at) return false;
     const now = Date.now();
@@ -90,7 +97,6 @@ export default function EventDetail() {
         : startTime + 3 * 60 * 60 * 1000; // Default 3 hours if no end time
 
       const preBufferMs = POSTABLE_NOW_CONFIG.preEventBuffer * 60 * 1000;
-      const postBufferMs = POSTABLE_NOW_CONFIG.postEventBuffer * 60 * 1000;
 
       if (now < startTime - preBufferMs) {
         const minutesUntil = Math.ceil((startTime - now) / (60 * 1000));
@@ -110,7 +116,7 @@ export default function EventDetail() {
         return;
       }
 
-      if (now > endTime + postBufferMs) {
+      if (now > endTime) {
         Alert.alert(
           "Event Ended",
           "This event has already ended. Check-in is no longer available.",
@@ -198,6 +204,20 @@ export default function EventDetail() {
       setCheckingIn(false);
     }
   }
+
+  // When we have a creatorId from the share link but the event query fails,
+  // fetch the creator's username so we can personalise the "private event" screen.
+  useEffect(() => {
+    if (!creatorId || item) return;
+    supabase
+      .from("profiles")
+      .select("username")
+      .eq("id", creatorId)
+      .single()
+      .then(({ data }) => {
+        if (data) setPrivateEventCreator(data as { username: string });
+      });
+  }, [creatorId, item]);
 
   useEffect(() => {
     if (!id) return;
@@ -290,6 +310,59 @@ export default function EventDetail() {
   }
 
   if (error || !item) {
+    // Private event — viewer is not friends with the creator.
+    // creatorId is embedded in the share link so we can show a contextual CTA.
+    if (creatorId) {
+      const creatorHandle = privateEventCreator
+        ? `@${privateEventCreator.username}`
+        : "the creator";
+      return (
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
+          <Stack.Screen options={{ headerShown: false }} />
+          <ScreenHeader />
+          <View style={{ flex: 1, padding: 24, justifyContent: "center", alignItems: "center", gap: 12 }}>
+            <Ionicons name="lock-closed-outline" size={48} color={colors.textTertiary} />
+            <Text style={{ fontSize: 18, fontWeight: "600", textAlign: "center", color: colors.text }}>
+              This event is private
+            </Text>
+            <Text style={{ fontSize: 14, textAlign: "center", color: colors.textSecondary }}>
+              Only friends of {creatorHandle} can view this event.
+            </Text>
+            <Pressable
+              onPress={() => router.push(`/user/${creatorId}` as any)}
+              accessibilityLabel={`View ${creatorHandle}'s profile`}
+              accessibilityRole="button"
+              style={{
+                marginTop: 8,
+                paddingHorizontal: 24,
+                paddingVertical: 12,
+                borderRadius: 8,
+                backgroundColor: Colors.primary,
+              }}
+            >
+              <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
+                View {creatorHandle}&apos;s Profile
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.back()}
+              accessibilityLabel="Go back"
+              accessibilityRole="button"
+              style={{
+                paddingHorizontal: 24,
+                paddingVertical: 12,
+                borderRadius: 8,
+                backgroundColor: colors.surfaceVariant,
+              }}
+            >
+              <Text style={{ color: colors.text, fontSize: 16, fontWeight: "600" }}>Go Back</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    // Generic error (deleted, expired, not found)
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <Stack.Screen options={{ headerShown: false }} />
@@ -335,6 +408,7 @@ export default function EventDetail() {
       startsAt: item.starts_at,
       scheduleText: item.schedule_text,
       itemId: item.id,
+      creatorId: item.created_by_user_id ?? undefined,
     });
     if (shared && user) {
       logInteraction({
@@ -495,7 +569,7 @@ export default function EventDetail() {
               </Text>
             </View>
 
-            {(item.location_name || item.town) && (
+            {(item.location_name || item.town || item.address) && (
               <View style={{ gap: 4 }}>
                 <Text
                   style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}

@@ -69,12 +69,13 @@ export async function uploadAvatar(
       return { avatarUrl: null, error: error.message };
     }
 
-    // Get public URL
+    // Get public URL — append cache-bust timestamp so React Native's image
+    // cache doesn't serve the previous avatar after an upload to the same path.
     const { data: urlData } = supabase.storage
       .from(AVATARS_BUCKET)
       .getPublicUrl(data.path);
 
-    return { avatarUrl: urlData.publicUrl, error: null };
+    return { avatarUrl: `${urlData.publicUrl}?t=${Date.now()}`, error: null };
   } catch (error) {
     console.error("[Avatar] Upload exception:", error);
     return {

@@ -502,6 +502,26 @@ describe("Postable Now Logic", () => {
       expect(result.isPostable).toBe(false);
       expect(result.reason).toBe("ended");
     });
+
+    it("should not be postable immediately after an event ends (1 min after end)", () => {
+      // Regression: previously events showed "POST NOW" for 120min after ending.
+      // Now any event past its end time is immediately not postable, consistent
+      // with the detail page showing "This event has ended".
+      const now = new Date();
+      const endTime = new Date(now.getTime() - 1 * 60 * 1000); // Ended 1 min ago
+      const startTime = new Date(endTime.getTime() - 2 * 60 * 60 * 1000);
+
+      const item = createMockItem({
+        kind: "event",
+        lat: 44.476,
+        lng: -73.212,
+        starts_at: startTime.toISOString(),
+        ends_at: endTime.toISOString(),
+      });
+      const result = computePostableNow(item, userLocation, now);
+      expect(result.isPostable).toBe(false);
+      expect(result.reason).toBe("ended");
+    });
   });
 
   describe("processPostableNow", () => {

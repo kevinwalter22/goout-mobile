@@ -702,9 +702,9 @@ RESPOND WITH VALID JSON ONLY:
 {
   "hook_line": "string or null if current one is good",
   "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
-  "suggested_category": "Food & Drink" (or null if current category is correct),
+  "suggested_category": null,  // null = current category is correct; put the corrected category name (e.g. "Arts & Culture") if it is wrong
   "price_bucket": "free" | "$" | "$$" | "$$$" | "unknown",
-  "description": "1-2 sentence description, or null if already exists",
+  "description": "1-2 sentence description, or null if the current one is already detailed (40+ chars)",
   "short_schedule": "condensed schedule string, or null if not needed",
   "audience_fit": "youth_general" | "family" | "business" | "tourist" | "niche" | "unknown",
   "is_event_venue": true or false,

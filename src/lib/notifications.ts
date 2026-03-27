@@ -1,7 +1,7 @@
 import { Platform } from "react-native";
 import { router } from "expo-router";
 import { supabase } from "./supabase";
-import { captureError } from "./logger";
+import { captureError, captureWarning } from "./logger";
 
 // ── Lazy-load expo-notifications to avoid crashing in Expo Go ───
 // The native module `ExpoPushTokenManager` only exists in dev builds / production.
@@ -66,10 +66,41 @@ export async function registerForPushNotifications(
     // User denied — silently return
     if (finalStatus !== "granted") return;
 
-    // Get the Expo push token
-    const tokenResponse = await Notifications.getExpoPushTokenAsync({
-      projectId: "4c8f3119-7056-4a82-a35a-c0f05b161d8a",
-    });
+    // Get the Expo push token — retry once on transient failures (503 / timeout)
+    // since Expo's token service has occasional brief outages that should not
+    // generate Sentry alerts.
+    let tokenResponse;
+    try {
+      tokenResponse = await Notifications.getExpoPushTokenAsync({
+        projectId: "4c8f3119-7056-4a82-a35a-c0f05b161d8a",
+      });
+    } catch (firstErr) {
+      const msg = (firstErr instanceof Error ? firstErr.message : String(firstErr)).toLowerCase();
+      const isTransient =
+        msg.includes("timeout") ||
+        msg.includes("503") ||
+        msg.includes("service unavailable") ||
+        msg.includes("network request failed");
+
+      if (!isTransient) {
+        captureError(firstErr, { action: "registerForPushNotifications" });
+        return;
+      }
+
+      // One retry after a short pause
+      await new Promise((r) => setTimeout(r, 3000));
+      try {
+        tokenResponse = await Notifications.getExpoPushTokenAsync({
+          projectId: "4c8f3119-7056-4a82-a35a-c0f05b161d8a",
+        });
+      } catch (retryErr) {
+        captureWarning("Push token fetch failed after retry (transient)", {
+          action: "registerForPushNotifications",
+          error: retryErr instanceof Error ? retryErr.message : String(retryErr),
+        });
+        return;
+      }
+    }
     const token = tokenResponse.data;
     currentToken = token;
 

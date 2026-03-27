@@ -7,6 +7,15 @@ import * as Haptics from "expo-haptics";
 const TAB_ORDER = ["/feed", "/explore", "/profile"] as const;
 type TabPath = (typeof TAB_ORDER)[number];
 
+// Module-level timestamp — set whenever a swipe navigation fires.
+// Lets child press handlers ignore accidental presses that race with a swipe.
+let _lastSwipeNavigatedAt = 0;
+
+/** Returns true if a swipe navigation fired within the last 350ms. */
+export function didSwipeNavigateRecently(): boolean {
+  return Date.now() - _lastSwipeNavigatedAt < 350;
+}
+
 export function SwipeableTabsContainer({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -47,6 +56,7 @@ export function SwipeableTabsContainer({ children }: { children: React.ReactNode
           }
 
           if (targetIndex !== null) {
+            _lastSwipeNavigatedAt = Date.now();
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             router.navigate(TAB_ORDER[targetIndex]);
           }

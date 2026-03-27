@@ -69,7 +69,10 @@ Deno.serve(async (req) => {
   }
 
   // ── Ownership check ─────────────────────────────────────
-  if (!path.startsWith(`${userId}/`)) {
+  const isOwned =
+    path.startsWith(`${userId}/`) ||
+    path.startsWith(`events/${userId}/`);
+  if (!isOwned) {
     return json({ error: "Forbidden: not your file" }, 403);
   }
 
@@ -141,7 +144,11 @@ Deno.serve(async (req) => {
 
     // ── Apply result to DB ──────────────────────────────────
     if (bucket === "posts") {
-      await applyPostResult(adminClient, path, result, provider.name);
+      if (path.startsWith("events/")) {
+        await applyEventResult(adminClient, path, result, provider.name);
+      } else {
+        await applyPostResult(adminClient, path, result, provider.name);
+      }
     } else if (bucket === "avatars") {
       await applyAvatarResult(adminClient, userId, result, provider.name);
     }
@@ -219,6 +226,44 @@ async function applyPostResult(
       .update({ moderated_at: now })
       .eq("id", postId);
   }
+}
+
+/** Extract event UUID from a storage path like `events/{userId}/{eventId}.jpg` */
+function extractEventId(path: string): string | null {
+  const parts = path.split("/");
+  if (parts[0] !== "events" || parts.length !== 3) return null;
+  return parts[2].replace(/\.jpg$/, "");
+}
+
+async function applyEventResult(
+  client: ReturnType<typeof createClient>,
+  path: string,
+  result: ImageModerationResult,
+  providerName: string,
+) {
+  const eventId = extractEventId(path);
+  if (!eventId) return;
+
+  if (result.action !== "allow") {
+    await (client as any)
+      .from("explore_items")
+      .update({ review_status: "quarantined" })
+      .eq("id", eventId)
+      .eq("review_status", "auto_approved"); // only escalate, never downgrade
+
+    await (client as any).from("moderation_flags").insert({
+      target_type: "explore_item",
+      target_id: eventId,
+      source: "auto_image",
+      category: result.categories[0] ?? "other",
+      severity: result.severity,
+      action: result.action,
+      reason: `Image flagged by ${providerName}`,
+      metadata: result.provider_meta,
+      status: result.action === "blocked" ? "resolved" : "open",
+    });
+  }
+  // Clean images: no update needed (review_status stays auto_approved)
 }
 
 async function applyAvatarResult(

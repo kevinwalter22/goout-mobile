@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
 import { checkBeforeSubmit, moderateText } from "../lib/moderation/textModeration";
 import { uploadEventImage } from "../utils/storage";
+import { requestImageModeration } from "../utils/imageModeration";
 import type { ExploreItem } from "../types/database";
 
 /**
@@ -169,6 +170,8 @@ export function useCreateEvent() {
               .update({ image_url: imageUrl })
               .eq("id", newEvent.id);
             (newEvent as any).image_url = imageUrl;
+            // Fire-and-forget moderation (same pattern as post images)
+            requestImageModeration({ bucket: "posts", path: `events/${user.id}/${newEvent.id}.jpg` });
           }
         }
 

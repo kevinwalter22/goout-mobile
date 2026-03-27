@@ -56,7 +56,6 @@ export function computePostableNow(
   const {
     defaultRadius = POSTABLE_NOW_CONFIG.defaultRadius,
     preEventBuffer = POSTABLE_NOW_CONFIG.preEventBuffer,
-    postEventBuffer = POSTABLE_NOW_CONFIG.postEventBuffer,
   } = config;
 
   // Calculate distance if possible
@@ -92,7 +91,7 @@ export function computePostableNow(
   }
 
   // Check time-based availability
-  const timeResult = checkTimeAvailability(item, now, preEventBuffer, postEventBuffer);
+  const timeResult = checkTimeAvailability(item, now, preEventBuffer);
 
   return {
     isPostable: timeResult.isAvailable && isWithinRadius,
@@ -117,7 +116,6 @@ function checkTimeAvailability(
   item: ExploreItem,
   now: Date,
   preEventBuffer: number,
-  postEventBuffer: number
 ): TimeCheckResult {
   const nowMs = now.getTime();
 
@@ -130,12 +128,11 @@ function checkTimeAvailability(
       : startTime + 3 * 60 * 60 * 1000; // Default 3 hours if no end time
 
     const preBufferMs = preEventBuffer * 60 * 1000;
-    const postBufferMs = postEventBuffer * 60 * 1000;
 
     const timeUntilStart = Math.floor((startTime - nowMs) / (60 * 1000));
 
-    // Event has ended (past end time + buffer)
-    if (nowMs > endTime + postBufferMs) {
+    // Event has ended — no longer postable, consistent with the detail page check
+    if (nowMs > endTime) {
       return {
         isAvailable: false,
         reason: "ended",
@@ -145,15 +142,6 @@ function checkTimeAvailability(
 
     // Event is in progress
     if (nowMs >= startTime && nowMs <= endTime) {
-      return {
-        isAvailable: true,
-        reason: "in_progress",
-        timeUntilStart,
-      };
-    }
-
-    // Event is within post-start buffer (just started, still postable)
-    if (nowMs > endTime && nowMs <= endTime + postBufferMs) {
       return {
         isAvailable: true,
         reason: "in_progress",
