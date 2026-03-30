@@ -32,7 +32,7 @@ export default function AuthCallback() {
         if (!error) {
           // type=recovery → password reset flow; all others → main feed
           const type = params.type as string | undefined;
-          router.replace(type === "recovery" ? "/(auth)/reset-password" : "/(tabs)/feed");
+          router.replace((type === "recovery" ? "/(auth)/reset-password" : "/(tabs)/feed") as any);
           return;
         }
       }
@@ -53,7 +53,7 @@ export default function AuthCallback() {
               refresh_token: refreshToken,
             });
             if (!error) {
-              router.replace(type === "recovery" ? "/(auth)/reset-password" : "/(tabs)/feed");
+              router.replace((type === "recovery" ? "/(auth)/reset-password" : "/(tabs)/feed") as any);
               return;
             }
           }

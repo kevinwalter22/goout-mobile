@@ -231,8 +231,8 @@ export interface ExploreFilterState {
   // Kind filter (activities vs events)
   kindFilter: KindFilter;
 
-  // Advanced filters
-  category: CategoryId;
+  // Advanced filters — categories is an array; empty means "all categories"
+  categories: CategoryId[];
   priceBucket: PriceBucket;
   timeWindow: TimeWindow;
   distance: DistanceRadius;
@@ -251,7 +251,7 @@ export interface ExploreFilterState {
 export const DEFAULT_FILTER_STATE: ExploreFilterState = {
   quickFilter: null,
   kindFilter: "all",
-  category: "all",
+  categories: [],
   priceBucket: "all",
   timeWindow: "all",
   distance: 50,
@@ -279,7 +279,7 @@ export function hasActiveFilters(state: ExploreFilterState): boolean {
   return (
     state.quickFilter !== null ||
     state.kindFilter !== "all" ||
-    state.category !== "all" ||
+    state.categories.length > 0 ||
     state.priceBucket !== "all" ||
     state.timeWindow !== "all" ||
     state.distance !== 50 ||
@@ -302,9 +302,12 @@ export function getFilterSummary(state: ExploreFilterState): string {
     parts.push(state.kindFilter === "activity" ? "Activities" : "Events");
   }
 
-  if (state.category !== "all") {
-    const cat = CATEGORIES.find((c) => c.id === state.category);
-    if (cat) parts.push(cat.label);
+  if (state.categories.length > 0) {
+    const labels = state.categories
+      .map((id) => CATEGORIES.find((c) => c.id === id)?.label)
+      .filter(Boolean)
+      .join(", ");
+    if (labels) parts.push(labels);
   }
 
   if (state.priceBucket !== "all") {
@@ -325,7 +328,7 @@ export function getFilterSummary(state: ExploreFilterState): string {
  */
 export function countActiveAdvancedFilters(state: ExploreFilterState): number {
   let count = 0;
-  if (state.category !== "all") count++;
+  if (state.categories.length > 0) count++;
   if (state.priceBucket !== "all") count++;
   if (state.timeWindow !== "all") count++;
   if (state.distance !== 50) count++;
@@ -337,7 +340,7 @@ export function countActiveAdvancedFilters(state: ExploreFilterState): number {
  */
 export function getEffectiveFilters(state: ExploreFilterState): {
   timeWindow: TimeWindow;
-  category: CategoryId;
+  categories: CategoryId[];
   priceBucket: PriceBucket;
   tags: string[];
   distance: DistanceRadius;
@@ -347,9 +350,10 @@ export function getEffectiveFilters(state: ExploreFilterState): {
   if (state.quickFilter) {
     const qf = getQuickFilter(state.quickFilter);
     if (qf) {
+      const qfCategory = qf.criteria.category;
       return {
         timeWindow: qf.criteria.timeWindow || "all",
-        category: qf.criteria.category || "all",
+        categories: qfCategory && qfCategory !== "all" ? [qfCategory] : [],
         priceBucket: qf.criteria.priceBucket || "all",
         tags: qf.criteria.tags || [],
         distance: state.distance,
@@ -361,7 +365,7 @@ export function getEffectiveFilters(state: ExploreFilterState): {
 
   return {
     timeWindow: state.timeWindow,
-    category: state.category,
+    categories: state.categories,
     priceBucket: state.priceBucket,
     tags: [],
     distance: state.distance,
@@ -384,7 +388,7 @@ export function debugLogFilters(
   console.log(`[ExploreFilters] ${label}`, {
     raw: {
       quickFilter: state.quickFilter,
-      category: state.category,
+      categories: state.categories,
       priceBucket: state.priceBucket,
       timeWindow: state.timeWindow,
       distance: state.distance,

@@ -16,7 +16,7 @@ import type { NormalizedEvent } from "./ticketmaster.ts";
 
 const CATEGORY_MAP: Record<string, string> = {
   community: "arts",
-  concerts: "nightlife",
+  concerts: "arts",   // concerts are cultural events, not nightlife
   conferences: "arts",
   expos: "arts",
   festivals: "arts",

@@ -13,6 +13,7 @@ import { SupabaseClient } from "@supabase/supabase-js";
 import {
   ExploreFilterState,
   TimeWindow,
+  CategoryId,
   getQuickFilter,
 } from "../config/exploreFilters";
 import { getDistanceInMiles } from "../utils/location";
@@ -224,14 +225,14 @@ export async function queryExploreItems(
     // Debug: Log filter state
     console.log("[ExploreQuery] Starting query with filters:", {
       quickFilter: filters.quickFilter,
-      category: filters.category,
+      categories: filters.categories,
       timeWindow: filters.timeWindow,
       page: filters.page,
     });
 
     // Determine effective filters (from quick filter or advanced)
     let effectiveTimeWindow: TimeWindow = "all";
-    let effectiveCategory: string = "all";
+    let effectiveCategories: CategoryId[] = [];
     let effectivePriceBucket: string = "all";
     let effectiveTags: string[] = [];
 
@@ -239,23 +240,34 @@ export async function queryExploreItems(
       const qf = getQuickFilter(filters.quickFilter);
       if (qf?.criteria) {
         effectiveTimeWindow = qf.criteria.timeWindow || "all";
-        effectiveCategory = qf.criteria.category || "all";
+        const qfCat = qf.criteria.category;
+        effectiveCategories = qfCat && qfCat !== "all" ? [qfCat] : [];
         effectivePriceBucket = qf.criteria.priceBucket || "all";
         effectiveTags = qf.criteria.tags || [];
       }
     } else {
       effectiveTimeWindow = filters.timeWindow;
-      effectiveCategory = filters.category;
+      effectiveCategories = filters.categories;
       effectivePriceBucket = filters.priceBucket;
     }
 
     // Get date range for time window
     const dateRange = getDateRangeForTimeWindow(effectiveTimeWindow);
 
-    // Map category to database values
+    // Map all selected categories to DB values, deduplicated
     let dbCategories: string[] | null = null;
-    if (effectiveCategory !== "all") {
-      dbCategories = mapCategoryToDb(effectiveCategory);
+    if (effectiveCategories.length > 0) {
+      const allDbCats = effectiveCategories.flatMap((c) => mapCategoryToDb(c));
+      const unique = [...new Set(allDbCats)];
+      dbCategories = unique.length > 0 ? unique : null;
+    }
+
+    // "music" as the sole selected category implies music-specific tags — without
+    // this, it returns all Arts & Culture (museums, galleries, theater).
+    // When combined with other categories, skip the tag injection so it doesn't
+    // narrow results that should include non-music arts items.
+    if (effectiveCategories.length === 1 && effectiveCategories[0] === "music" && effectiveTags.length === 0) {
+      effectiveTags = ["live_music", "concert"];
     }
 
     // Tags are passed directly to the RPC for array overlap filtering
@@ -265,7 +277,8 @@ export async function queryExploreItems(
     console.log("[ExploreQuery] Effective filters:", {
       timeWindow: effectiveTimeWindow,
       dateRange: dateRange ? { start: dateRange.start.toISOString(), end: dateRange.end.toISOString() } : null,
-      categories: dbCategories,
+      effectiveCategories,
+      dbCategories,
       tags: dbTags,
       priceBucket: effectivePriceBucket,
     });

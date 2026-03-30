@@ -39,9 +39,10 @@ function ThemedStack() {
           contentStyle: { backgroundColor: colors.background },
           gestureEnabled: true,
           gestureDirection: "horizontal",
-          // Default iOS edge zone is 50px — increase to 120 so the back swipe
-          // feels as forgiving as the full-screen tab swipe gesture.
-          gestureResponseDistance: 120,
+          // Allow back swipe to start anywhere on the screen, matching the
+          // full-screen tab swipe from SwipeableTabsContainer.
+          fullScreenGestureEnabled: true,
+          gestureResponseDistance: 120 as any,
         }}
       />
     </>

@@ -102,7 +102,7 @@ export function FilterChips({
  */
 function countActiveAdvancedFilters(filters: ExploreFilterState): number {
   let count = 0;
-  if (filters.category !== "all") count++;
+  if (filters.categories.length > 0) count++;
   if (filters.priceBucket !== "all") count++;
   if (filters.timeWindow !== "all") count++;
   if (filters.distance !== 50) count++;

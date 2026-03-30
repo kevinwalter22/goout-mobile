@@ -18,6 +18,8 @@ export type Profile = PublicProfile & {
   contacts_synced_at: string | null;
   notify_event_reminders: boolean;
   notify_friend_requests: boolean;
+  notify_post_reactions: boolean;
+  notify_post_comments: boolean;
 };
 
 export type Event = {

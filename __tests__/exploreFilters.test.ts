@@ -134,8 +134,8 @@ describe("Filter State Management", () => {
       expect(DEFAULT_FILTER_STATE.quickFilter).toBeNull();
     });
 
-    it("should have 'all' for category, price, and time", () => {
-      expect(DEFAULT_FILTER_STATE.category).toBe("all");
+    it("should have empty categories, 'all' for price, and time", () => {
+      expect(DEFAULT_FILTER_STATE.categories).toEqual([]);
       expect(DEFAULT_FILTER_STATE.priceBucket).toBe("all");
       expect(DEFAULT_FILTER_STATE.timeWindow).toBe("all");
     });
@@ -150,10 +150,10 @@ describe("Filter State Management", () => {
       expect(hasActiveFilters(state)).toBe(true);
     });
 
-    it("should return true when category is set", () => {
+    it("should return true when categories is non-empty", () => {
       const state: ExploreFilterState = {
         ...DEFAULT_FILTER_STATE,
-        category: "outdoors",
+        categories: ["outdoors"],
       };
       expect(hasActiveFilters(state)).toBe(true);
     });
@@ -209,7 +209,7 @@ describe("Filter State Management", () => {
     it("should include category when set", () => {
       const state: ExploreFilterState = {
         ...DEFAULT_FILTER_STATE,
-        category: "music",
+        categories: ["music"],
       };
       const summary = getFilterSummary(state);
       expect(summary).toContain("Music");
@@ -231,11 +231,11 @@ describe("Filter State Management", () => {
       const state: ExploreFilterState = {
         ...DEFAULT_FILTER_STATE,
         quickFilter: null,
-        category: "nightlife",
+        categories: ["nightlife"],
         priceBucket: "$$$",
       };
       const effective = getEffectiveFilters(state);
-      expect(effective.category).toBe("nightlife");
+      expect(effective.categories).toEqual(["nightlife"]);
       expect(effective.priceBucket).toBe("$$$");
     });
 
@@ -684,15 +684,13 @@ describe("Filter Integration", () => {
     const effective = getEffectiveFilters(filters);
 
     return items.filter((item) => {
-      // Category filter
-      if (effective.category !== "all") {
+      // Category filter — OR across selected categories
+      if (effective.categories.length > 0) {
         const normalizedCategory = normalizeCategory(item.category);
-        if (
-          normalizedCategory?.toLowerCase() !==
-          effective.category.toLowerCase()
-        ) {
-          return false;
-        }
+        const match = effective.categories.some(
+          (c) => normalizedCategory?.toLowerCase() === c.toLowerCase()
+        );
+        if (!match) return false;
       }
 
       // Price filter
@@ -718,7 +716,7 @@ describe("Filter Integration", () => {
   it("should filter by category", () => {
     const filters: ExploreFilterState = {
       ...DEFAULT_FILTER_STATE,
-      category: "outdoors",
+      categories: ["outdoors"],
     };
     const results = applyFilters(ALL_FIXTURES, filters);
     results.forEach((item) => {
@@ -742,7 +740,7 @@ describe("Filter Integration", () => {
       ...DEFAULT_FILTER_STATE,
       quickFilter: "free",
       // These should be ignored when quick filter is active
-      category: "nightlife",
+      categories: ["nightlife"],
       priceBucket: "$$$",
     };
     const results = applyFilters(ALL_FIXTURES, filters);

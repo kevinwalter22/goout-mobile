@@ -180,5 +180,10 @@ export function handleNotificationResponse(response: any): void {
         router.push(`/event/${data.reference_id}` as any);
       }
       break;
+    case "post_reaction":
+    case "post_comment":
+      // Navigate to the feed where the post is visible
+      router.push("/(tabs)/feed");
+      break;
   }
 }

@@ -80,7 +80,7 @@ export default function SignUp() {
     // Without this, a taken username causes the DB trigger to fail with
     // the opaque "Database error saving new user" Supabase error.
     const { data: usernameAvailable, error: usernameCheckError } = await supabase.rpc(
-      "check_username_available",
+      "check_username_available" as any,
       { p_username: username },
     );
     if (usernameCheckError || usernameAvailable === false) {

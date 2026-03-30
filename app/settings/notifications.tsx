@@ -21,6 +21,8 @@ export default function NotificationSettings() {
 
   const [eventReminders, setEventReminders] = useState(true);
   const [friendRequests, setFriendRequests] = useState(true);
+  const [postReactions, setPostReactions] = useState(true);
+  const [postComments, setPostComments] = useState(true);
   const [saving, setSaving] = useState(false);
   const [osPermission, setOsPermission] = useState<string | null>(null);
 
@@ -29,6 +31,8 @@ export default function NotificationSettings() {
     if (profile) {
       setEventReminders(profile.notify_event_reminders);
       setFriendRequests(profile.notify_friend_requests);
+      setPostReactions(profile.notify_post_reactions ?? true);
+      setPostComments(profile.notify_post_comments ?? true);
     }
   }, [profile]);
 
@@ -47,19 +51,21 @@ export default function NotificationSettings() {
   }, []);
 
   async function updatePreference(
-    key: "event_reminders" | "friend_requests",
+    key: "event_reminders" | "friend_requests" | "post_reactions" | "post_comments",
     value: boolean
   ) {
     if (!profile) return;
 
-    const newEventReminders =
-      key === "event_reminders" ? value : eventReminders;
-    const newFriendRequests =
-      key === "friend_requests" ? value : friendRequests;
+    const newEventReminders = key === "event_reminders" ? value : eventReminders;
+    const newFriendRequests = key === "friend_requests" ? value : friendRequests;
+    const newPostReactions  = key === "post_reactions"  ? value : postReactions;
+    const newPostComments   = key === "post_comments"   ? value : postComments;
 
     // Optimistic update
     if (key === "event_reminders") setEventReminders(value);
-    else setFriendRequests(value);
+    else if (key === "friend_requests") setFriendRequests(value);
+    else if (key === "post_reactions") setPostReactions(value);
+    else setPostComments(value);
 
     setSaving(true);
     try {
@@ -67,6 +73,8 @@ export default function NotificationSettings() {
         p_user_id: profile.id,
         p_event_reminders: newEventReminders,
         p_friend_requests: newFriendRequests,
+        p_post_reactions: newPostReactions,
+        p_post_comments: newPostComments,
       });
 
       if (error) throw error;
@@ -74,7 +82,9 @@ export default function NotificationSettings() {
     } catch {
       // Revert on failure
       if (key === "event_reminders") setEventReminders(!value);
-      else setFriendRequests(!value);
+      else if (key === "friend_requests") setFriendRequests(!value);
+      else if (key === "post_reactions") setPostReactions(!value);
+      else setPostComments(!value);
     } finally {
       setSaving(false);
     }
@@ -209,6 +219,70 @@ export default function NotificationSettings() {
               <Switch
                 value={friendRequests}
                 onValueChange={(v) => updatePreference("friend_requests", v)}
+                trackColor={{ false: colors.border, true: Colors.primary }}
+                disabled={saving}
+              />
+            </View>
+
+            <View style={{ height: 1, backgroundColor: colors.separator }} />
+
+            {/* Post Reactions Toggle */}
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                padding: 16,
+                gap: 12,
+              }}
+            >
+              <Ionicons
+                name="heart-outline"
+                size={20}
+                color={colors.textSecondary}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, color: colors.text }}>
+                  Post Reactions
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.textTertiary }}>
+                  When someone reacts to your post
+                </Text>
+              </View>
+              <Switch
+                value={postReactions}
+                onValueChange={(v) => updatePreference("post_reactions", v)}
+                trackColor={{ false: colors.border, true: Colors.primary }}
+                disabled={saving}
+              />
+            </View>
+
+            <View style={{ height: 1, backgroundColor: colors.separator }} />
+
+            {/* Post Comments Toggle */}
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                padding: 16,
+                gap: 12,
+              }}
+            >
+              <Ionicons
+                name="chatbubble-outline"
+                size={20}
+                color={colors.textSecondary}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, color: colors.text }}>
+                  Post Comments
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.textTertiary }}>
+                  When someone comments on your post
+                </Text>
+              </View>
+              <Switch
+                value={postComments}
+                onValueChange={(v) => updatePreference("post_comments", v)}
                 trackColor={{ false: colors.border, true: Colors.primary }}
                 disabled={saving}
               />

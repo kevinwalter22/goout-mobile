@@ -227,7 +227,7 @@ export type RecommenderConfig = typeof RECOMMENDER_CONFIG;
 
 // Dev-only weight sum validation
 if (__DEV__) {
-  const sum = Object.values(RECOMMENDER_CONFIG.WEIGHTS).reduce((a, b) => a + b, 0);
+  const sum = (Object.values(RECOMMENDER_CONFIG.WEIGHTS) as number[]).reduce((a, b) => a + b, 0);
   if (Math.abs(sum - 1.0) > 0.001) {
     console.error(`[RECOMMENDER] Weights sum to ${sum}, expected 1.0!`);
   }

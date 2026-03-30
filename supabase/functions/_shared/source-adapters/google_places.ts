@@ -506,7 +506,10 @@ export function normalizeGooglePlacesEvent(raw: any): NormalizedEvent {
     is_anchor: primaryType === "tourist_attraction",
     is_hidden_gem: isHiddenGem(rating, userRatingCount),
 
-    source_url: raw.googleMapsUri || raw.websiteUri || null,
+    // Use the venue/place website as the "More info" link.
+    // googleMapsUri is intentionally excluded — it is displayed separately
+    // via the dedicated "Open in Google Maps" CTA on the event detail screen.
+    source_url: raw.websiteUri || null,
     external_id: raw.id,
 
     tags,

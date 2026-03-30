@@ -218,7 +218,7 @@ function FlagCard({
       {/* View content link */}
       {contentRoute(flag.target_type, flag.target_id) && (
         <Pressable
-          onPress={() => router.push(contentRoute(flag.target_type, flag.target_id) as string)}
+          onPress={() => router.push(contentRoute(flag.target_type, flag.target_id) as any)}
           style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
         >
           <Ionicons name="open-outline" size={13} color={Colors.primary} />

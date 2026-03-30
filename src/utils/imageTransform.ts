@@ -12,7 +12,7 @@ function getImageDimensions(uri: string): Promise<{ width: number; height: numbe
  *   1. Center-crops landscape images to 3:4 portrait (consistent feed layout)
  *   2. Flips front camera images horizontally (mirrors the preview the user saw)
  *   3. Resizes to 1080×1440 (1080p-class, avoids uploading 4K originals)
- *   4. Compresses to JPEG at 0.85 (single compression pass — caller must capture at quality: 1)
+ *   4. Compresses to JPEG at 0.90 (single compression pass — caller must capture at quality: 1)
  */
 export async function normalizePostImage(
   uri: string,
@@ -40,7 +40,7 @@ export async function normalizePostImage(
   const result = await ImageManipulator.manipulateAsync(
     uri,
     actions,
-    { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+    { compress: 0.90, format: ImageManipulator.SaveFormat.JPEG }
   );
 
   return result.uri;

@@ -26,7 +26,7 @@ interface ExploreMapViewProps {
   userId?: string;
   // Filter props
   kindFilter: KindFilter;
-  category?: CategoryId;
+  categories?: CategoryId[];
   priceBucket?: PriceBucket;
   timeWindow?: TimeWindow;
   distance?: DistanceRadius;
@@ -160,7 +160,7 @@ export function ExploreMapView({
   userLocation,
   userId,
   kindFilter,
-  category = "all",
+  categories = [],
   priceBucket = "all",
   timeWindow = "all",
   distance = 50,
@@ -186,8 +186,8 @@ export function ExploreMapView({
   // Generate a cache key from all filter values
   const filterCacheKey = useMemo(
     () =>
-      `${kindFilter}-${category}-${priceBucket}-${timeWindow}-${distance}-${tags.join(",")}-${userLocation ? "loc" : "noloc"}`,
-    [kindFilter, category, priceBucket, timeWindow, distance, tags, userLocation]
+      `${kindFilter}-${categories.join("+")}-${priceBucket}-${timeWindow}-${distance}-${tags.join(",")}-${userLocation ? "loc" : "noloc"}`,
+    [kindFilter, categories, priceBucket, timeWindow, distance, tags, userLocation]
   );
 
   // Initial region calculation
@@ -248,22 +248,26 @@ export function ExploreMapView({
     }
   }, [timeWindow]);
 
-  // Map category ID to database category values
+  // Map selected category IDs to database category values for map filtering
   const getCategoryFilter = useCallback((): string[] | null => {
+    if (categories.length === 0) return null;
     const categoryMap: Record<CategoryId, string[]> = {
       all: [],
-      music: ["music", "Music", "concert", "live_music"],
+      music: ["music", "Music", "concert", "live_music", "Arts & Culture"],
       sports: ["sports", "Sports", "Sports & Recreation"],
       arts: ["arts", "Arts & Culture", "Arts & Theatre", "theatre", "theater"],
-      entertainment: ["entertainment", "Entertainment"],
-      community: ["community", "Community"],
+      entertainment: ["entertainment", "Entertainment", "Arts & Culture"],
+      community: ["community", "Community", "Anchor"],
       food: ["food", "Food & Drink", "Food"],
       outdoors: ["outdoors", "Outdoor", "outdoor", "hiking", "nature"],
       nightlife: ["nightlife", "Nightlife", "bars", "clubs"],
     };
-    const values = categoryMap[category];
-    return values && values.length > 0 ? values : null;
-  }, [category]);
+    const allValues = categories
+      .filter((c) => c !== "all")
+      .flatMap((c) => categoryMap[c] || []);
+    const unique = [...new Set(allValues)];
+    return unique.length > 0 ? unique : null;
+  }, [categories]);
 
   // Fetch map items with all filters applied
   const fetchMapItems = useCallback(

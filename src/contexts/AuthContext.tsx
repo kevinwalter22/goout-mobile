@@ -108,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single();
 
       if (error) throw error;
-      setProfile(data);
+      setProfile(data as any);
     } catch (error) {
       captureError(error, { action: "loadProfile" });
       setProfile(null);

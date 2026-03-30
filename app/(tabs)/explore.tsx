@@ -78,6 +78,7 @@ const ExploreCard = React.memo(function ExploreCard({
   kindFilter,
   onPress,
   onLongPress,
+  onCameraShortcut,
   colors,
   currentUserId,
 }: {
@@ -88,10 +89,38 @@ const ExploreCard = React.memo(function ExploreCard({
   kindFilter: KindFilter;
   onPress: (id: string) => void;
   onLongPress?: (id: string) => void;
+  onCameraShortcut?: (id: string) => void;
   colors: any;
   currentUserId?: string;
 }) {
   const [imgError, setImgError] = React.useState(false);
+  const tapTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+    };
+  }, []);
+
+  function handlePress() {
+    if (!isPostable || !onCameraShortcut) {
+      onPress(item.id);
+      return;
+    }
+    if (tapTimerRef.current !== null) {
+      // Second tap within the window — double-tap confirmed → go to camera
+      clearTimeout(tapTimerRef.current);
+      tapTimerRef.current = null;
+      onCameraShortcut(item.id);
+    } else {
+      // First tap — wait 200ms for a possible second tap
+      tapTimerRef.current = setTimeout(() => {
+        tapTimerRef.current = null;
+        onPress(item.id);
+      }, 200);
+    }
+  }
+
   return (
     <>
       {isFirstRegular && (
@@ -106,11 +135,11 @@ const ExploreCard = React.memo(function ExploreCard({
         </View>
       )}
       <Pressable
-        onPress={() => onPress(item.id)}
+        onPress={handlePress}
         onLongPress={() => onLongPress?.(item.id)}
         accessibilityLabel={item.title}
         accessibilityRole="button"
-        accessibilityHint="Tap to view details"
+        accessibilityHint={isPostable && onCameraShortcut ? "Tap to view details, double-tap to go straight to camera" : "Tap to view details"}
         style={{
           padding: 14,
           borderRadius: 12,
@@ -170,6 +199,11 @@ const ExploreCard = React.memo(function ExploreCard({
                 </View>
               )}
             </View>
+            {isPostable && onCameraShortcut && (
+              <Text style={{ fontSize: 11, color: colors.textTertiary, marginTop: 3 }}>
+                Double-tap to post now
+              </Text>
+            )}
             {item.hook_line && (
               <Text
                 style={{
@@ -403,7 +437,7 @@ export default function Explore() {
     hasFilters,
     filterSummary,
     setKindFilter,
-    setCategory,
+    toggleCategory,
     setPriceBucket,
     setTimeWindow,
     setDistance,
@@ -588,7 +622,7 @@ export default function Explore() {
   // Count active filters for badge display
   const activeFilterCount = useMemo(() => {
     let count = 0;
-    if (filters.category !== "all") count++;
+    if (filters.categories.length > 0) count++;
     if (filters.priceBucket !== "all") count++;
     if (filters.timeWindow !== "all") count++;
     if (filters.distance !== 50) count++;
@@ -624,7 +658,7 @@ export default function Explore() {
       scoreBreakdown: {
         timeMatch: 1, distance: 1, openNow: 1, friendsGoing: 0,
         tagAffinity: 0, weather: 0.5, contextIntent: 0.5, typeAffinity: 0.5,
-        quality: 1, communityFeedback: 0.5, freshness: 0.5, total: 1,
+        quality: 1, communityFeedback: 0.5, freshness: 0.5, friendCreated: 0, total: 1,
       },
     }));
   }, [postableNow]);
@@ -685,6 +719,17 @@ export default function Explore() {
       router.push(`/event/${itemId}` as any);
     },
     [user, orderedItems],
+  );
+
+  // Double-tap shortcut on postable-now cards → skip event detail, go straight to camera
+  const handleCameraShortcut = useCallback(
+    (itemId: string) => {
+      if (didSwipeNavigateRecently()) return;
+      const item = orderedItems.find((i) => i.id === itemId);
+      if (!item) return;
+      router.push(`/checkin/${itemId}?itemKind=${item.kind}` as any);
+    },
+    [orderedItems],
   );
 
   // Suppress item ("Not Interested") — long-press on cards/list items
@@ -915,7 +960,7 @@ export default function Explore() {
           userLocation={userLocation}
           userId={user?.id}
           kindFilter={effectiveFilters.kindFilter}
-          category={effectiveFilters.category}
+          categories={effectiveFilters.categories}
           priceBucket={effectiveFilters.priceBucket}
           timeWindow={effectiveFilters.timeWindow}
           distance={effectiveFilters.distance}
@@ -1074,6 +1119,7 @@ export default function Explore() {
                 kindFilter={filters.kindFilter}
                 onPress={handleItemPress}
                 onLongPress={handleSuppressItem}
+                onCameraShortcut={handleCameraShortcut}
                 colors={colors}
                 currentUserId={user?.id}
               />
@@ -1088,7 +1134,7 @@ export default function Explore() {
         visible={showFilterSheet}
         onClose={() => setShowFilterSheet(false)}
         filters={filters}
-        onCategoryChange={setCategory}
+        onCategoryToggle={toggleCategory}
         onPriceBucketChange={setPriceBucket}
         onTimeWindowChange={setTimeWindow}
         onDistanceChange={setDistance}

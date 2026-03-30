@@ -40,7 +40,7 @@ interface GroupedExploreFeedProps {
   onRefresh: () => void;
   refreshing: boolean;
   loading: boolean;
-  flatListRef?: React.RefObject<FlatList>;
+  flatListRef?: React.RefObject<FlatList | null>;
 }
 
 function formatItemDateTime(item: ExploreItem) {
@@ -176,7 +176,7 @@ function OverflowItem({
 
       {(item.image_thumb_url || item.image_url) ? (
         <Image
-          source={{ uri: item.image_thumb_url || item.image_url }}
+          source={{ uri: item.image_thumb_url ?? item.image_url ?? undefined }}
           style={{
             width: 72,
             height: 72,

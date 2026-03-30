@@ -29,7 +29,40 @@ export default function CreateEvent() {
   // Cover image
   const [imageUri, setImageUri] = useState<string | null>(null);
 
-  async function pickImage() {
+  function showImageOptions() {
+    Alert.alert(
+      "Cover Photo",
+      undefined,
+      [
+        { text: "Take Photo", onPress: takePhoto },
+        { text: "Choose from Library", onPress: pickFromLibrary },
+        { text: "Cancel", style: "cancel" },
+      ]
+    );
+  }
+
+  async function takePhoto() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert(
+        "Camera Permission Required",
+        "Please enable camera access in Settings → Euda → Camera.",
+        [{ text: "OK" }]
+      );
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: "images",
+      quality: 0.9,
+      allowsEditing: true,
+      aspect: [16, 9],
+    });
+    if (!result.canceled && result.assets[0]) {
+      setImageUri(result.assets[0].uri);
+    }
+  }
+
+  async function pickFromLibrary() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: "images",
       quality: 0.9,
@@ -162,7 +195,7 @@ export default function CreateEvent() {
       >
         {/* Cover Photo */}
         <Pressable
-          onPress={pickImage}
+          onPress={showImageOptions}
           accessibilityLabel={imageUri ? "Change cover photo" : "Add cover photo"}
           accessibilityRole="button"
           style={{

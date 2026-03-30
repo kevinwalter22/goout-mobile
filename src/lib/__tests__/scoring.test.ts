@@ -174,15 +174,16 @@ describe("computeFreshnessScore", () => {
 
 describe("RECOMMENDER_CONFIG weight sum", () => {
   it("weights sum to 1.0", () => {
-    const sum = Object.values(RECOMMENDER_CONFIG.WEIGHTS).reduce(
+    const sum = (Object.values(RECOMMENDER_CONFIG.WEIGHTS) as number[]).reduce(
       (a, b) => a + b,
       0
     );
     expect(Math.abs(sum - 1.0)).toBeLessThan(0.001);
   });
 
-  it("has FRESHNESS weight", () => {
-    expect(RECOMMENDER_CONFIG.WEIGHTS.FRESHNESS).toBeGreaterThan(0);
-    expect(RECOMMENDER_CONFIG.WEIGHTS.FRESHNESS).toBeLessThanOrEqual(0.05);
+  it("FRESHNESS weight is defined and non-negative", () => {
+    // FRESHNESS is currently 0 (absorbed into FRIEND_CREATED weight) but must remain defined.
+    expect(RECOMMENDER_CONFIG.WEIGHTS.FRESHNESS).toBeGreaterThanOrEqual(0);
+    expect(RECOMMENDER_CONFIG.WEIGHTS.FRESHNESS).toBeLessThanOrEqual(0.1);
   });
 });

@@ -104,6 +104,13 @@ export function ReactionBar({ postId, initialReactions }: ReactionBarProps) {
           setReactions(updated);
           isSelfEmit.current = true;
           reactionSync.emit(postId, { reactions: updated, userReaction: emoji });
+
+          // Notify the post author (fire-and-forget; edge fn skips self-reactions)
+          supabase.functions
+            .invoke("send-notification", {
+              body: { type: "post_reaction", post_id: postId, actor_id: user.id },
+            })
+            .catch(() => {});
         }
       }
     } catch (error) {

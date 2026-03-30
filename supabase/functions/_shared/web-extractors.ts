@@ -1116,7 +1116,8 @@ function validateCandidate(candidate: EventCandidate, minTitleLength = 3): void 
   }
 
   // Validate date is not in the distant past
-  if (candidate.starts_at) {
+  // Skip this check for recurring events — their DTSTART may be the series origin date
+  if (candidate.starts_at && !candidate.recurrence_text) {
     const startDate = new Date(candidate.starts_at);
     const sixMonthsAgo = new Date();
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
@@ -1161,6 +1162,34 @@ function deduplicateCandidates(candidates: EventCandidate[]): EventCandidate[] {
   }
 
   return Array.from(seen.values());
+}
+
+// ============================================================================
+// ICS Link Discovery (exported for use by evaluate-venue-websites)
+// ============================================================================
+
+/**
+ * Scan an HTML page for calendar/ICS feed links.
+ * Returns absolute URLs to any .ics files or calendar feed references found.
+ */
+export function detectIcsLinksInHtml(html: string, baseUrl: string): string[] {
+  const links: string[] = [];
+
+  // <link rel="alternate" type="text/calendar" href="...">
+  const linkRe = /<link[^>]*(?:type=["']text\/calendar["'][^>]*href=["']([^"']+)["']|href=["']([^"']+)["'][^>]*type=["']text\/calendar["'])[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = linkRe.exec(html)) !== null) {
+    const href = m[1] || m[2];
+    if (href) links.push(resolveUrl(href, baseUrl));
+  }
+
+  // <a href="...calendar.ics"> or any .ics anchor
+  const anchorRe = /<a[^>]*href=["']([^"']*\.ics[^"']*)["'][^>]*>/gi;
+  while ((m = anchorRe.exec(html)) !== null) {
+    links.push(resolveUrl(m[1], baseUrl));
+  }
+
+  return [...new Set(links)];
 }
 
 // ============================================================================

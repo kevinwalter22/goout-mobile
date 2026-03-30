@@ -41,7 +41,7 @@ export interface UseExploreFiltersReturn {
   setQuickFilter: (id: QuickFilterId | null) => void;
   toggleQuickFilter: (id: QuickFilterId) => void;
   setKindFilter: (kind: KindFilter) => void;
-  setCategory: (category: CategoryId) => void;
+  toggleCategory: (category: CategoryId) => void;
   setPriceBucket: (price: PriceBucket) => void;
   setTimeWindow: (time: TimeWindow) => void;
   setDistance: (distance: DistanceRadius) => void;
@@ -272,7 +272,7 @@ export function useExploreFilters(
         // Clear advanced filters when setting quick filter
         ...(id
           ? {
-              category: "all" as CategoryId,
+              categories: [] as CategoryId[],
               priceBucket: "all" as PriceBucket,
               timeWindow: "all" as TimeWindow,
             }
@@ -293,7 +293,7 @@ export function useExploreFilters(
         // Clear advanced filters when setting quick filter
         ...(!isCurrentlyActive
           ? {
-              category: "all" as CategoryId,
+              categories: [] as CategoryId[],
               priceBucket: "all" as PriceBucket,
               timeWindow: "all" as TimeWindow,
             }
@@ -305,11 +305,23 @@ export function useExploreFilters(
     [filters, updateFiltersAndQuery]
   );
 
-  const setCategory = useCallback(
+  const toggleCategory = useCallback(
     (category: CategoryId) => {
+      let newCategories: CategoryId[];
+      if (category === "all") {
+        // "All Categories" clears the selection
+        newCategories = [];
+      } else {
+        const current = filters.categories;
+        if (current.includes(category)) {
+          newCategories = current.filter((c) => c !== category);
+        } else {
+          newCategories = [...current, category];
+        }
+      }
       const newFilters: ExploreFilterState = {
         ...filters,
-        category,
+        categories: newCategories,
         quickFilter: null,
         page: 0,
       };
@@ -409,7 +421,7 @@ export function useExploreFilters(
       ...filters,
       quickFilter: null,
       kindFilter: "all",
-      category: "all",
+      categories: [],
       priceBucket: "all",
       timeWindow: "all",
       distance: 50,
@@ -453,7 +465,7 @@ export function useExploreFilters(
     setQuickFilter,
     toggleQuickFilter,
     setKindFilter,
-    setCategory,
+    toggleCategory,
     setPriceBucket,
     setTimeWindow,
     setDistance,

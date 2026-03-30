@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   View,
   StyleProp,
   ViewStyle,
   Pressable,
   Animated,
-  Image,
+  StyleSheet,
 } from "react-native";
+import { Image as ExpoImage } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { getImageUrl } from "../utils/storage";
 
@@ -39,12 +40,6 @@ export function DualCameraPost({
   // Get URLs once and keep them stable
   const backUrl = getImageUrl(backPhotoPath);
   const frontUrl = getImageUrl(frontPhotoPath);
-
-  // Preload both images on mount
-  useEffect(() => {
-    if (backUrl) Image.prefetch(backUrl);
-    if (frontUrl) Image.prefetch(frontUrl);
-  }, [backUrl, frontUrl]);
 
   const handleSwap = () => {
     // Trigger haptic feedback
@@ -87,27 +82,13 @@ export function DualCameraPost({
       {/* Main images - both rendered, opacity controls visibility */}
       <View style={{ width: "100%", height: "100%" }}>
         {/* Back camera as main */}
-        <Animated.Image
-          source={{ uri: backUrl }}
-          style={{
-            position: "absolute",
-            width: "100%",
-            height: "100%",
-            opacity: backMainOpacity,
-          }}
-          resizeMode="cover"
-        />
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: backMainOpacity }]}>
+          <ExpoImage source={backUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
+        </Animated.View>
         {/* Front camera as main */}
-        <Animated.Image
-          source={{ uri: frontUrl }}
-          style={{
-            position: "absolute",
-            width: "100%",
-            height: "100%",
-            opacity: frontMainOpacity,
-          }}
-          resizeMode="cover"
-        />
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: frontMainOpacity }]}>
+          <ExpoImage source={frontUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
+        </Animated.View>
       </View>
 
       {/* Overlay image - tappable to swap */}
@@ -131,27 +112,13 @@ export function DualCameraPost({
         }}
       >
         {/* Back camera as overlay */}
-        <Animated.Image
-          source={{ uri: backUrl }}
-          style={{
-            position: "absolute",
-            width: "100%",
-            height: "100%",
-            opacity: backOverlayOpacity,
-          }}
-          resizeMode="cover"
-        />
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: backOverlayOpacity }]}>
+          <ExpoImage source={backUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
+        </Animated.View>
         {/* Front camera as overlay */}
-        <Animated.Image
-          source={{ uri: frontUrl }}
-          style={{
-            position: "absolute",
-            width: "100%",
-            height: "100%",
-            opacity: frontOverlayOpacity,
-          }}
-          resizeMode="cover"
-        />
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: frontOverlayOpacity }]}>
+          <ExpoImage source={frontUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
+        </Animated.View>
       </Pressable>
     </View>
   );

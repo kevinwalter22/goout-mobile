@@ -18,6 +18,7 @@ const DEFAULT_BREAKDOWN: ScoreBreakdown = {
   quality: 0.7,
   communityFeedback: 0.5,
   freshness: 0.5,
+  friendCreated: 0,
   total: 0.5,
 };
 

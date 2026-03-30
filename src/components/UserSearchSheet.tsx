@@ -114,7 +114,7 @@ export function UserSearchSheet({ visible, onClose, onViewProfile }: UserSearchS
           ListFooterComponent={
             <View style={[styles.inviteFooter, { borderTopColor: colors.borderLight }]}>
               <Text style={[styles.inviteHint, { color: colors.textSecondary }]}>
-                Can't find who you're looking for?
+                Can&apos;t find who you&apos;re looking for?
               </Text>
               <Pressable
                 onPress={() => shareApp()}

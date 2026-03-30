@@ -406,6 +406,12 @@ export default function Settings() {
                 label="Quality Audit"
                 onPress={() => router.push("/settings/admin-quality" as any)}
               />
+              <View style={{ height: 1, backgroundColor: colors.border }} />
+              <SettingsItem
+                icon="globe-outline"
+                label="Venue Discovery"
+                onPress={() => router.push("/settings/admin-targets" as any)}
+              />
             </View>
           </View>
         )}

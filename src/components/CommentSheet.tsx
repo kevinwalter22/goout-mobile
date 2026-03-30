@@ -162,6 +162,18 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
         };
         setComments((prev) => [...prev, commentWithProfile as any]);
         setCommentText("");
+
+        // Notify the post author (fire-and-forget; edge fn skips self-comments)
+        supabase.functions
+          .invoke("send-notification", {
+            body: {
+              type: "post_comment",
+              post_id: postId,
+              comment_id: (commentData as any).id,
+              actor_id: user.id,
+            },
+          })
+          .catch(() => {});
       }
     } catch (error) {
       captureError(error, { action: "commentSubmit", postId });

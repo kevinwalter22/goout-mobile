@@ -40,7 +40,7 @@ interface FilterSheetProps {
   visible: boolean;
   onClose: () => void;
   filters: ExploreFilterState;
-  onCategoryChange: (category: CategoryId) => void;
+  onCategoryToggle: (category: CategoryId) => void;
   onPriceBucketChange: (price: PriceBucket) => void;
   onTimeWindowChange: (time: TimeWindow) => void;
   onDistanceChange: (distance: DistanceRadius) => void;
@@ -52,7 +52,7 @@ export function FilterSheet({
   visible,
   onClose,
   filters,
-  onCategoryChange,
+  onCategoryToggle,
   onPriceBucketChange,
   onTimeWindowChange,
   onDistanceChange,
@@ -139,15 +139,19 @@ export function FilterSheet({
             </FilterSection>
           )}
 
-          {/* Category */}
+          {/* Category — multi-select; "All Categories" clears the selection */}
           <FilterSection title="Category">
             <View style={styles.optionRow}>
               {CATEGORIES.map((option) => (
                 <OptionChip
                   key={option.id}
                   label={option.label}
-                  isSelected={filters.category === option.id}
-                  onPress={() => handleOptionSelect(option.id, onCategoryChange)}
+                  isSelected={
+                    option.id === "all"
+                      ? filters.categories.length === 0
+                      : filters.categories.includes(option.id)
+                  }
+                  onPress={() => handleOptionSelect(option.id, onCategoryToggle)}
                 />
               ))}
             </View>

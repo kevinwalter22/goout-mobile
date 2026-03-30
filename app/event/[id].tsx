@@ -35,6 +35,12 @@ import { captureError } from "../../src/lib/logger";
 import { friendlyMessage } from "../../src/lib/errorMessages";
 import { getFallbackImage } from "../../src/lib/categoryFallbackImages";
 
+/** Returns true for any Google Maps URL — these should not appear as "MORE INFO" links
+ *  because the detail screen already has a dedicated "Open in Google Maps" CTA. */
+function isGoogleMapsUrl(url: string): boolean {
+  return /maps\.google\.|google\.com\/maps|goo\.gl\/maps/i.test(url);
+}
+
 export default function EventDetail() {
   const { id, title: fallbackTitle, creatorId } = useLocalSearchParams<{
     id: string;
@@ -648,7 +654,7 @@ export default function EventDetail() {
               )}
             </View>
 
-            {item.source_url && /^https?:\/\//i.test(item.source_url) && (
+            {item.source_url && /^https?:\/\//i.test(item.source_url) && !isGoogleMapsUrl(item.source_url) && (
               <View style={{ gap: 4 }}>
                 <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textTertiary }}>
                   MORE INFO
