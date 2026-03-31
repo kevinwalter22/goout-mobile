@@ -94,7 +94,8 @@ export default function CreateEvent() {
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
 
-  const canSubmit = title.trim().length > 0 && !loading;
+  const hasLocation = selectedCoords !== null || address.trim().length > 0;
+  const canSubmit = title.trim().length > 0 && !loading && hasLocation;
 
   async function handleSubmit() {
     if (!canSubmit) return;
@@ -446,7 +447,10 @@ export default function CreateEvent() {
               color: colors.textSecondary,
             }}
           >
-            Address
+            Address *
+          </Text>
+          <Text style={{ fontSize: 12, color: colors.textTertiary, marginTop: -4 }}>
+            Required for map and check-in
           </Text>
           <AddressAutocomplete
             value={address}

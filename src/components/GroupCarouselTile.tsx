@@ -4,7 +4,7 @@
  * 160px wide, compact card with image, title, distance + open-now dot, tags.
  */
 
-import React from "react";
+import React, { useMemo } from "react";
 import { Image, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../contexts/ThemeContext";
@@ -28,10 +28,10 @@ function GroupCarouselTileInner({
 }: GroupCarouselTileProps) {
   const { colors } = useTheme();
 
-  const distanceText =
-    userLocation && item.lat && item.lng
-      ? `${getDistanceInMiles(userLocation.lat, userLocation.lng, item.lat, item.lng).toFixed(1)} mi`
-      : null;
+  const distanceText = useMemo(() => {
+    if (!userLocation || !item.lat || !item.lng) return null;
+    return `${getDistanceInMiles(userLocation.lat, userLocation.lng, item.lat, item.lng).toFixed(1)} mi`;
+  }, [userLocation, item.lat, item.lng]);
 
   const isOpen = item.scoreBreakdown.openNow >= 0.9;
   const tags = (item.tags || []).slice(0, 2);
@@ -49,10 +49,10 @@ function GroupCarouselTileInner({
         overflow: "hidden",
       }}
     >
-      {/* Image */}
-      {item.image_thumb_url ? (
+      {/* Image — prefer thumbnail, fall back to full image (user-created events only set image_url) */}
+      {(item.image_thumb_url || item.image_url) ? (
         <Image
-          source={{ uri: item.image_thumb_url }}
+          source={{ uri: item.image_thumb_url ?? item.image_url ?? undefined }}
           style={{ width: 160, height: 120, backgroundColor: colors.border }}
           resizeMode="cover"
         />

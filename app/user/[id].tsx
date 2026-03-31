@@ -9,6 +9,7 @@ import {
   Pressable,
   Image,
 } from "react-native";
+import { ScrollView as GHScrollView } from "react-native-gesture-handler";
 import { useProfile } from "../../src/hooks/useProfile";
 import { useUserPosts } from "../../src/hooks/useUserPosts";
 import { useFriendCount } from "../../src/hooks/useFriendCount";
@@ -268,7 +269,7 @@ export default function UserProfile() {
           <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 12, color: colors.text }}>
             Upcoming
           </Text>
-          <ScrollView
+          <GHScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             style={{ marginHorizontal: -16 }}
@@ -287,9 +288,9 @@ export default function UserProfile() {
                   overflow: "hidden",
                 }}
               >
-                {plan.image_thumb_url ? (
+                {(plan.image_thumb_url || plan.image_url) ? (
                   <Image
-                    source={{ uri: plan.image_thumb_url }}
+                    source={{ uri: plan.image_thumb_url ?? plan.image_url ?? undefined }}
                     style={{ width: "100%", height: 80, backgroundColor: colors.surfaceVariant }}
                     resizeMode="cover"
                   />
@@ -318,7 +319,7 @@ export default function UserProfile() {
                 </View>
               </Pressable>
             ))}
-          </ScrollView>
+          </GHScrollView>
         </View>
       )}
 

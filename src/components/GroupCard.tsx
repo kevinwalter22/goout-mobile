@@ -4,7 +4,7 @@
  * Renders a group heading and a snapping horizontal FlatList of GroupCarouselTile.
  */
 
-import React from "react";
+import React, { useCallback } from "react";
 import { FlatList, Text, View } from "react-native";
 import { useTheme } from "../contexts/ThemeContext";
 import { Colors } from "../config/theme";
@@ -25,6 +25,18 @@ const TILE_GAP = 12;
 function GroupCardInner({ group, userLocation, onItemPress, onLongPressItem }: GroupCardProps) {
   const { colors } = useTheme();
   const isPostable = group.cardType === "postable_now";
+
+  const renderCarouselItem = useCallback(
+    ({ item }: { item: ScoredItem }) => (
+      <GroupCarouselTile
+        item={item}
+        userLocation={userLocation}
+        onPress={onItemPress}
+        onLongPress={onLongPressItem}
+      />
+    ),
+    [userLocation, onItemPress, onLongPressItem]
+  );
 
   return (
     <View
@@ -90,14 +102,12 @@ function GroupCardInner({ group, userLocation, onItemPress, onLongPressItem }: G
           gap: TILE_GAP,
         }}
         initialNumToRender={4}
-        renderItem={({ item }: { item: ScoredItem }) => (
-          <GroupCarouselTile
-            item={item}
-            userLocation={userLocation}
-            onPress={onItemPress}
-            onLongPress={onLongPressItem}
-          />
-        )}
+        getItemLayout={(_, i) => ({
+          length: TILE_WIDTH + TILE_GAP,
+          offset: i * (TILE_WIDTH + TILE_GAP),
+          index: i,
+        })}
+        renderItem={renderCarouselItem}
       />
     </View>
   );

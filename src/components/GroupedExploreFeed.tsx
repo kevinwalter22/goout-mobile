@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Platform,
   Pressable,
   RefreshControl,
   Text,
@@ -322,6 +323,9 @@ export function GroupedExploreFeed({
       renderItem={renderItem}
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ padding: 16, gap: 12 }}
+      windowSize={5}
+      maxToRenderPerBatch={3}
+      removeClippedSubviews={Platform.OS === "android"}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}

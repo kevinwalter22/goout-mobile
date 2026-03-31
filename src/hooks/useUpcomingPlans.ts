@@ -10,6 +10,9 @@ export type UpcomingPlan = {
   town: string | null;
   kind: "event" | "activity";
   image_thumb_url: string | null;
+  // User-created events only set image_url (enrichment sets image_thumb_url for
+  // system events but does not run for user-created events).
+  image_url: string | null;
 };
 
 export function useUpcomingPlans(userId: string | null | undefined) {
@@ -29,7 +32,7 @@ export function useUpcomingPlans(userId: string | null | undefined) {
     const { data, error } = await supabase
       .from("explore_item_rsvps")
       .select(
-        "*, explore_items(id, title, starts_at, ends_at, location_name, town, kind, image_thumb_url)"
+        "*, explore_items(id, title, starts_at, ends_at, location_name, town, kind, image_thumb_url, image_url)"
       )
       .eq("user_id", userId);
 
@@ -67,6 +70,7 @@ export function useUpcomingPlans(userId: string | null | undefined) {
         town: item.town,
         kind: item.kind,
         image_thumb_url: item.image_thumb_url,
+        image_url: item.image_url,
       });
     }
 

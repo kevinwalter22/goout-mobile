@@ -79,7 +79,6 @@ const ExploreCard = React.memo(function ExploreCard({
   onPress,
   onLongPress,
   onCameraShortcut,
-  colors,
   currentUserId,
 }: {
   item: ExploreItem;
@@ -90,9 +89,9 @@ const ExploreCard = React.memo(function ExploreCard({
   onPress: (id: string) => void;
   onLongPress?: (id: string) => void;
   onCameraShortcut?: (id: string) => void;
-  colors: any;
   currentUserId?: string;
 }) {
+  const { colors } = useTheme();
   const [imgError, setImgError] = React.useState(false);
   const tapTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1110,6 +1109,8 @@ export default function Explore() {
                 </View>
               ) : null
             }
+            windowSize={5}
+            maxToRenderPerBatch={5}
             renderItem={({ item, index }) => (
               <ExploreCard
                 item={item}
@@ -1120,7 +1121,6 @@ export default function Explore() {
                 onPress={handleItemPress}
                 onLongPress={handleSuppressItem}
                 onCameraShortcut={handleCameraShortcut}
-                colors={colors}
                 currentUserId={user?.id}
               />
             )}

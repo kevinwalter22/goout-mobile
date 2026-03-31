@@ -11,6 +11,7 @@ import {
   Image,
   useWindowDimensions,
 } from "react-native";
+import { ScrollView as GHScrollView } from "react-native-gesture-handler";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -543,7 +544,7 @@ export default function Profile() {
             <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 12, color: colors.text }}>
               Upcoming
             </Text>
-            <ScrollView
+            <GHScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               style={{ marginHorizontal: -24 }}
@@ -564,9 +565,9 @@ export default function Profile() {
                     overflow: "hidden",
                   }}
                 >
-                  {plan.image_thumb_url ? (
+                  {(plan.image_thumb_url || plan.image_url) ? (
                     <Image
-                      source={{ uri: plan.image_thumb_url }}
+                      source={{ uri: plan.image_thumb_url ?? plan.image_url ?? undefined }}
                       style={{ width: "100%", height: 80, backgroundColor: colors.surfaceVariant }}
                       resizeMode="cover"
                     />
@@ -595,7 +596,7 @@ export default function Profile() {
                   </View>
                 </Pressable>
               ))}
-            </ScrollView>
+            </GHScrollView>
           </View>
         )}
 

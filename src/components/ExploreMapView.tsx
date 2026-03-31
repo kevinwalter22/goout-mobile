@@ -327,8 +327,11 @@ export function ExploreMapView({
         // Fetch events for "all" and "event" modes
         if (kindFilter === "all" || kindFilter === "event") {
           // 1. Dated events within the time window
+          // Mirror the explore-feed filter: creator sees ALL their own events
+          // regardless of review status (not just quarantined), so user-created
+          // events always appear on the creator's map once they have coordinates.
           const reviewStatusFilter = userId
-            ? `review_status.is.null,review_status.in.(auto_approved,approved),and(review_status.eq.quarantined,created_by_user_id.eq.${userId})`
+            ? `review_status.is.null,review_status.in.(auto_approved,approved),created_by_user_id.eq.${userId}`
             : "review_status.is.null,review_status.in.(auto_approved,approved)";
 
           let eventQuery = supabase
@@ -336,6 +339,7 @@ export function ExploreMapView({
             .select("*")
             .eq("kind", "event")
             .is("deleted_at", null)
+            .eq("is_admin_suppressed", false)
             .gte("starts_at", startDate.toISOString())
             .lte("starts_at", endDate.toISOString())
             .not("lat", "is", null)
@@ -356,6 +360,7 @@ export function ExploreMapView({
             .select("*")
             .is("starts_at", null)
             .is("deleted_at", null)
+            .eq("is_admin_suppressed", false)
             .not("lat", "is", null)
             .not("lng", "is", null)
             .gte("priority", 0)

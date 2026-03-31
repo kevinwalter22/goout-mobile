@@ -25,6 +25,12 @@ export default function NotificationSettings() {
   const [postComments, setPostComments] = useState(true);
   const [saving, setSaving] = useState(false);
   const [osPermission, setOsPermission] = useState<string | null>(null);
+  type TestStatus =
+    | "idle"
+    | "sending"
+    | { ok: true; count: number }
+    | { ok: false; message: string };
+  const [testStatus, setTestStatus] = useState<TestStatus>("idle");
 
   // Sync local state from profile
   useEffect(() => {
@@ -87,6 +93,24 @@ export default function NotificationSettings() {
       else setPostComments(!value);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function sendTestNotification() {
+    setTestStatus("sending");
+    try {
+      const { data, error } = await supabase.functions.invoke("test-push-notification", { body: {} });
+      if (error) {
+        setTestStatus({ ok: false, message: error.message || "Network error" });
+        return;
+      }
+      if (data?.error === "no_tokens") {
+        setTestStatus({ ok: false, message: "No device registered — grant permission and reopen the app" });
+        return;
+      }
+      setTestStatus({ ok: true, count: data?.tokens_found ?? 1 });
+    } catch (err) {
+      setTestStatus({ ok: false, message: err instanceof Error ? err.message : "Unknown error" });
     }
   }
 
@@ -332,6 +356,63 @@ export default function NotificationSettings() {
               size={18}
               color={colors.textTertiary}
             />
+          </Pressable>
+        </View>
+
+        {/* Test Notification */}
+        <View style={{ gap: 12 }}>
+          <Text
+            style={{
+              fontSize: 14,
+              fontWeight: "600",
+              color: colors.textSecondary,
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+            }}
+          >
+            Diagnostics
+          </Text>
+
+          <Pressable
+            onPress={sendTestNotification}
+            disabled={testStatus === "sending"}
+            accessibilityLabel="Send a test notification to this device"
+            accessibilityRole="button"
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              padding: 16,
+              gap: 12,
+              borderRadius: 12,
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+              opacity: testStatus === "sending" ? 0.6 : 1,
+            }}
+          >
+            {testStatus === "sending" ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <Ionicons name="notifications-outline" size={20} color={colors.textSecondary} />
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 16, color: colors.text }}>
+                Send Test Notification
+              </Text>
+              {typeof testStatus === "object" && testStatus.ok && (
+                <Text style={{ fontSize: 12, color: "#16A34A", marginTop: 2 }}>
+                  Sent to {testStatus.count} device{testStatus.count !== 1 ? "s" : ""} — check your notifications
+                </Text>
+              )}
+              {typeof testStatus === "object" && !testStatus.ok && (
+                <Text style={{ fontSize: 12, color: "#DC2626", marginTop: 2 }}>
+                  {testStatus.message}
+                </Text>
+              )}
+            </View>
+            {testStatus === "idle" && (
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+            )}
           </Pressable>
         </View>
 

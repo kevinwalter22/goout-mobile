@@ -120,6 +120,10 @@ export async function registerForPushNotifications(
       p_token: token,
       p_platform: platform,
     });
+
+    if (__DEV__) {
+      console.log("[Notifications] Push token registered:", token.slice(0, 20) + "...");
+    }
   } catch (error) {
     captureError(error, { action: "registerForPushNotifications" });
   }

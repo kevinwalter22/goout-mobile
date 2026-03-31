@@ -26,6 +26,7 @@ import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import type { Post } from "../../src/types/database";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
+import { ZoomableImage } from "../../src/components/ZoomableImage";
 
 type PostWithDetails = Post & {
   profile: {
@@ -255,27 +256,27 @@ export default function PostDetail() {
 
           {/* Photo */}
           {post.photo_path && (
-            post.camera_mode === "dual" && post.front_photo_path ? (
-              <DualCameraPost
-                backPhotoPath={post.photo_path}
-                frontPhotoPath={post.front_photo_path}
-                style={{
-                  width: "100%",
-                  aspectRatio: 3 / 4,
-                  borderRadius: 12,
-                  overflow: "hidden",
-                }}
-              />
-            ) : (
-              <PostImage
-                photoPath={post.photo_path}
-                style={{
-                  width: "100%",
-                  aspectRatio: 3 / 4,
-                  borderRadius: 12,
-                }}
-              />
-            )
+            <ZoomableImage
+              style={{
+                width: "100%",
+                aspectRatio: 3 / 4,
+                borderRadius: 12,
+                overflow: "hidden",
+              }}
+            >
+              {post.camera_mode === "dual" && post.front_photo_path ? (
+                <DualCameraPost
+                  backPhotoPath={post.photo_path}
+                  frontPhotoPath={post.front_photo_path}
+                  style={{ width: "100%", height: "100%" }}
+                />
+              ) : (
+                <PostImage
+                  photoPath={post.photo_path}
+                  style={{ width: "100%", height: "100%" }}
+                />
+              )}
+            </ZoomableImage>
           )}
 
           {/* Caption */}

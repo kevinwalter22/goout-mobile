@@ -6,6 +6,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../contexts/ThemeContext";
 import { reactionSync } from "../utils/reactionSync";
 import type { PostReaction } from "../types/database";
+import { captureWarning } from "../lib/logger";
 
 type ReactionBarProps = {
   postId: string;
@@ -40,7 +41,7 @@ export function ReactionBar({ postId, initialReactions }: ReactionBarProps) {
     } else {
       loadReactions();
     }
-  }, [postId]);
+  }, [postId, user?.id]);
 
   // Subscribe to cross-instance reaction sync (e.g. feed ↔ post detail)
   useEffect(() => {
@@ -110,7 +111,7 @@ export function ReactionBar({ postId, initialReactions }: ReactionBarProps) {
             .invoke("send-notification", {
               body: { type: "post_reaction", post_id: postId, actor_id: user.id },
             })
-            .catch(() => {});
+            .catch((err) => captureWarning("send-notification failed", { type: "post_reaction", err }));
         }
       }
     } catch (error) {

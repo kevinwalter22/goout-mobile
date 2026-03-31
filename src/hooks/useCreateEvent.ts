@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import * as Location from "expo-location";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
 import { checkBeforeSubmit, moderateText } from "../lib/moderation/textModeration";
@@ -8,21 +7,22 @@ import { requestImageModeration } from "../utils/imageModeration";
 import type { ExploreItem } from "../types/database";
 
 /**
- * Geocode an address to get lat/lng coordinates
- * Uses Expo Location which leverages native geocoding (Apple Maps / Google)
+ * Geocode an address to get lat/lng coordinates via Nominatim (OpenStreetMap).
+ * Consistent with AddressAutocomplete which also uses Nominatim.
  */
 async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
   try {
-    const results = await Location.geocodeAsync(address);
+    const params = new URLSearchParams({ q: address, format: "json", limit: "1", addressdetails: "0" });
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+      headers: { "User-Agent": "EudaApp/1.0" },
+    });
+    if (!response.ok) return null;
+    const results = await response.json();
     if (results.length > 0) {
-      return {
-        lat: results[0].latitude,
-        lng: results[0].longitude,
-      };
+      return { lat: parseFloat(results[0].lat), lng: parseFloat(results[0].lon) };
     }
     return null;
-  } catch (error) {
-    console.log("[geocodeAddress] Failed to geocode:", error);
+  } catch {
     return null;
   }
 }
@@ -127,6 +127,10 @@ export function useCreateEvent() {
           if (coords) {
             lat = coords.lat;
             lng = coords.lng;
+          } else {
+            setError("Couldn't find coordinates for this address. Please pick from the address suggestions or drop a pin.");
+            setLoading(false);
+            return null;
           }
         }
 

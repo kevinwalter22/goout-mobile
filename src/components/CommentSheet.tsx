@@ -22,7 +22,7 @@ import { Avatar } from "./Avatar";
 import { ReportSheet } from "./ReportSheet";
 import { Colors } from "../config/theme";
 import { useTheme } from "../contexts/ThemeContext";
-import { captureError } from "../lib/logger";
+import { captureError, captureWarning } from "../lib/logger";
 import { friendlyMessage } from "../lib/errorMessages";
 import { checkBeforeSubmit } from "../lib/moderation/textModeration";
 import { useEnforcement } from "../hooks/useEnforcement";
@@ -173,7 +173,7 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
               actor_id: user.id,
             },
           })
-          .catch(() => {});
+          .catch((err) => captureWarning("send-notification failed", { type: "post_comment", err }));
       }
     } catch (error) {
       captureError(error, { action: "commentSubmit", postId });

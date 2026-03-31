@@ -3,13 +3,39 @@ import {
   View,
   StyleProp,
   ViewStyle,
-  Pressable,
   Animated,
   StyleSheet,
 } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import * as Haptics from "expo-haptics";
+import ReAnimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  runOnJS,
+} from "react-native-reanimated";
+import { GestureDetector, Gesture } from "react-native-gesture-handler";
 import { getImageUrl } from "../utils/storage";
+
+const OVERLAY_W = 100;
+const OVERLAY_H = 133;
+const MARGIN = 16;
+
+function snapToCorner(x: number, y: number, cW: number, cH: number) {
+  "worklet";
+  const corners = [
+    { x: MARGIN,                  y: MARGIN },
+    { x: cW - OVERLAY_W - MARGIN, y: MARGIN },
+    { x: MARGIN,                  y: cH - OVERLAY_H - MARGIN },
+    { x: cW - OVERLAY_W - MARGIN, y: cH - OVERLAY_H - MARGIN },
+  ];
+  let minD = Infinity, best = corners[0];
+  for (const c of corners) {
+    const d = (x - c.x) ** 2 + (y - c.y) ** 2;
+    if (d < minD) { minD = d; best = c; }
+  }
+  return best;
+}
 
 type DualCameraPostProps = {
   backPhotoPath: string;
@@ -19,13 +45,14 @@ type DualCameraPostProps = {
 
 /**
  * Component that displays a dual camera post with BeReal-style overlay
- * Shows back camera as main image with front camera as small overlay in top-left corner
- * Tap the overlay to swap images
+ * Shows back camera as main image with front camera as small overlay
  *
  * Features:
  * - Both images preloaded and kept mounted (no remount on swap)
  * - True crossfade animation (simultaneous fade in/out)
- * - Instant swap feel with haptic feedback
+ * - Tap overlay to swap images
+ * - Drag overlay to any corner (snaps on release)
+ * - Hold overlay > 300ms to temporarily hide it
  */
 export function DualCameraPost({
   backPhotoPath,
@@ -42,13 +69,9 @@ export function DualCameraPost({
   const frontUrl = getImageUrl(frontPhotoPath);
 
   const handleSwap = () => {
-    // Trigger haptic feedback
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
     const newIsBackMain = !isBackMain;
     setIsBackMain(newIsBackMain);
-
-    // Animate crossfade: 0 = back main, 1 = front main
     Animated.timing(crossfadeAnim, {
       toValue: newIsBackMain ? 0 : 1,
       duration: 150,
@@ -57,7 +80,6 @@ export function DualCameraPost({
   };
 
   // Interpolate opacities for true crossfade
-  // Main images: back fades out as front fades in
   const backMainOpacity = crossfadeAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [1, 0],
@@ -66,8 +88,6 @@ export function DualCameraPost({
     inputRange: [0, 1],
     outputRange: [0, 1],
   });
-
-  // Overlay images: opposite of main
   const backOverlayOpacity = crossfadeAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, 1],
@@ -77,49 +97,101 @@ export function DualCameraPost({
     outputRange: [1, 0],
   });
 
+  // Overlay position & visibility (Reanimated shared values)
+  const containerW = useSharedValue(0);
+  const containerH = useSharedValue(0);
+  const overlayX   = useSharedValue(MARGIN);
+  const overlayY   = useSharedValue(MARGIN);
+  const panStartX  = useSharedValue(MARGIN);
+  const panStartY  = useSharedValue(MARGIN);
+  const overlayVis = useSharedValue(1);
+
+  const tap = Gesture.Tap()
+    .maxDuration(250)
+    .onEnd(() => runOnJS(handleSwap)());
+
+  const longPress = Gesture.LongPress()
+    .minDuration(300)
+    .onStart(() => { overlayVis.value = withTiming(0, { duration: 150 }); })
+    .onFinalize(() => { overlayVis.value = withTiming(1, { duration: 200 }); });
+
+  const pan = Gesture.Pan()
+    .minDistance(10)
+    .onBegin(() => {
+      panStartX.value = overlayX.value;
+      panStartY.value = overlayY.value;
+    })
+    .onUpdate((e) => {
+      overlayX.value = panStartX.value + e.translationX;
+      overlayY.value = panStartY.value + e.translationY;
+    })
+    .onEnd(() => {
+      const c = snapToCorner(overlayX.value, overlayY.value, containerW.value, containerH.value);
+      overlayX.value = c.x;
+      overlayY.value = c.y;
+      panStartX.value = c.x;
+      panStartY.value = c.y;
+    });
+
+  const overlayGesture = Gesture.Race(pan, longPress, tap);
+
+  const overlayAnimStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: overlayX.value },
+      { translateY: overlayY.value },
+    ],
+    opacity: overlayVis.value,
+  }));
+
   return (
-    <View style={style}>
+    <View
+      style={style}
+      onLayout={(e) => {
+        containerW.value = e.nativeEvent.layout.width;
+        containerH.value = e.nativeEvent.layout.height;
+      }}
+    >
       {/* Main images - both rendered, opacity controls visibility */}
       <View style={{ width: "100%", height: "100%" }}>
-        {/* Back camera as main */}
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: backMainOpacity }]}>
           <ExpoImage source={backUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
         </Animated.View>
-        {/* Front camera as main */}
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: frontMainOpacity }]}>
           <ExpoImage source={frontUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
         </Animated.View>
       </View>
 
-      {/* Overlay image - tappable to swap */}
-      <Pressable
-        onPress={handleSwap}
-        style={{
-          position: "absolute",
-          top: 16,
-          left: 16,
-          width: 100,
-          height: 133, // maintain 3:4 aspect ratio
-          borderRadius: 12,
-          borderWidth: 3,
-          borderColor: "white",
-          overflow: "hidden",
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.25,
-          shadowRadius: 3.84,
-          elevation: 5,
-        }}
-      >
-        {/* Back camera as overlay */}
-        <Animated.View style={[StyleSheet.absoluteFill, { opacity: backOverlayOpacity }]}>
-          <ExpoImage source={backUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
-        </Animated.View>
-        {/* Front camera as overlay */}
-        <Animated.View style={[StyleSheet.absoluteFill, { opacity: frontOverlayOpacity }]}>
-          <ExpoImage source={frontUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
-        </Animated.View>
-      </Pressable>
+      {/* Overlay — draggable to any corner, hold to hide, tap to swap */}
+      <GestureDetector gesture={overlayGesture}>
+        <ReAnimated.View
+          style={[
+            {
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: OVERLAY_W,
+              height: OVERLAY_H,
+              borderRadius: 12,
+              borderWidth: 3,
+              borderColor: "white",
+              overflow: "hidden",
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.25,
+              shadowRadius: 3.84,
+              elevation: 5,
+            },
+            overlayAnimStyle,
+          ]}
+        >
+          <Animated.View style={[StyleSheet.absoluteFill, { opacity: backOverlayOpacity }]}>
+            <ExpoImage source={backUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
+          </Animated.View>
+          <Animated.View style={[StyleSheet.absoluteFill, { opacity: frontOverlayOpacity }]}>
+            <ExpoImage source={frontUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
+          </Animated.View>
+        </ReAnimated.View>
+      </GestureDetector>
     </View>
   );
 }

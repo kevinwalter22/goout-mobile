@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
 import { mediumHaptic } from "../utils/haptics";
+import { captureWarning } from "../lib/logger";
 
 type FriendshipStatus =
   | "none"           // No friendship or request exists
@@ -16,6 +17,9 @@ export function useFriendship(targetUserId: string | null) {
   const [loading, setLoading] = useState(true);
   // Track who initiated the friendship (for accept notifications)
   const initiatorId = useRef<string | null>(null);
+  // Synchronous in-flight guard — prevents double-submit races that slip through
+  // before setLoading(true) causes a re-render
+  const inFlight = useRef(false);
 
   useEffect(() => {
     if (!user || !targetUserId) {
@@ -68,9 +72,13 @@ export function useFriendship(targetUserId: string | null) {
   }
 
   async function sendFriendRequest() {
-    if (!user || !targetUserId || loading) return;
+    if (!user || !targetUserId || loading || inFlight.current) return;
 
+    inFlight.current = true;
     setLoading(true);
+    // Optimistic update — flip the button immediately so the UI responds on the
+    // first tap without waiting for the network round-trip.
+    setStatus("pending_sent");
 
     try {
       const { data, error } = await supabase
@@ -81,7 +89,6 @@ export function useFriendship(targetUserId: string | null) {
 
       if (!error && data) {
         mediumHaptic();
-        setStatus("pending_sent");
         setFriendshipId((data as any).id);
         initiatorId.current = user.id;
 
@@ -90,11 +97,16 @@ export function useFriendship(targetUserId: string | null) {
           .invoke("send-notification", {
             body: { type: "friend_request", recipient_id: targetUserId },
           })
-          .catch(() => {});
+          .catch((err) => captureWarning("send-notification failed", { type: "friend_request", err }));
+      } else {
+        // Rollback optimistic update on failure
+        setStatus("none");
       }
     } catch (error) {
       console.error("Error sending friend request:", error);
+      setStatus("none");
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   }
@@ -121,7 +133,7 @@ export function useFriendship(targetUserId: string | null) {
             .invoke("send-notification", {
               body: { type: "friend_accepted", recipient_id: senderId },
             })
-            .catch(() => {});
+            .catch((err) => captureWarning("send-notification failed", { type: "friend_accepted", err }));
         }
       }
     } catch (error) {
