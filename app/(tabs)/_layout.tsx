@@ -1,14 +1,31 @@
+import { useEffect, useState } from "react";
 import { Tabs, usePathname } from "expo-router";
 import { Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { scrollToTopEmitter } from "../../src/utils/scrollToTop";
 import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { SwipeableTabsContainer } from "../../src/components/SwipeableTabsContainer";
+import { WelcomeModal } from "../../src/components/WelcomeModal";
+
+const WELCOME_KEY = "@euda_has_seen_welcome";
 
 export default function TabsLayout() {
   const { colors } = useTheme();
   const pathname = usePathname();
+  const [showWelcome, setShowWelcome] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem(WELCOME_KEY).then((v) => {
+      if (!v) setShowWelcome(true);
+    });
+  }, []);
+
+  function dismissWelcome() {
+    AsyncStorage.setItem(WELCOME_KEY, "1");
+    setShowWelcome(false);
+  }
 
   return (
     <SwipeableTabsContainer>
@@ -80,6 +97,7 @@ export default function TabsLayout() {
         }}
       />
     </Tabs>
+    <WelcomeModal visible={showWelcome} onClose={dismissWelcome} />
     </SwipeableTabsContainer>
   );
 }

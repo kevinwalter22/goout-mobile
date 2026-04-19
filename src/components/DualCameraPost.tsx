@@ -52,7 +52,7 @@ type DualCameraPostProps = {
  * - True crossfade animation (simultaneous fade in/out)
  * - Tap overlay to swap images
  * - Drag overlay to any corner (snaps on release)
- * - Hold overlay > 300ms to temporarily hide it
+ * - Hold main image > 300ms to temporarily hide the overlay
  */
 export function DualCameraPost({
   backPhotoPath,
@@ -110,11 +110,6 @@ export function DualCameraPost({
     .maxDuration(250)
     .onEnd(() => runOnJS(handleSwap)());
 
-  const longPress = Gesture.LongPress()
-    .minDuration(300)
-    .onStart(() => { overlayVis.value = withTiming(0, { duration: 150 }); })
-    .onFinalize(() => { overlayVis.value = withTiming(1, { duration: 200 }); });
-
   const pan = Gesture.Pan()
     .minDistance(10)
     .onBegin(() => {
@@ -133,7 +128,13 @@ export function DualCameraPost({
       panStartY.value = c.y;
     });
 
-  const overlayGesture = Gesture.Race(pan, longPress, tap);
+  const overlayGesture = Gesture.Race(pan, tap);
+
+  // Hold on main image to temporarily hide the overlay
+  const mainLongPress = Gesture.LongPress()
+    .minDuration(300)
+    .onStart(() => { overlayVis.value = withTiming(0, { duration: 150 }); })
+    .onFinalize(() => { overlayVis.value = withTiming(1, { duration: 200 }); });
 
   const overlayAnimStyle = useAnimatedStyle(() => ({
     transform: [
@@ -151,17 +152,19 @@ export function DualCameraPost({
         containerH.value = e.nativeEvent.layout.height;
       }}
     >
-      {/* Main images - both rendered, opacity controls visibility */}
-      <View style={{ width: "100%", height: "100%" }}>
-        <Animated.View style={[StyleSheet.absoluteFill, { opacity: backMainOpacity }]}>
-          <ExpoImage source={backUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
-        </Animated.View>
-        <Animated.View style={[StyleSheet.absoluteFill, { opacity: frontMainOpacity }]}>
-          <ExpoImage source={frontUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
-        </Animated.View>
-      </View>
+      {/* Main images — hold to temporarily hide the overlay */}
+      <GestureDetector gesture={mainLongPress}>
+        <View style={{ width: "100%", height: "100%" }}>
+          <Animated.View style={[StyleSheet.absoluteFill, { opacity: backMainOpacity }]}>
+            <ExpoImage source={backUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
+          </Animated.View>
+          <Animated.View style={[StyleSheet.absoluteFill, { opacity: frontMainOpacity }]}>
+            <ExpoImage source={frontUrl} contentFit="cover" style={StyleSheet.absoluteFill} />
+          </Animated.View>
+        </View>
+      </GestureDetector>
 
-      {/* Overlay — draggable to any corner, hold to hide, tap to swap */}
+      {/* Overlay — draggable to any corner, tap to swap */}
       <GestureDetector gesture={overlayGesture}>
         <ReAnimated.View
           style={[

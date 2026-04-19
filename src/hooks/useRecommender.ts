@@ -5,7 +5,7 @@
  * Fetches additional context (weather, friends, affinity) and applies scoring.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useExploreFilters, UseExploreFiltersReturn } from "./useExploreFilters";
 import { useAuth } from "./useAuth";
 import { useWeather, WeatherData } from "./useWeather";
@@ -282,16 +282,42 @@ export function useRecommender(
   );
 
   // ========================================
-  // Apply deterministic scoring
+  // Apply deterministic scoring (pagination-aware)
   // ========================================
+
+  // Track previous scored state to avoid re-ranking already-visible items on
+  // pagination. When items are appended (scroll to load more), we only score the
+  // new items and append them to the stable existing list. When the scoring context
+  // updates after a pagination (e.g. friendsGoingMap fetched for new items), we
+  // skip the re-rank entirely to prevent scroll position jumps.
+  const paginationStateRef = useRef<{
+    firstItemId: string | null;
+    scoredItems: ScoredItem[];
+  }>({ firstItemId: null, scoredItems: [] });
+  // Reset to false on filter change / fresh load; set to true after first pagination.
+  const hasPaginatedRef = useRef(false);
 
   const scoredItems = useMemo<ScoredItem[]>(() => {
     // Clear reranked items when base items change
     setRerankedItems(null);
 
-    if (!enableScoring) {
-      // Return items with default scores
-      return exploreFilters.items.map((item) => ({
+    const currentItems = exploreFilters.items;
+    const prevState = paginationStateRef.current;
+
+    // Detect pagination append: more items than before, same leading item
+    const isPagination =
+      currentItems.length > prevState.scoredItems.length &&
+      prevState.scoredItems.length > 0 &&
+      currentItems[0]?.id === prevState.firstItemId;
+
+    // Detect scoring-context-only update: same item set, context changed
+    const isContextOnlyUpdate =
+      prevState.scoredItems.length > 0 &&
+      currentItems.length === prevState.scoredItems.length &&
+      currentItems[0]?.id === prevState.firstItemId;
+
+    const defaultScored = (items: ExploreItem[]): ScoredItem[] =>
+      items.map((item) => ({
         ...item,
         recommendScore: 0,
         scoreBreakdown: {
@@ -310,9 +336,35 @@ export function useRecommender(
           total: 0,
         },
       }));
+
+    let result: ScoredItem[];
+
+    if (isPagination) {
+      // Append-only: score only the newly loaded items, preserve existing order
+      hasPaginatedRef.current = true;
+      const newItems = currentItems.slice(prevState.scoredItems.length);
+      const scoredNew = enableScoring
+        ? scoreAndRankItems(newItems, scoringContext)
+        : defaultScored(newItems);
+      result = [...prevState.scoredItems, ...scoredNew];
+    } else if (isContextOnlyUpdate && hasPaginatedRef.current) {
+      // Context changed (friendsGoingMap, communityFeedback, etc.) after a
+      // pagination — keep existing order to avoid scroll position jumps.
+      result = prevState.scoredItems;
+    } else {
+      // Fresh load: filter change, initial load, or context update before first pagination
+      hasPaginatedRef.current = false;
+      result = enableScoring
+        ? scoreAndRankItems(currentItems, scoringContext)
+        : defaultScored(currentItems);
     }
 
-    return scoreAndRankItems(exploreFilters.items, scoringContext);
+    paginationStateRef.current = {
+      firstItemId: currentItems[0]?.id ?? null,
+      scoredItems: result,
+    };
+
+    return result;
   }, [exploreFilters.items, scoringContext, enableScoring]);
 
   // ========================================

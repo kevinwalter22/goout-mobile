@@ -101,7 +101,17 @@ export default function NotificationSettings() {
     try {
       const { data, error } = await supabase.functions.invoke("test-push-notification", { body: {} });
       if (error) {
-        setTestStatus({ ok: false, message: error.message || "Network error" });
+        // Try to read the actual error detail from the function response body
+        let detail = error.message || "Edge function error";
+        try {
+          const body = await (error as any).context?.json?.();
+          if (body?.details) detail = body.details;
+          else if (body?.error && body.error !== "Internal error") detail = body.error;
+          else if (body?.message) detail = body.message;
+        } catch {
+          // context not parseable — keep original message
+        }
+        setTestStatus({ ok: false, message: detail });
         return;
       }
       if (data?.error === "no_tokens") {

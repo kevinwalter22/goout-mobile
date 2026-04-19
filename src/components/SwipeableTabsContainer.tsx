@@ -29,16 +29,23 @@ export function SwipeableTabsContainer({ children }: { children: React.ReactNode
         // Claim the gesture once 12px horizontal motion is detected.
         // This prevents scroll views from stealing the touch mid-swipe.
         .activeOffsetX([-12, 12])
-        // Automatically fail (yield to vertical scroll) if vertical motion
-        // exceeds the limit before horizontal activation.
-        // Explore is slightly tighter to protect map pan gestures.
-        .failOffsetY(isExplore ? [-30, 30] : [-40, 40])
+        // Fail (yield to vertical scroll) if >20px vertical motion appears
+        // before 12px horizontal. Unified threshold across all tabs — tighter
+        // than the previous ±40 (normal) / ±30 (explore) to reduce the race
+        // window where a fast diagonal scroll activates the gesture.
+        .failOffsetY([-20, 20])
         .onEnd((event) => {
-          const { translationX, velocityX } = event;
+          const { translationX, translationY, velocityX } = event;
 
           const tab = pathname as TabPath;
           const currentIndex = TAB_ORDER.indexOf(tab);
           if (currentIndex === -1) return;
+
+          // Safety net: if net displacement is more vertical than horizontal,
+          // the user was scrolling, not swiping tabs. This catches cases where
+          // the gesture activated (horizontal reached ±12px first) but the
+          // overall motion was diagonal or vertical.
+          if (Math.abs(translationX) < Math.abs(translationY)) return;
 
           // OR logic: either a deliberate drag OR a quick flick is sufficient.
           // Explore thresholds are slightly higher to reduce accidental triggers

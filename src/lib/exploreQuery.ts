@@ -368,7 +368,7 @@ export async function queryExploreItems(
             count: isDistanceFiltering ? sortedData.length : dbTotalCount,
             hasMore: isDistanceFiltering
               ? gotFullPage
-              : filteredData.length > 0 && offset + rpcData.length < dbTotalCount,
+              : filteredData.length > 0 && offset + filteredData.length < dbTotalCount,
             error: null,
           };
         }

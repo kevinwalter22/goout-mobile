@@ -39,12 +39,25 @@ function ThemedStack() {
           contentStyle: { backgroundColor: colors.background },
           gestureEnabled: true,
           gestureDirection: "horizontal",
-          // Allow back swipe to start anywhere on the screen, matching the
-          // full-screen tab swipe from SwipeableTabsContainer.
-          fullScreenGestureEnabled: true,
-          gestureResponseDistance: 120 as any,
+          // Edge-only back swipe: gesture activates from the left 20px strip.
+          // fullScreenGestureEnabled was previously true but caused vertical
+          // scrolls with any horizontal component to partially reveal the
+          // previous screen — there is no failOffsetY equivalent for native
+          // full-screen gestures, unlike SwipeableTabsContainer which uses
+          // gesture-handler's .failOffsetY(). Instagram/Twitter both use
+          // edge-only back swipe for the same reason.
+          fullScreenGestureEnabled: false,
+          gestureResponseDistance: 20 as any,
         }}
-      />
+      >
+        {/* Authenticated tab root — SwipeableTabsContainer handles all
+            horizontal navigation within tabs. Disabling the native back
+            gesture here prevents back-swiping to auth screens entirely,
+            and eliminates the iOS peek animation during vertical scrolling
+            on tab screens. Detail screens (event/[id], settings, etc.) are
+            separate Stack entries and inherit gestureEnabled: true. */}
+        <Stack.Screen name="(tabs)" options={{ gestureEnabled: false }} />
+      </Stack>
     </>
   );
 }

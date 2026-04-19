@@ -15,6 +15,7 @@ import { sendTestException } from "../../src/lib/sentry";
 import { captureError } from "../../src/lib/logger";
 import { friendlyMessage } from "../../src/lib/errorMessages";
 import { logSecurityEvent, SEC } from "../../src/lib/securityEvents";
+import { shareApp } from "../../src/utils/share";
 import {
   getSimMode,
   setSimMode,
@@ -412,6 +413,12 @@ export default function Settings() {
                 label="Venue Discovery"
                 onPress={() => router.push("/settings/admin-targets" as any)}
               />
+              <View style={{ height: 1, backgroundColor: colors.border }} />
+              <SettingsItem
+                icon="chatbubble-ellipses-outline"
+                label="Feedback Inbox"
+                onPress={() => router.push("/settings/admin-feedback" as any)}
+              />
             </View>
           </View>
         )}
@@ -493,6 +500,19 @@ export default function Settings() {
               overflow: "hidden",
             }}
           >
+            <SettingsItem
+              icon="chatbubble-ellipses-outline"
+              label="Give Feedback"
+              onPress={() => router.push("/settings/feedback" as any)}
+            />
+            <View style={{ height: 1, backgroundColor: colors.separator, marginLeft: 48 }} />
+            <SettingsItem
+              icon="share-social-outline"
+              label="Invite a Friend"
+              onPress={() => shareApp()}
+              showChevron={false}
+            />
+            <View style={{ height: 1, backgroundColor: colors.separator, marginLeft: 48 }} />
             <SettingsItem
               icon="mail-outline"
               label="Contact Support"

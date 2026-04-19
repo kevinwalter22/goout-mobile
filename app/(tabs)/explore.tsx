@@ -589,7 +589,10 @@ export default function Explore() {
         };
       }
 
-      setRsvpData(newRsvpData);
+      // Merge instead of replace so existing items keep their RSVP data
+      // while the fetch is in flight (prevents every visible card from
+      // receiving a new rsvpInfo object reference and re-rendering needlessly).
+      setRsvpData((prev) => ({ ...prev, ...newRsvpData }));
     }
 
     loadRSVPData();

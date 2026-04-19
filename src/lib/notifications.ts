@@ -113,13 +113,23 @@ export async function registerForPushNotifications(
       });
     }
 
-    // Upsert token to Supabase
+    // Upsert token to Supabase — retry once on failure since the token
+    // is already obtained and the only thing left is persisting it.
     const platform = Platform.OS as "ios" | "android";
-    await supabase.rpc("upsert_push_token", {
-      p_user_id: userId,
-      p_token: token,
-      p_platform: platform,
-    });
+    const upsertArgs = { p_user_id: userId, p_token: token, p_platform: platform };
+    let { error: rpcError } = await supabase.rpc("upsert_push_token", upsertArgs);
+
+    if (rpcError) {
+      // One retry after a short pause — covers transient DB/network blips
+      await new Promise((r) => setTimeout(r, 2000));
+      const retry = await supabase.rpc("upsert_push_token", upsertArgs);
+      rpcError = retry.error;
+    }
+
+    if (rpcError) {
+      captureError(rpcError, { action: "upsert_push_token", retried: true });
+      return;
+    }
 
     if (__DEV__) {
       console.log("[Notifications] Push token registered:", token.slice(0, 20) + "...");

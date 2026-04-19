@@ -7,6 +7,7 @@ import { setSentryUser } from "../lib/sentry";
 import { logAnalyticsEvent } from "../lib/analyticsLogger";
 import { captureError } from "../lib/logger";
 import { setLocationOverride } from "../utils/location";
+import { removePushToken } from "../lib/notifications";
 import type { Profile } from "../types/database";
 
 type AuthContextType = {
@@ -172,6 +173,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signOut() {
+    // Remove push token before revoking the session — the RPC requires
+    // a valid JWT, which won't be available after signOut completes.
+    if (user) {
+      await removePushToken(user.id);
+    }
     // Clear cached URLs on logout to prevent stale data
     clearExpiredUrlCache();
     // scope: 'global' revokes the refresh token server-side and

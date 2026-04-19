@@ -91,14 +91,14 @@ export function scoreItem(
     contextIntent: intentResult.score,
     typeAffinity: context.featureFlags.get(FLAGS.TYPE_AFFINITY_LEARNING)
       ? computeTypeAffinityScore(item, context)
-      : 0.5,
+      : 0,
     quality: computeQualityScore(item),
     communityFeedback: context.featureFlags.get(FLAGS.COMMUNITY_FEEDBACK)
       ? computeCommunityFeedbackScore(item, context)
-      : 0.5,
+      : 0,
     freshness: context.featureFlags.get(FLAGS.FRESHNESS)
       ? computeFreshnessScore(item)
-      : 0.5,
+      : 0,
     friendCreated: context.featureFlags.get(FLAGS.FRIEND_CREATED_BOOST)
       ? computeFriendCreatedScore(item, context)
       : 0,
