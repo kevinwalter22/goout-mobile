@@ -49,6 +49,7 @@ export default function FeedbackScreen() {
     });
     setSubmitting(false);
     if (error) {
+      console.error("[Feedback] insert error:", error.message);
       showToast("Couldn't send — try again", "error");
     } else {
       setSubmitted(true);

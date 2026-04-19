@@ -44,12 +44,35 @@ export default function AdminFeedback() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase
-      .from("feedback" as any)
-      .select("id, type, message, created_at, profiles(username)")
+    (supabase.from as any)("feedback")
+      .select("id, type, message, created_at, user_id")
       .order("created_at", { ascending: false })
-      .then(({ data }: { data: any }) => {
-        setRows((data as FeedbackRow[]) ?? []);
+      .then(async ({ data, error }: { data: any; error: any }) => {
+        if (error || !data) {
+          console.error("[AdminFeedback] fetch error:", error?.message);
+          setLoading(false);
+          return;
+        }
+        // Batch-fetch usernames for all feedback rows
+        const userIds: string[] = [...new Set(data.map((r: any) => r.user_id).filter(Boolean) as string[])];
+        let profileMap: Record<string, string> = {};
+        if (userIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("id, username")
+            .in("id", userIds);
+          if (profiles) {
+            profileMap = Object.fromEntries(profiles.map((p: any) => [p.id, p.username]));
+          }
+        }
+        setRows(
+          data.map((r: any) => ({
+            ...r,
+            profiles: r.user_id && profileMap[r.user_id]
+              ? { username: profileMap[r.user_id] }
+              : null,
+          }))
+        );
         setLoading(false);
       });
   }, []);
