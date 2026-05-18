@@ -60,10 +60,13 @@ export async function requireUser(
  * Validate that the caller is using a service-role key.
  * Use for internal/ops functions called by fetch-coordinator, cron, or admin scripts.
  *
- * Uses direct string comparison against the SUPABASE_SERVICE_ROLE_KEY env var.
- * A previous version had a JWT payload fallback (checking `role === "service_role"`),
- * but JWT payloads are not cryptographically verified here, so anyone could forge
- * that claim. Direct comparison is the only safe approach.
+ * Compares against multiple valid forms to survive Supabase's migration from
+ * legacy service-role JWTs to the new sb_secret_* format:
+ *   - SUPABASE_SERVICE_ROLE_KEY   — current auto-injected value (may be either format)
+ *   - SUPABASE_SECRET_KEYS        — comma-separated list of valid secret keys
+ *
+ * Direct string comparison only — never trust a JWT payload's `role` claim
+ * without verifying the signature.
  */
 export function requireServiceRole(
   req: Request
@@ -75,6 +78,12 @@ export function requireServiceRole(
 
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (serviceKey && token === serviceKey) return { ok: true };
+
+  const secretKeys = Deno.env.get("SUPABASE_SECRET_KEYS");
+  if (secretKeys) {
+    const valid = secretKeys.split(",").map((k) => k.trim()).filter(Boolean);
+    if (valid.includes(token)) return { ok: true };
+  }
 
   return { ok: false, error: "Forbidden" };
 }

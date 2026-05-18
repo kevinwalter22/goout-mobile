@@ -421,17 +421,24 @@ export class WebCollector {
   }
 
   /**
-   * Check if a path is in the target's allowed_paths
+   * Check if a path is in the target's allowed_paths.
+   *
+   * Normalizes trailing slashes on both sides: "/events" and "/events/" refer
+   * to the same resource. A path matches if it equals an allowed prefix or is
+   * a sub-resource of one (separated by "/"). This avoids both the historical
+   * trailing-slash mismatch bug and false over-matches like "/events-archive"
+   * matching prefix "/events".
    */
   private isPathAllowed(target: CollectorTarget, path: string): boolean {
-    // Empty allowed_paths = allow all (for targets that explicitly want this)
     if (target.allowed_paths.length === 0) {
       return true;
     }
 
-    return target.allowed_paths.some((allowedPath) =>
-      path.startsWith(allowedPath)
-    );
+    const normPath = path.replace(/\/$/, "");
+    return target.allowed_paths.some((allowedPath) => {
+      const normAllowed = allowedPath.replace(/\/$/, "");
+      return normPath === normAllowed || normPath.startsWith(normAllowed + "/");
+    });
   }
 
   /**
