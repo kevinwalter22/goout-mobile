@@ -1,6 +1,6 @@
 # Euda — Project State
 
-**Last updated:** 05/18/2026 1:20PM
+**Last updated:** 05/18/2026 (Phase 5 design + production triage session)
 **Owner:** Kevin Walter
 **Operating layer:** Claude (via this document) coordinating Claude Code
 
@@ -90,18 +90,22 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 
 ## 2. Current Priorities
 
-**This week (Warwick, week of [DATE TBD]):**
-- Complete Warwick data ingestion (migrations 126, 127, 128) — Claude Code mid-execution
-- Verify the 9 flagged URLs before atomic enable
-- Build trust in the autonomous-development pattern via Phase 1 setup
-- Begin onboarding brothers and their friends to Euda in Warwick
+**This week (Warwick, week of [05/18/2026]):**
+- ✅ Migrations 126, 127, 128 applied (Warwick partitions, collector targets, URL fixes)
+- ✅ URL verification done; 2 social-only venues deleted, 9 corrections applied
+- ✅ LLM extraction design doc approved (`docs/llm_extraction_design.md`)
+- ✅ Production ingestion restored after discovering 3-month dormancy
+- ⏳ Phase 5.1 (build LLM extractor) — deferred to next session
+- ⏳ Atomic enable of Warwick partitions/targets — deferred until LLM extractor ships
+- ⏳ Onboarding brothers and friends in Warwick
 
-**Active blockers:** None currently.
+**Active blockers:** None. Production ingestion is restored, pg_cron will auto-fire correctly on next */30 tick.
 
 **Awaiting Kevin's input on:**
 - Slack workspace setup (where these messages will live)
 - Weekly email day-of-week preference
-- Whether to verify Warwick URLs manually himself or let Claude Code do the web fetches
+- Decision on V1.1 timing trade-off: 7-day TestFlight target (tight, zero buffer) vs 10-day (comfortable, given Phase 2 surprises)
+- *(sb_secret rotation confirmed done by Kevin — old key revoked, new key in place, all functions verified working post-rotation)*
 
 ---
 
@@ -109,14 +113,23 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 
 | Date | Decision | Rationale | Decided by |
 |------|----------|-----------|------------|
-| [today] | Adopt lead-engineer-agent model with Claude in role | Founder wants to spend time on app and business, not on technical operations | Kevin |
-| [today] | PROJECT_STATE.md as single source of truth, lives in repo | Markdown is portable, Claude Code can read/write it, version controlled by default | Kevin + Claude |
-| [today] | Slack for ping-me, weekly email for longer reports | Slack matches founder's existing communication habits; email allows for longer-form weekly context | Kevin |
-| [recent] | Warwick before Portland in launch sequence | Founder will be physically present in Warwick, has dense social graph, brothers can help with acquisition | Kevin |
-| [recent] | Scrap nearby-users feature for now (Bug 6) | Not actually a bug, user density doesn't justify building yet, friends-of-friends already covers the use case | Kevin |
-| [recent] | Stage Warwick partitions and collector targets with is_enabled=FALSE for atomic flip | Avoid debugging a half-populated catalog if Phase 4 surfaces an issue | Claude (approved by Kevin) |
-| [recent] | Bump PredictHQ monthly budget from 500 to 1000 | Now serving 2 geographies on same cap; raise proactively rather than reactively | Claude (approved by Kevin) |
-| [recent] | Civic-meeting ignore_patterns at collector level, defer LLM enrichment classifier | Cheapest, most deterministic defense; defer global prompt change to its own scoped work | Claude (approved by Kevin) |
+| [05/18/2026] | Adopt lead-engineer-agent model with Claude in role | Founder wants to spend time on app and business, not on technical operations | Kevin |
+| [05/18/2026] | PROJECT_STATE.md as single source of truth, lives in repo | Markdown is portable, Claude Code can read/write it, version controlled by default | Kevin + Claude |
+| [05/18/2026] | Slack for ping-me, weekly email for longer reports | Slack matches founder's existing communication habits; email allows for longer-form weekly context | Kevin |
+| [05/14/2026] | Warwick before Portland in launch sequence | Founder will be physically present in Warwick, has dense social graph, brothers can help with acquisition | Kevin |
+| [05/14/2026] | Scrap nearby-users feature for now (Bug 6) | Not actually a bug, user density doesn't justify building yet, friends-of-friends already covers the use case | Kevin |
+| [05/18/2026] | Stage Warwick partitions and collector targets with is_enabled=FALSE for atomic flip | Avoid debugging a half-populated catalog if Phase 4 surfaces an issue | Claude (approved by Kevin) |
+| [05/18/2026] | Bump PredictHQ monthly budget from 500 to 1000 | Now serving 2 geographies on same cap; raise proactively rather than reactively | Claude (approved by Kevin) |
+| [05/18/2026] | Civic-meeting ignore_patterns at collector level, defer LLM enrichment classifier | Cheapest, most deterministic defense; defer global prompt change to its own scoped work | Claude (approved by Kevin) |
+| [05/18/2026] | Delete Tuscan Cafe + Ochs Orchard from collector targets | Both promote events via Instagram/Facebook only — no scrapable web events surface; carrying them as dead targets clutters monitoring | Claude (approved by Kevin) |
+| [05/18/2026] | Pivot from atomic flip to LLM-based extraction first | Phase 2 smoke test exposed that the default DOM extractor matches ~0 real-world sites; atomic-flipping 30 targets would produce ~0 events. LLM extraction (Phase 5) is the actual fix | Claude (approved by Kevin) |
+| [05/18/2026] | LLM cost model: hard cap $50/mo, alert at $20/mo, weekly cadence w/ backoff | Two-threshold cost control; weekly cadence balances freshness against spend; don't over-optimize upfront | Kevin |
+| [05/18/2026] | Add LLM critique pass as anti-hallucination belt-and-suspenders | Verbatim evidence snippets are primary control; critique pass costs ~$0.001/crawl and catches mis-extractions evidence check might miss | Kevin |
+| [05/18/2026] | Order: build extractor (5.1) → integrate into collector_targets (5.2) → build Google Places bridge (5.3) | 5.2 first is lower-risk: validates extractor on a function we just proved end-to-end in Phase 2, before building greenfield function+table+cron in 5.3 | Claude (approved by Kevin) |
+| [05/18/2026] | Add Week 0 single-venue manual validation before Week 1 (10 venues) | Cheap paranoia: protects against "10 venues all broken in the same way" debugging | Kevin |
+| [05/18/2026] | Migration number reservation: Phase 5 uses 129–132, impression logging uses 133+ | Two parallel workstreams need explicit numbering to avoid merge conflicts | Kevin |
+| [05/18/2026] | Redeploy all 17 service-role edge functions with `--no-verify-jwt` | Supabase platform migrated auto-injected SUPABASE_SERVICE_ROLE_KEY from legacy JWT to sb_secret_*. Gateway rejects sb_secret (not JWT format). Disabling gateway verification lets the function-level requireServiceRole still enforce auth. Restored 3 months of dormant ingestion | Claude (approved by Kevin) |
+| [05/18/2026] | Add legacy-JWT fallback to requireServiceRole via custom `LEGACY_SERVICE_ROLE_JWT` env | Dashboard SQL editor lacks permission to update DB-level `app.service_role_key` config that pg_cron jobs read. Adding a code-side fallback so cron's existing legacy-JWT bearer works was simpler than a vault-based rewrite | Claude (approved by Kevin) |
 
 ---
 
@@ -133,9 +146,17 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 - Risks: Premature change affects global enrichment, takes effort to validate
 
 **Q: Should the venue-discovery bridge (Google Places → website crawl) be built during Warwick or deferred?**
-- Trigger to revisit: After Warwick curated collector targets are live for 1 week and we can quantify the gap
-- Current default: Design now (Phase 5 of current Claude Code prompt), implement later
-- Risks: Major infrastructure effort during a time we should focus on V2
+- **RESOLVED 05/18/2026:** Build during Warwick, scope expanded to "LLM-based extraction as shared layer for collector_targets AND Google Places venues" — design doc at `docs/llm_extraction_design.md`, implementation begins next session with Phase 5.1
+- Reasoning: Phase 2 surfaced that existing DOM extractor matches ~0 real-world sites; the venue-discovery bridge's LLM extractor is the cleanest fix for both problems
+
+**Q: Should pg_cron job auth be migrated to sb_secret format, or should requireServiceRole accept both formats?**
+- **RESOLVED 05/18/2026:** Both formats accepted via `_shared/auth-guard.ts:requireServiceRole`. Reads three env vars: `SUPABASE_SERVICE_ROLE_KEY` (auto-injected sb_secret), `LEGACY_SERVICE_ROLE_JWT` (custom secret holding legacy JWT for pg_cron), and `SUPABASE_SECRET_KEYS` (auto-injected comma-separated list). Cron continues sending legacy JWT; new code can use either format.
+- Risk: `--no-verify-jwt` on 16 functions means gateway no longer pre-filters bad bearers; if requireServiceRole ever regresses, functions become public. **Mitigation backlog item:** write a test that proves requireServiceRole returns 403 for empty/wrong bearers, run in CI.
+
+**Q: V1.1 timing — 7-day TestFlight (tight) vs 10-day (buffered)?**
+- Trigger to revisit: Kevin's call before Phase 5.1 starts
+- Current default: Kevin to decide
+- Risks: 7-day has zero buffer; Phase 2 demonstrated this codebase has latent surprises
 
 **Q: When to enable the LLM reranker?**
 - Trigger to revisit: After offline evaluation harness is in place and we have baseline metrics
@@ -147,13 +168,18 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 ## 5. Bug & Feature Backlog
 
 ### In flight
-- (Migration 128) URL verification for 9 flagged Warwick collector targets
-- (Atomic flip) Enable all Warwick partitions and targets once verified
-- (Phase 4 of current prompt) Civic-meeting enrichment classifier — deferred
-- (Phase 5 of current prompt) Venue-discovery bridge design — pending
+- (Phase 5.1) Build `_shared/llm-extractor.ts` + 10 fixture HTMLs + unit test + critique pass — next session
+- (Phase 5.2) Wire LLM fallback into ingest-web-collector for collector_targets
+- (Phase 5.3) Build Google Places venue-discovery bridge (new function + venue_crawl_state table)
+- (Phase 5.4 Week 0) Manual single-venue end-to-end validation
+- (Atomic flip) Enable all Warwick partitions and targets — DEFERRED until LLM extractor lands
+- (Civic classifier) Folded into Phase 5.5 — handled by LLM extractor's structured output, no separate classifier prompt
+- (V1.1 release) Bundle bug fixes + Warwick LLM (10 venues) + impression logging for TestFlight
 
-### Open bugs
-*(None currently known beyond what's already in flight)*
+### Open bugs (NEW this session)
+- **Path-allow bug in `_shared/web-collector.ts`** — discovery_urls without trailing slash failed prefix check against allowed_paths with trailing slash. FIXED & deployed to ingest-web-collector. Was a latent bug across the whole catalog since migration 045 (every Potsdam target also affected).
+- **3-month ingestion dormancy** — production ingestion silently stopped Feb 3-25 when Supabase migrated auto-injected SUPABASE_SERVICE_ROLE_KEY from legacy JWT to sb_secret_*. FIXED via 15-function redeploy with --no-verify-jwt. Manual ALTER DATABASE pending from Kevin to update pg_cron auth.
+- **iCal feed URL for Town of Warwick is dynamic / JS-rendered** — switching to 'ics' parsing strategy in migration 128 was premature. The discovery URL still points at the HTML calendar, not the actual .ics endpoint. Low priority; LLM extractor will handle the HTML version regardless.
 
 ### Feature backlog (V2 work)
 - Impression logging (the V2 evaluation tent-pole — has NOT been built yet, blocks all downstream V2 measurement)
@@ -178,15 +204,19 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 ### Deployed
 - **V1 (App Store):** Live. Approved [recent]. ~30 users in Potsdam.
 - **V1 bug fixes (Bugs 1-5, 7):** Implemented by Claude Code, not yet shipped to TestFlight or submitted to App Store as V1.1, currently sitting in dev branch.
+- **15 service-role edge functions** redeployed with `--no-verify-jwt` (auth fix from this session): fetch-coordinator, all 4 ingest-*, normalize-raw-events, enrich-explore-item, run-enrichment-queue, schedule-enrichment, send-event-reminders, evaluate-venue-websites, lookup-venue-images, cache-place-photos, cleanup-orphaned-media, health-summary
+- **ingest-web-collector** redeployed with path-allow bug fix + auth fix
+- **Migration 126** (Warwick fetch partitions): applied; 3 partitions staged is_enabled=FALSE
+- **Migration 127** (Warwick collector targets): applied; 30 targets staged is_enabled=FALSE (32 originally, 2 deleted in 128)
+- **Migration 128** (URL fixes + 2 deletions): applied
 
 ### In flight
-- **Migration 126** (Warwick fetch partitions): written and applied
-- **Migration 127** (Warwick collector targets): written and applied
-- **Migration 128** (URL fixes): written and applied
+- *(nothing — Phase 5.1 ready to start in next session)*
 
 ### Disabled / Feature-flagged
 - LLM reranker (`rerank-explore-items` edge function): deployed but feature flag off
 - Eventbrite source: globally disabled (migration 036)
+- All Warwick partitions and collector targets: is_enabled=FALSE pending Phase 5 LLM extractor
 
 ### Environments
 - **Production:** Supabase Pro tier project, live
@@ -203,10 +233,16 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 ## 7. Architecture & Patterns Notes
 
 ### Database
-- PostgreSQL via Supabase, 108+ migrations applied to production
+- PostgreSQL via Supabase, 128+ migrations applied to production
 - Row-level security throughout
 - Migrations numbered sequentially; never reuse numbers
 - Migration apply pattern: write file → review → `supabase db push`
+
+#### Migration number reservations (parallel workstreams)
+When multiple Claude Code sessions run in parallel, they need to reserve migration number ranges in advance to avoid merge conflicts. Current reservations:
+- **129–132**: Phase 5 (LLM extraction + venue-discovery bridge)
+- **133+**: Impression logging workstream (V2 evaluation harness)
+- Other parallel sessions: append a new reservation here before starting work that adds migrations.
 
 ### Recommendation engine (V1)
 - 12-signal weighted linear ranker
@@ -240,6 +276,34 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 - Feature flags for all V2 changes — no untested code paths in production by default
 - All sheets/modals should refresh on visible (lesson from Bug 1)
 - All notification handlers should emit refresh events (lesson from Bug 3)
+
+### Known tech debt (added this session)
+
+**1. Edge function auth: inconsistent verify-jwt strategy.**
+- 16 service-role functions deployed with `--no-verify-jwt` (gateway off); function-level `requireServiceRole` is sole check, now accepts both new sb_secret and legacy JWT formats.
+- 6 user-facing functions still have gateway verify-jwt on (correct — they use `requireUser` which validates JWTs).
+- 1 function (rerank-explore-items) uses both auth styles; kept gateway on.
+- Tech debt to track: write a CI test that proves `requireServiceRole` returns 403 for empty/wrong/forged bearers. Defer to Phase 2 (staging environment setup).
+
+**2. pg_cron DB-level `app.service_role_key` is stale but no longer matters.**
+- Has the original legacy JWT value, can't be updated from dashboard SQL editor (postgres role isn't superuser).
+- Auth-guard accepts that legacy JWT via `LEGACY_SERVICE_ROLE_JWT` custom env var.
+- Long-term fix: replace `current_setting()` lookup in cron jobs with a Supabase Vault-based read so secret rotation is mechanical. Out of scope until staging env exists.
+
+**3. Default DOM extractor in `_shared/web-extractors.ts` matches very few real-world sites.**
+- `.event`, `.event-item`, `article.event`, `[itemtype*='Event']` covers maybe 5% of sites we sampled.
+- Phase 5 LLM extraction addresses this. After Phase 5 ships, the DOM path becomes "tier-0 cheap free pass; LLM fills the rest."
+- Don't deprecate DOM extractor — it's the right tool for the 5% of sites where it works.
+
+**4. Trailing-slash convention bug in `allowed_paths` was latent across the whole catalog.**
+- Original migration 045 used `discovery_urls=['/events']` + `allowed_paths=['/events/']` which prefix-fails. Same pattern in every collector_target since.
+- FIXED in `_shared/web-collector.ts:isPathAllowed` — normalize trailing slash on both sides; bonus: also fixes over-match (e.g., `/events-archive` no longer matches `/events`).
+- Existing data could be normalized in a follow-up migration but is not necessary — the code fix is sufficient.
+
+**5. Supabase auto-injected env vars change format unpredictably.**
+- The platform migrated SUPABASE_SERVICE_ROLE_KEY from legacy JWT to sb_secret_* sometime between Feb and May 2026, silently. Cost us 3 months of ingestion before discovery.
+- Lesson: every cron-driven function should write to `pipeline_health_log` even on success, so the LACK of recent entries is detectable.
+- Lesson: monitoring dashboard (Phase 6 originally) should surface "no recent activity per source" as a top-level alert.
 
 ---
 
