@@ -62,8 +62,13 @@ export async function requireUser(
  *
  * Compares against multiple valid forms to survive Supabase's migration from
  * legacy service-role JWTs to the new sb_secret_* format:
- *   - SUPABASE_SERVICE_ROLE_KEY   — current auto-injected value (may be either format)
- *   - SUPABASE_SECRET_KEYS        — comma-separated list of valid secret keys
+ *   - SUPABASE_SERVICE_ROLE_KEY   — auto-injected; on current Supabase platform this is the sb_secret_* form
+ *   - SUPABASE_SECRET_KEYS        — auto-injected; comma-separated list of valid secret keys
+ *   - LEGACY_SERVICE_ROLE_JWT     — custom secret holding the legacy JWT-form service-role key.
+ *                                   pg_cron jobs created via migration 088 still call with the
+ *                                   legacy JWT (the DB-level app.service_role_key setting can't
+ *                                   be updated from the dashboard SQL editor without superuser).
+ *                                   Accepting it here lets cron keep working without DB changes.
  *
  * Direct string comparison only — never trust a JWT payload's `role` claim
  * without verifying the signature.
@@ -78,6 +83,9 @@ export function requireServiceRole(
 
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (serviceKey && token === serviceKey) return { ok: true };
+
+  const legacyJwt = Deno.env.get("LEGACY_SERVICE_ROLE_JWT");
+  if (legacyJwt && token === legacyJwt) return { ok: true };
 
   const secretKeys = Deno.env.get("SUPABASE_SECRET_KEYS");
   if (secretKeys) {
