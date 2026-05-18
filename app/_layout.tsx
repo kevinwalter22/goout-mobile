@@ -15,7 +15,9 @@ import {
   registerForPushNotifications,
   removePushToken,
   addNotificationResponseListener,
+  addNotificationReceivedListener,
   handleNotificationResponse,
+  handleNotificationReceivedForeground,
   getPushPermissionStatus,
 } from "../src/lib/notifications";
 import {
@@ -174,8 +176,14 @@ function NotificationInitializer() {
 
   useEffect(() => {
     // Handle notification taps (deep-link to relevant screen)
-    const unsub = addNotificationResponseListener(handleNotificationResponse);
-    return () => unsub?.();
+    const unsubTap = addNotificationResponseListener(handleNotificationResponse);
+    // Handle foreground arrivals (emit data-refresh events so badges update
+    // while the user stays on the current screen)
+    const unsubForeground = addNotificationReceivedListener(handleNotificationReceivedForeground);
+    return () => {
+      unsubTap?.();
+      unsubForeground?.();
+    };
   }, []);
 
   return null;

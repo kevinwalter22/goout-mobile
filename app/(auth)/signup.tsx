@@ -14,6 +14,7 @@ import { Image } from "expo-image";
 import { Link, router } from "expo-router";
 import { useAuth } from "../../src/hooks/useAuth";
 import { friendlyMessage } from "../../src/lib/errorMessages";
+import { logAuthEvent } from "../../src/lib/authLog";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors, Spacing, BorderRadius, FontSize, FontWeight } from "../../src/config/theme";
 import { supabase } from "../../src/lib/supabase";
@@ -75,6 +76,7 @@ export default function SignUp() {
     }
 
     setLoading(true);
+    logAuthEvent("signup_attempt", { email, metadata: { username_len: username.length } });
 
     // Check username availability before creating the auth user.
     // Without this, a taken username causes the DB trigger to fail with
@@ -85,6 +87,11 @@ export default function SignUp() {
     );
     if (usernameCheckError || usernameAvailable === false) {
       setLoading(false);
+      logAuthEvent("signup_failed", {
+        email,
+        errorCode: "username_taken",
+        errorMessage: usernameCheckError?.message ?? "Username already taken",
+      });
       Alert.alert("Error", "This username is already taken. Please choose a different one.");
       return;
     }
@@ -94,9 +101,18 @@ export default function SignUp() {
 
     if (error) {
       const msg = error.message?.toLowerCase() ?? "";
+      const errorCode = msg.includes("rate limit")
+        ? "rate_limit"
+        : msg.includes("already registered") || msg.includes("user already")
+        ? "email_exists"
+        : (error as any).code || "unknown";
+      logAuthEvent("signup_failed", {
+        email,
+        errorCode,
+        errorMessage: error.message,
+      });
+
       if (msg.includes("rate limit")) {
-        // Lock the button for 5 minutes — retrying sooner won't help since the
-        // limit is project-wide. The real fix is a custom SMTP provider in Supabase.
         setCooldownEnd(new Date(Date.now() + 5 * 60 * 1000));
         Alert.alert(
           "High Demand",
@@ -106,6 +122,7 @@ export default function SignUp() {
         Alert.alert("Error", friendlyMessage(error));
       }
     } else {
+      logAuthEvent("signup_succeeded", { email });
       Alert.alert(
         "Success",
         "Account created! Please check your email to verify your account.",

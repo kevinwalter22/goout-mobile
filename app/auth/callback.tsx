@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Linking from "expo-linking";
 import { supabase } from "../../src/lib/supabase";
+import { logAuthEvent } from "../../src/lib/authLog";
 import { Colors } from "../../src/config/theme";
 
 /**
@@ -24,17 +25,26 @@ export default function AuthCallback() {
   }, []);
 
   async function handleCallback() {
+    const callbackType = (params.type as string | undefined) ?? "unknown";
     try {
       // Try PKCE code exchange first (query param)
       const code = params.code as string | undefined;
       if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
         if (!error) {
-          // type=recovery → password reset flow; all others → main feed
-          const type = params.type as string | undefined;
-          router.replace((type === "recovery" ? "/(auth)/reset-password" : "/(tabs)/feed") as any);
+          logAuthEvent("confirmation_arrived", {
+            userId: data?.user?.id ?? null,
+            email: data?.user?.email ?? null,
+            metadata: { callback_type: callbackType, flow: "pkce" },
+          });
+          router.replace((callbackType === "recovery" ? "/(auth)/reset-password" : "/(tabs)/feed") as any);
           return;
         }
+        logAuthEvent("confirmation_failed", {
+          errorCode: "pkce_exchange_failed",
+          errorMessage: error.message,
+          metadata: { callback_type: callbackType, flow: "pkce" },
+        });
       }
 
       // Fallback: extract tokens from the full URL (hash fragment)
@@ -45,24 +55,44 @@ export default function AuthCallback() {
           const hashParams = new URLSearchParams(hash);
           const accessToken = hashParams.get("access_token");
           const refreshToken = hashParams.get("refresh_token");
-          const type = hashParams.get("type");
+          const type = hashParams.get("type") ?? callbackType;
 
           if (accessToken && refreshToken) {
-            const { error } = await supabase.auth.setSession({
+            const { data, error } = await supabase.auth.setSession({
               access_token: accessToken,
               refresh_token: refreshToken,
             });
             if (!error) {
+              logAuthEvent("confirmation_arrived", {
+                userId: data?.user?.id ?? null,
+                email: data?.user?.email ?? null,
+                metadata: { callback_type: type, flow: "hash_fragment" },
+              });
               router.replace((type === "recovery" ? "/(auth)/reset-password" : "/(tabs)/feed") as any);
               return;
             }
+            logAuthEvent("confirmation_failed", {
+              errorCode: "set_session_failed",
+              errorMessage: error.message,
+              metadata: { callback_type: type, flow: "hash_fragment" },
+            });
           }
         }
       }
 
       // If we got here, no tokens were found — redirect to sign-in
+      logAuthEvent("confirmation_failed", {
+        errorCode: "no_tokens_found",
+        errorMessage: "Callback opened without code or hash tokens",
+        metadata: { callback_type: callbackType },
+      });
       router.replace("/(auth)/signin");
-    } catch {
+    } catch (err) {
+      logAuthEvent("confirmation_failed", {
+        errorCode: "exception",
+        errorMessage: err instanceof Error ? err.message : String(err),
+        metadata: { callback_type: callbackType },
+      });
       router.replace("/(auth)/signin");
     }
   }

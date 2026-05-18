@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
 import { mediumHaptic } from "../utils/haptics";
 import { captureWarning } from "../lib/logger";
+import { appEvents } from "../utils/appEvents";
 
 type FriendshipStatus =
   | "none"           // No friendship or request exists
@@ -27,6 +28,20 @@ export function useFriendship(targetUserId: string | null) {
       return;
     }
     loadFriendshipStatus();
+  }, [user, targetUserId]);
+
+  // Refresh when a friend-accepted push arrives — covers the case where the
+  // sender has the recipient's profile already mounted (stale "Add Friend"
+  // button) when the recipient accepts. Only refresh if the push is about
+  // this exact target.
+  useEffect(() => {
+    if (!user || !targetUserId) return;
+    const onAccepted = (payload: { accepterId?: string }) => {
+      if (payload.accepterId && payload.accepterId !== targetUserId) return;
+      loadFriendshipStatus();
+    };
+    appEvents.on("notification:friendAccepted", onAccepted);
+    return () => appEvents.off("notification:friendAccepted", onAccepted);
   }, [user, targetUserId]);
 
   async function loadFriendshipStatus() {

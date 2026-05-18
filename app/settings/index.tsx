@@ -419,6 +419,12 @@ export default function Settings() {
                 label="Feedback Inbox"
                 onPress={() => router.push("/settings/admin-feedback" as any)}
               />
+              <View style={{ height: 1, backgroundColor: colors.border }} />
+              <SettingsItem
+                icon="key-outline"
+                label="Auth Event Log"
+                onPress={() => router.push("/settings/admin-auth-log" as any)}
+              />
             </View>
           </View>
         )}

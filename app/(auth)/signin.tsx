@@ -15,6 +15,7 @@ import { Link, router } from "expo-router";
 import { useAuth } from "../../src/hooks/useAuth";
 import { friendlyMessage } from "../../src/lib/errorMessages";
 import { logSecurityEvent, SEC } from "../../src/lib/securityEvents";
+import { logAuthEvent } from "../../src/lib/authLog";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { Colors, Spacing, BorderRadius, FontSize, FontWeight } from "../../src/config/theme";
 
@@ -32,13 +33,22 @@ export default function SignIn() {
     }
 
     setLoading(true);
+    logAuthEvent("signin_attempt", { email });
     const { error } = await signIn(email, password);
     setLoading(false);
 
     if (error) {
       logSecurityEvent(SEC.AUTH_FAILED_LOGIN, "medium");
+      const msg = error.message?.toLowerCase() ?? "";
+      const errorCode = msg.includes("email not confirmed") || msg.includes("not confirmed")
+        ? "email_not_confirmed"
+        : msg.includes("invalid login") || msg.includes("invalid credentials")
+        ? "invalid_credentials"
+        : (error as any).code || "unknown";
+      logAuthEvent("signin_failed", { email, errorCode, errorMessage: error.message });
       Alert.alert("Error", friendlyMessage(error));
     } else {
+      logAuthEvent("signin_succeeded", { email });
       router.replace("/(tabs)/feed");
     }
   }

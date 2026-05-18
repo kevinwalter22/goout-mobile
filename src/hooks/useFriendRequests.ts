@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
+import { appEvents } from "../utils/appEvents";
 
 type FriendRequest = {
   id: string;
@@ -19,6 +20,16 @@ export function useFriendRequests() {
     if (user) {
       loadRequests();
     }
+  }, [user]);
+
+  // Refresh when a friend-request push arrives (tap or foreground).
+  // Covers the case where the Profile tab is already mounted and React
+  // Navigation's focus event doesn't refire on push tap.
+  useEffect(() => {
+    if (!user) return;
+    const onFriendRequest = () => loadRequests();
+    appEvents.on("notification:friendRequest", onFriendRequest);
+    return () => appEvents.off("notification:friendRequest", onFriendRequest);
   }, [user]);
 
   async function loadRequests() {

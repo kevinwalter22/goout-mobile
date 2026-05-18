@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -52,6 +52,17 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ commentId: string; userId: string } | null>(null);
+
+  // Prevent multi-tap stacking of profile pushes. The sheet is a fullScreen
+  // Modal on top of the nav stack, so a naive router.push hides behind it and
+  // accumulates routes per tap. Close-then-push and guard re-entry.
+  const navigatingRef = useRef(false);
+  function handleViewProfile(userId: string) {
+    if (navigatingRef.current) return;
+    navigatingRef.current = true;
+    onClose();
+    router.push(`/user/${userId}` as any);
+  }
 
   useEffect(() => {
     if (visible) {
@@ -249,7 +260,7 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
           renderItem={({ item }) => (
             <View style={[styles.commentItem, { borderBottomColor: colors.borderLight }]}>
               <View style={{ flexDirection: "row", gap: 12 }}>
-                <Pressable onPress={() => router.push(`/user/${item.user_id}` as any)}>
+                <Pressable onPress={() => handleViewProfile(item.user_id)}>
                   <Avatar
                     avatarUrl={item.profile?.avatar_url || null}
                     size={32}
@@ -257,7 +268,7 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
                 </Pressable>
                 <View style={{ flex: 1 }}>
                   <View style={styles.commentHeader}>
-                    <Pressable onPress={() => router.push(`/user/${item.user_id}` as any)}>
+                    <Pressable onPress={() => handleViewProfile(item.user_id)}>
                       <Text style={[styles.username, { color: colors.text }]}>
                         {item.profile?.username || "Unknown"}
                       </Text>

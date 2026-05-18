@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   Modal,
   View,
@@ -23,6 +24,13 @@ type FriendsSheetProps = {
 export function FriendsSheet({ visible, onClose, onFriendTap }: FriendsSheetProps) {
   const { friends, loading, refresh } = useFriendsList();
   const { colors } = useTheme();
+
+  // Modal stays mounted across visibility toggles, so the hook's mount-time
+  // fetch goes stale if the user accepts a friend request while the sheet
+  // is closed. Refresh whenever the sheet opens.
+  useEffect(() => {
+    if (visible) refresh();
+  }, [visible]);
 
   return (
     <Modal

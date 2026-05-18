@@ -216,7 +216,16 @@ export default function UserProfile() {
                 onPress={() => {
                   if (status === "none") sendFriendRequest();
                   else if (status === "pending_sent") cancelFriendRequest();
-                  else if (status === "accepted") removeFriend();
+                  else if (status === "accepted") {
+                    Alert.alert(
+                      "Remove Friend?",
+                      `Remove ${profile.username} from your friends list?`,
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        { text: "Remove", style: "destructive", onPress: () => removeFriend() },
+                      ]
+                    );
+                  }
                 }}
                 disabled={friendshipLoading}
                 style={{

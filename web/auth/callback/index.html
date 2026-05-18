@@ -37,11 +37,44 @@
       font-size: 15px;
       margin-bottom: 24px;
     }
-    .btn { display: block; margin: 0 auto; max-width: 280px; }
+    .btn {
+      display: block;
+      margin: 0 auto;
+      max-width: 280px;
+      padding: 14px 20px;
+      background: #7B3FF2;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 16px;
+    }
+    .btn-prominent {
+      animation: pulse 1.5s ease-in-out infinite;
+      box-shadow: 0 0 0 0 rgba(123, 63, 242, 0.4);
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(123, 63, 242, 0.4); }
+      50% { box-shadow: 0 0 0 8px rgba(123, 63, 242, 0); }
+    }
     .hint {
-      margin-top: 16px;
+      margin-top: 20px;
       font-size: 13px;
       color: var(--text-secondary);
+      line-height: 1.5;
+    }
+    .fallback-hint {
+      display: none;
+      margin-top: 16px;
+      padding: 12px;
+      background: #FEF3C7;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #92400E;
+      line-height: 1.5;
+    }
+    .fallback-hint.show {
+      display: block;
     }
   </style>
 </head>
@@ -51,28 +84,62 @@
       <div class="logo">euda</div>
       <div class="checkmark">&#10003;</div>
       <h1>Email Verified</h1>
-      <p class="subtitle">Your account is ready. Open the Euda app to sign in.</p>
-      <a id="open-app" class="btn" href="#">Open Euda</a>
-      <p class="hint">If the app doesn't open, go back to Euda and sign in with your email and password.</p>
+      <p class="subtitle">Your account is ready. Tap below to return to the Euda app.</p>
+      <!-- Default href works even if scripts are blocked. JS below appends
+           the access tokens from the URL hash if present. If the app opens
+           without tokens, the in-app callback handler redirects to sign-in;
+           the user is already verified so signing in completes the flow. -->
+      <a id="open-app" class="btn" href="euda://auth/callback">Open Euda</a>
+      <div id="fallback-hint" class="fallback-hint">
+        Didn&rsquo;t open? Switch to the Euda app you already have installed and sign in with your email and password — you&rsquo;re already verified.
+      </div>
+      <p class="hint">
+        If you don&rsquo;t have the app yet,
+        <a href="https://apps.apple.com/app/euda/id6759115921" style="color:#7B3FF2;">download it from the App Store</a>.
+      </p>
     </div>
   </div>
   <script>
-    // Try to open the app via universal link first, then custom scheme
+    // Web → app handoff.
+    //
+    // We arrive here because Supabase 302-redirected to this page after
+    // verifying the user's email link. Tokens are in the URL hash or query.
+    // We want to forward them into the native app via the euda:// deep link.
+    //
+    // Failure modes we handle:
+    //   1) In-app webviews (Gmail, Outlook) block custom-scheme URLs silently.
+    //   2) Some browsers require a user gesture rather than auto-bounce.
+    //   3) The app may not be installed.
+    //
+    // Strategy: auto-bounce at 300ms, then keep the manual button visible
+    // and start pulsing it after 2.5s if the page is still in the foreground.
     (function () {
       var hash = window.location.hash;
       var search = window.location.search;
+      var appUrl = "euda://auth/callback" + search + hash;
 
-      // Build the deep link URL with any tokens from the redirect
-      var appUrl = 'euda://auth/callback' + search + hash;
-      var universalUrl = 'https://links.euda.live/auth/callback' + search + hash;
-
-      var btn = document.getElementById('open-app');
+      var btn = document.getElementById("open-app");
+      var fallbackHint = document.getElementById("fallback-hint");
       btn.href = appUrl;
 
-      // Auto-attempt to open the app after a short delay
+      // First attempt — auto-bounce
       setTimeout(function () {
         window.location.href = appUrl;
       }, 300);
+
+      // Second attempt — meta-refresh-style fallback (some browsers honor this)
+      setTimeout(function () {
+        window.location.href = appUrl;
+      }, 1200);
+
+      // If we're still visible after 2.5s, the bounce failed silently.
+      // Highlight the manual button and reveal the fallback hint.
+      setTimeout(function () {
+        if (document.visibilityState === "visible") {
+          btn.classList.add("btn-prominent");
+          fallbackHint.classList.add("show");
+        }
+      }, 2500);
     })();
   </script>
 </body>

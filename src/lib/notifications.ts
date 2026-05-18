@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import { router } from "expo-router";
 import { supabase } from "./supabase";
 import { captureError, captureWarning } from "./logger";
+import { appEvents } from "../utils/appEvents";
 
 // ── Lazy-load expo-notifications to avoid crashing in Expo Go ───
 // The native module `ExpoPushTokenManager` only exists in dev builds / production.
@@ -170,12 +171,45 @@ export function addNotificationResponseListener(
 }
 
 /**
- * Handle a user tapping on a notification — deep-link to the
- * relevant screen.
+ * Subscribe to foreground notification arrivals (banner shown while app is
+ * open). Returns an unsubscribe function, or null if notifications are
+ * unavailable.
+ */
+export function addNotificationReceivedListener(
+  callback: (notification: any) => void
+): (() => void) | null {
+  if (!Notifications) return null;
+  const sub = Notifications.addNotificationReceivedListener(callback);
+  return () => sub.remove();
+}
+
+/**
+ * Emit app-event signals for notification data so already-mounted hooks
+ * (e.g. useFriendRequests on the Profile tab) can invalidate their data.
+ * Shared by the tap-response and foreground-received handlers.
+ */
+function emitDataEventForNotification(data: any): void {
+  if (!data?.type) return;
+  switch (data.type) {
+    case "friend_request":
+      appEvents.emit("notification:friendRequest", {});
+      break;
+    case "friend_accepted":
+      appEvents.emit("notification:friendAccepted", { accepterId: data.reference_id });
+      break;
+  }
+}
+
+/**
+ * Handle a user tapping on a notification — deep-link to the relevant
+ * screen AND emit a data-refresh event so the destination screen's hooks
+ * pick up the new state even if they're already mounted.
  */
 export function handleNotificationResponse(response: any): void {
   const data = response?.notification?.request?.content?.data;
   if (!data?.type) return;
+
+  emitDataEventForNotification(data);
 
   switch (data.type) {
     case "friend_request":
@@ -200,4 +234,14 @@ export function handleNotificationResponse(response: any): void {
       router.push("/(tabs)/feed");
       break;
   }
+}
+
+/**
+ * Handle a foreground notification arrival — no navigation, but still emit
+ * data-refresh events so badges/indicators update immediately while the user
+ * stays on their current screen.
+ */
+export function handleNotificationReceivedForeground(notification: any): void {
+  const data = notification?.request?.content?.data;
+  emitDataEventForNotification(data);
 }

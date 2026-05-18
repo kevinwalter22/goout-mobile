@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
@@ -144,7 +145,14 @@ function UserSearchResultItem({ user, onViewProfile }: { user: User; onViewProfi
     } else if (status === "pending_sent") {
       cancelFriendRequest();
     } else if (status === "accepted") {
-      removeFriend();
+      Alert.alert(
+        "Remove Friend?",
+        `Remove ${user.username} from your friends list?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Remove", style: "destructive", onPress: () => removeFriend() },
+        ]
+      );
     }
   }
 
