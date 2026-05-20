@@ -660,7 +660,7 @@ export default function Explore() {
       scoreBreakdown: {
         timeMatch: 1, distance: 1, openNow: 1, friendsGoing: 0,
         tagAffinity: 0, weather: 0.5, contextIntent: 0.5, typeAffinity: 0.5,
-        quality: 1, communityFeedback: 0.5, freshness: 0.5, friendCreated: 0, total: 1,
+        quality: 1, communityFeedback: 0.5, freshness: 0.5, friendCreated: 0, chainPenalty: 1.0, total: 1,
       },
     }));
   }, [postableNow]);

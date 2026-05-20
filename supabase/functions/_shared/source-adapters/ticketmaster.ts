@@ -61,6 +61,12 @@ export interface NormalizedEvent {
   // Provenance + review (optional — used by web collector adapter)
   review_status?: string;
   provenance?: Record<string, any>;
+
+  // Chain venue detection (optional — populated by Google Places adapter
+  // via _shared/chain-detection.ts; see migration 130). Other adapters
+  // leave these undefined and the columns default at the DB layer.
+  is_chain?: boolean;
+  chain_brand?: string | null;
 }
 
 /**

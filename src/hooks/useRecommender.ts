@@ -258,6 +258,8 @@ export function useRecommender(
 
   // Current kind filter from explore (needed for context intent gating)
   const kindFilter = exploreFilters.filters.kindFilter;
+  // Whether the user is actively searching — disables chain-venue suppression
+  const searchActive = (exploreFilters.filters.searchQuery?.trim().length ?? 0) > 0;
 
   const scoringContext = useMemo<ScoringContext>(
     () => ({
@@ -277,8 +279,9 @@ export function useRecommender(
         : null,
       featureFlags,
       kindFilter,
+      searchActive,
     }),
-    [userLocation, friendsGoingMap, userTagAffinity, userTypeAffinity, communityFeedbackMap, friendCreatedItemIds, weather, featureFlags, kindFilter]
+    [userLocation, friendsGoingMap, userTagAffinity, userTypeAffinity, communityFeedbackMap, friendCreatedItemIds, weather, featureFlags, kindFilter, searchActive]
   );
 
   // ========================================
@@ -333,6 +336,7 @@ export function useRecommender(
           communityFeedback: 0,
           freshness: 0,
           friendCreated: 0,
+          chainPenalty: 1.0,
           total: 0,
         },
       }));
