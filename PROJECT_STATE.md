@@ -1,6 +1,6 @@
 # Euda — Project State
 
-**Last updated:** 05/18/2026 (Phase 5 design + production triage session)
+**Last updated:** 05/20/2026 (Phase 5.1 LLM extractor shipped; 5.2 collector integration in flight)
 **Owner:** Kevin Walter
 **Operating layer:** Claude (via this document) coordinating Claude Code
 
@@ -95,8 +95,10 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 - ✅ URL verification done; 2 social-only venues deleted, 9 corrections applied
 - ✅ LLM extraction design doc approved (`docs/llm_extraction_design.md`)
 - ✅ Production ingestion restored after discovering 3-month dormancy
-- ⏳ Phase 5.1 (build LLM extractor) — deferred to next session
-- ⏳ Atomic enable of Warwick partitions/targets — deferred until LLM extractor ships
+- ✅ **Phase 5.1: LLM extractor built + 10-fixture test passing** — see Section 5 for metrics
+- ⏳ Phase 5.2 (wire LLM fallback into ingest-web-collector) — in flight this session
+- ⏳ Week 0 single-venue validation (Albert Wisner) — after 5.2 ships
+- ⏳ Atomic enable of remaining Warwick partitions/targets — deferred until Week 0/1/2 validation
 - ⏳ Onboarding brothers and friends in Warwick
 
 **Active blockers:** None. Production ingestion is restored, pg_cron will auto-fire correctly on next */30 tick.
@@ -130,6 +132,13 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 | [05/18/2026] | Migration number reservation: Phase 5 uses 129–132, impression logging uses 133+ | Two parallel workstreams need explicit numbering to avoid merge conflicts | Kevin |
 | [05/18/2026] | Redeploy all 17 service-role edge functions with `--no-verify-jwt` | Supabase platform migrated auto-injected SUPABASE_SERVICE_ROLE_KEY from legacy JWT to sb_secret_*. Gateway rejects sb_secret (not JWT format). Disabling gateway verification lets the function-level requireServiceRole still enforce auth. Restored 3 months of dormant ingestion | Claude (approved by Kevin) |
 | [05/18/2026] | Add legacy-JWT fallback to requireServiceRole via custom `LEGACY_SERVICE_ROLE_JWT` env | Dashboard SQL editor lacks permission to update DB-level `app.service_role_key` config that pg_cron jobs read. Adding a code-side fallback so cron's existing legacy-JWT bearer works was simpler than a vault-based rewrite | Claude (approved by Kevin) |
+| [05/19/2026] | LLM extractor uses hand-rolled validators, not Zod | No other module in `_shared/` imports Zod; keeping the import surface minimal and consistent with the rest of the edge-function code | Claude |
+| [05/19/2026] | LLM extractor preprocesses HTML by stripping `<script>`, `<style>`, `<nav>`, `<header>`, `<footer>`, `<aside>` and truncating to 40,000 chars (~16K tokens) | Tested ratio: HTML is 2.41 chars/token (vs the design doc's 4-chars/token English-prose assumption). 40K-char cap balances coverage vs cost; per-crawl realistic cost lands at $0.027 (vs design doc's $0.005 estimate) | Claude |
+| [05/19/2026] | Strict-substring evidence check is the primary anti-hallucination control; critique pass is belt-and-suspenders | Per design-doc approval. Critique-pass failures are non-fatal (fall back to the evidence-checked set) — evidence check is the load-bearing guarantee | Kevin |
+| [05/20/2026] | Evidence check applies bidirectional canonicalization (HTML entities + typographic punctuation → ASCII) on BOTH source and evidence sides before substring comparison | Phase 5.1 test surfaced that modern CMSes (WordPress, Squarespace, Wix) emit typographic quotes/dashes in published content, and the model normalizes them to ASCII when quoting. Without bidirectional canonicalization, the strict-substring check silently dropped events from those venues. The transformation is deterministic 1:1, preserves the verbatim-quote guarantee | Kevin (approved post-C-prime) |
+| [05/20/2026] | Albert Wisner GT trimmed 20 → 12 (in-window events only); Drowned Lands GT trimmed 18 → 3; Cornerstone GT trimmed 5 → 0 | First two: 40K-char truncation cliff makes out-of-window events untestable for extraction skill (only truncation skill). Cornerstone: the 2026-season.html page has zero datable events; the 5 nav-menu titles aren't presented as events. expected_events:[] tests the model's discipline at NOT hallucinating from nav text | Kevin (approved at C-prime) |
+| [05/20/2026] | Phase 5.1 SHIP — recall 84.4%, precision 96.8%, 0 true hallucinations, $0.027/crawl | Both design-doc pass criteria met (recall ≥80%, precision ≥90%). Cost slightly above $0.025 stop-gate but noted-and-monitored; existing budget controls (per-venue ceiling, monthly cap, backoff) handle the failure modes the gate was protecting against | Kevin |
+| [05/20/2026] | Migration 129 reserved for Phase 5.2 (use_llm_fallback column + 5-venue flip + anthropic_haiku budget seed) | Per the 129–132 reservation from 05/18; 5.2 only needs one migration | Claude (approved by Kevin) |
 
 ---
 
@@ -168,18 +177,40 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 ## 5. Bug & Feature Backlog
 
 ### In flight
-- (Phase 5.1) Build `_shared/llm-extractor.ts` + 10 fixture HTMLs + unit test + critique pass — next session
-- (Phase 5.2) Wire LLM fallback into ingest-web-collector for collector_targets
-- (Phase 5.3) Build Google Places venue-discovery bridge (new function + venue_crawl_state table)
-- (Phase 5.4 Week 0) Manual single-venue end-to-end validation
-- (Atomic flip) Enable all Warwick partitions and targets — DEFERRED until LLM extractor lands
+- (Phase 5.2) Wire LLM fallback into ingest-web-collector for collector_targets — in flight this session (05/20/2026)
+- (Phase 5.3) Build Google Places venue-discovery bridge (new function + venue_crawl_state table) — separate session
+- (Phase 5.4 Week 0) Manual single-venue end-to-end validation on Albert Wisner — after 5.2 ships
+- (Atomic flip) Enable 5 hand-picked Warwick targets (Bethel Woods, Storm King, Albert Wisner, Drowned Lands, Sugar Loaf PAC) is_enabled=TRUE — after 5.2 ships
+- (Atomic flip) Enable remaining Warwick partitions and targets — DEFERRED until Week 1/2 validation
 - (Civic classifier) Folded into Phase 5.5 — handled by LLM extractor's structured output, no separate classifier prompt
 - (V1.1 release) Bundle bug fixes + Warwick LLM (10 venues) + impression logging for TestFlight
+
+### Done this session (05/19-20/2026)
+- **Phase 5.1 — LLM extractor** [`supabase/functions/_shared/llm-extractor.ts`]
+  - Single exported `extractEvents(html, hints, opts)` → events + usage + diagnostics
+  - Pipeline: HTML preprocess (strip scripts/styles/chrome, truncate to 40K chars) → Haiku 4.5 extraction (max_tokens 16K, temp 0.1) → hand-rolled schema validation (strict ISO 8601 datetime regex) → strict-substring evidence check with bidirectional canonicalization → critique pass (Haiku, non-fatal)
+  - 10-fixture unit test ([`scripts/llm_extractor_test.ts`]): **84.4% recall, 96.8% precision, 0 true hallucinations, $0.027/crawl**
+  - Pass criteria: recall ≥ 80% ✓, precision ≥ 90% ✓, zero hallucinations ✓
+  - Total fixture-set events: 45 (across 10 venues spanning Squarespace, Wix, MEC, WordPress, static .html, JSON-LD-bearing, dateless-button-only, and wrong-page-redirect scenarios)
+
+### Known limitations (Phase 5.1, accepted)
+- **Strict-evidence check rejects events with model-fabricated day-of-week context.** Example: source has "Next Jam: May 29"; model emits `date_evidence: "Friday, May 29"` (inferring the day). The check rejects because "Friday, May 29" isn't in source. Cost: ~3 events dropped per Bethel Woods crawl. Next crawl typically produces different evidence forms that pass. Revisit prompt tightening in Phase 5.2+ only if production data shows this is widespread.
+- **Pennings-style dateless-button events.** Pages that link to TicketSpice / Eventbrite buttons with titles but zero inline date context: model correctly omits them. Future work if we add null-`starts_at` handling downstream.
+- **Typographic obfuscation beyond the canonicalization allow-list.** Current allow-list covers `&amp; &#039; &quot; &#8211; &#8212; &#8216; &#8217; &#8220; &#8221; &#8230; &nbsp;` plus the corresponding Unicode forms. Add entries as production data reveals new patterns.
+- **Extreme density requiring multi-page fetch.** Sites with > 40K chars of preprocessed event content (Albert Wisner MEC monthly grid, Drowned Lands taproom page, Sugar Loaf PAC Wix events widget) lose recall at the truncation cliff. Phase 5.3's multi-page strategy (Section B path 2 of design doc) handles this.
+
+### Phase 5.1 cost watchpoint
+Per-crawl cost is **$0.027** (above design doc's $0.005 estimate). Monthly projection at 500 venues × weekly = $54/mo, just over the $50 hard cap. With backoff schedule (design doc Section D — bi-weekly after 2 empties, monthly after 6, disable after 12), realistic operation should land at $30-40/mo. Monitor `api_usage_counters('anthropic_haiku')` once Phase 5.4 enrollment begins. Acceptable in isolation; will need scale-time efficiency work if catalog grows to 5000+ venues (potential levers: smaller critique-pass HTML excerpt, prompt-cache the system prompt, or cadence-based budget allocation).
 
 ### Open bugs (NEW this session)
 - **Path-allow bug in `_shared/web-collector.ts`** — discovery_urls without trailing slash failed prefix check against allowed_paths with trailing slash. FIXED & deployed to ingest-web-collector. Was a latent bug across the whole catalog since migration 045 (every Potsdam target also affected).
 - **3-month ingestion dormancy** — production ingestion silently stopped Feb 3-25 when Supabase migrated auto-injected SUPABASE_SERVICE_ROLE_KEY from legacy JWT to sb_secret_*. FIXED via 15-function redeploy with --no-verify-jwt. Manual ALTER DATABASE pending from Kevin to update pg_cron auth.
 - **iCal feed URL for Town of Warwick is dynamic / JS-rendered** — switching to 'ics' parsing strategy in migration 128 was premature. The discovery URL still points at the HTML calendar, not the actual .ics endpoint. Low priority; LLM extractor will handle the HTML version regardless.
+- **3 additional dead Warwick collector targets discovered during Phase 5.1 fixture research** — defer cleanup to a follow-up migration (use whatever number is free after 5.1/5.2/5.3 migrations land):
+  - `penningsfarmcidery.com` is parked (GoDaddy lander w/ JS redirect to `/lander`) — DELETE row.
+  - `warwickhistoricalsociety.org` resolves to unrelated `heywarwick.com` mobile-app marketing site (domain takeover or shared-hosting redirect) — VERIFY current state, likely DELETE row.
+  - `longlot.com` is a HugeDomains parked-for-sale page; Long Lot Brewery may be Instagram-only like Tuscan/Ochs were (deleted in 128) — VERIFY, likely DELETE row.
+  - Phase 5.1 substituted Pennings Farm Market, Sugar Loaf PAC, and Mountain Creek Resort respectively in the fixture set. No migration in this session — discipline matters more than convenience.
 
 ### Feature backlog (V2 work)
 - Impression logging (the V2 evaluation tent-pole — has NOT been built yet, blocks all downstream V2 measurement)
@@ -209,6 +240,12 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 - **Migration 126** (Warwick fetch partitions): applied; 3 partitions staged is_enabled=FALSE
 - **Migration 127** (Warwick collector targets): applied; 30 targets staged is_enabled=FALSE (32 originally, 2 deleted in 128)
 - **Migration 128** (URL fixes + 2 deletions): applied
+
+### Phase 5.1 — new files (05/20/2026, awaiting deploy via 5.2 integration)
+- `supabase/functions/_shared/llm-extractor.ts` — extractEvents() + preprocessHtmlForPrompt() + evidenceAppearsInSource() + Haiku 4.5 prompts. Standalone module; no DB or network side effects beyond the LLM call (optional cost logging via opts.supabase).
+- `supabase/functions/_shared/__fixtures__/` — 10 .html + 10 .expected.json ground-truth pairs for unit testing. Total 45 ground-truth events across Bethel Woods, Storm King, Albert Wisner Library, Drowned Lands, Pennings Farm Market, Sugar Loaf Guild, Warwick Valley Winery, Sugar Loaf PAC, Mountain Creek Resort, Cornerstone Theatre Arts.
+- `scripts/llm_extractor_test.ts` — recall/precision/cost test harness with retry-on-429 + fuzzy-match diagnostic for misses. Outputs report to `scripts/llm_extractor_test_report.json`.
+- `scripts/llm_extractor_preflight.ts` — char-to-token ratio measurement via Anthropic count_tokens API + per-fixture truncation analysis.
 
 ### In flight
 - *(nothing — Phase 5.1 ready to start in next session)*
@@ -263,6 +300,16 @@ When multiple Claude Code sessions run in parallel, they need to reserve migrati
 - Daily budget cap via `check_llm_daily_budget` RPC
 - Per-field confidence scores via `apply_enrichment` RPC
 - Known issue: tag homogeneity (family_friendly on 64% of items, indoors on 55%)
+
+### LLM event extractor (Phase 5.1, 05/20/2026)
+- **File:** `supabase/functions/_shared/llm-extractor.ts`. Single exported `extractEvents(html, hints, opts)`.
+- **Pipeline:** HTML preprocess (strip scripts/styles/svg/noscript/nav/header/footer/aside; prefer `<main>` then `<body>`; whitespace-collapse; truncate to 40,000 chars) → Claude Haiku 4.5 extraction (max_tokens 16K, temp 0.1, JSON-only) → hand-rolled schema validation (strict ISO 8601 datetime regex; description ≤500 chars; title length 3-200) → strict-substring evidence check with bidirectional canonicalization → critique pass (Haiku again, max_tokens 1K, non-fatal on failure).
+- **Anti-hallucination:** Primary control is the verbatim-substring evidence check (`evidenceAppearsInSource`). Both source and evidence are canonicalized to ASCII (entities + typographic punctuation → ASCII) BEFORE substring comparison. The canonicalization is deterministic 1:1 — it preserves the strict-quote guarantee, just expands "substring" to cover equivalent character encodings. Secondary control is the critique pass: Haiku reviews extracted events against source, flags non-events / paraphrases / duplicates; flagged indices are dropped. Critique-pass failure (parse error, API hiccup) is non-fatal — falls back to the evidence-checked set.
+- **Hints:** `{ venue_name?, town?, timezone?, default_category? }` — pass-through context from collector_targets.site_config or Google Places venue context. Model uses these for disambiguation; not echoed in output.
+- **Cost tracking:** Optional `opts.supabase` → calls `increment_api_usage('anthropic_haiku', cost_cents)` after each successful run. Caller is responsible for the pre-call budget guard (`get_api_budget('anthropic_haiku')`). Pricing constants in module: Haiku 4.5 at $0.80/MTok input, $4.00/MTok output. costCents() rounds up (over-attribute rather than under-attribute).
+- **Schema (Zod-doc-equivalent, hand-rolled):** title (3-200), starts_at (strict ISO 8601 nullable), ends_at (same), recurrence_text, description (≤500), price_text, source_url_path, title_evidence (≥3 verbatim), date_evidence (verbatim or null).
+- **Known limitations** (see Section 5).
+- **Test harness:** `scripts/llm_extractor_test.ts` runs all 10 fixtures with retry-on-429 + 1.5s inter-fixture pacing. Recall computed against all GT; precision computed only on `expected_complete=true` fixtures (truncated fixtures excluded). Two-phase matcher: primary match (claims an unclaimed GT slot) + secondary recurring match (extra instances of an already-matched recurring GT entry count toward precision, not recall).
 
 ### Push notifications
 - Expo Push Notification Service
