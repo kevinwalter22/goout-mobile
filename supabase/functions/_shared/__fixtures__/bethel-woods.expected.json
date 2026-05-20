@@ -1,0 +1,49 @@
+{
+  "venue_name": "Bethel Woods Center for the Arts",
+  "source_url": "https://www.bethelwoodscenter.org/events",
+  "notes": "Events are rendered as server-side HTML inside <div class=\"eventItem\"> cards within <div class=\"eventList\">. Each card duplicates title/date in a thumb block and an info block. Titles live in <h3 class=\"title ...\"><a ...>TITLE</a></h3>. Dates live in <div class=\"date\"> — either a free-text range (e.g. 'April 1 - December 31', 'May 30 & 31') or a structured <span class=\"m-date__singleDate\"> with weekday/month/day spans. JSON-LD on the page is only an Organization block (no Event objects). A 'More Events' button exists but is disabled in this snapshot, so only the 6 visible events are extracted. Friday May 29 / Saturday May 30 line up with year 2026, and the museum run is dated 2026, so all starts_at are inferred as 2026 in America/New_York. Dates lack times on this listing page, so starts_at uses 00:00 local (-04:00 EDT in late May, -05:00 EST otherwise). The Museum entry is a date range and Rock Band Jam is a monthly recurring program — flagged via recurrence_text.",
+  "expected_events": [
+    {
+      "title": "The Museum at Bethel Woods",
+      "starts_at": "2026-04-01T00:00:00-04:00",
+      "recurrence_text": "April 1 - December 31",
+      "title_evidence": "<a href=\"https://www.bethelwoodscenter.org/events/detail/the-museum-at-bethel-woods\" title=\"More Info\">The Museum at Bethel Woods</a>",
+      "date_evidence": "April 1 - December 31"
+    },
+    {
+      "title": "Pre-Event Dinner for Ann Wilson: In My Voice",
+      "starts_at": "2026-05-29T00:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<a href=\"https://www.bethelwoodscenter.org/events/detail/ann-wilson-dinner\" title=\"More Info\">Pre-Event Dinner for <i>Ann Wilson: In My Voice</i></a>",
+      "date_evidence": "<span class=\"m-date__singleDate\"><span class=\"m-date__weekday\">Friday, </span><span class=\"m-date__month\">May </span><span class=\"m-date__day\">29</span></span>"
+    },
+    {
+      "title": "Rock Band Jam",
+      "starts_at": "2026-05-29T00:00:00-04:00",
+      "recurrence_text": "Monthly Music Drop-in for Adults",
+      "title_evidence": "<a href=\"https://www.bethelwoodscenter.org/events/detail/rock-band-jam\" title=\"More Info\">Rock Band Jam</a>",
+      "date_evidence": "Next Jam: May 29"
+    },
+    {
+      "title": "Ann Wilson: In My Voice",
+      "starts_at": "2026-05-29T00:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<a href=\"https://www.bethelwoodscenter.org/events/detail/ann-wilson\" title=\"More Info\">Ann Wilson: In My Voice</a>",
+      "date_evidence": "<span class=\"m-date__singleDate\"><span class=\"m-date__weekday\">Friday, </span><span class=\"m-date__month\">May </span><span class=\"m-date__day\">29</span></span>"
+    },
+    {
+      "title": "Music Production Workshop",
+      "starts_at": "2026-05-30T00:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<a href=\"https://www.bethelwoodscenter.org/events/detail/music-production\" title=\"More Info\">Music Production Workshop</a>",
+      "date_evidence": "May 30 & 31"
+    },
+    {
+      "title": "HARDY: THE COUNTRY! COUNTRY! TOUR!",
+      "starts_at": "2026-05-30T00:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<a href=\"https://www.bethelwoodscenter.org/events/detail/hardy\" title=\"More Info\">HARDY: THE COUNTRY! COUNTRY! TOUR!</a>",
+      "date_evidence": "<span class=\"m-date__singleDate\"><span class=\"m-date__weekday\">Saturday, </span><span class=\"m-date__month\">May </span><span class=\"m-date__day\">30</span></span>"
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "venue_name": "Albert Wisner Public Library",
+  "source_url": "https://www.albertwisnerlibrary.org/events",
+  "expected_complete": false,
+  "notes": "TRUNCATED FIXTURE — expected_complete=false. Original ground-truth was 20 events curated from the full ~480KB-preprocessed MEC monthly grid. Preflight (Phase 5.1) revealed that only the FIRST 12 of those events fall within the extractor's 40K-char prompt window — the remaining 8 are outside the truncation cliff. We trimmed the GT to the 12 in-window events so this fixture measures EXTRACTION SKILL (does the model find what's visible?) rather than TRUNCATION (which we already know costs recall). The 8 removed events are documented in scripts/llm_extractor_preflight.ts output and the Phase 5.1 session notes — they include 'Mahjong @ the Library', 'Grow Your Own Medicinal Herb Garden', 'Kurt Gallagher Kids\\' Concert', 'Music on McFarland presents Fire & Thyme', 'NAMI: Ending the Silence', 'Friends of the Library Summer Book Sale', 'OrangeREADS Author Talk with Alexis Coe', and 'Author Talk with Yardena Schwartz'. RECALL is computed against these 12 in-window events. PRECISION is NOT computed for this fixture (still expected_complete=false): the extractor may also find real in-window events outside our curated 12, and we can't distinguish those from hallucinations without expanding GT. Per-fixture precision is reported as informational only and excluded from the aggregate. Structural notes: em-* classes (Modern Events Calendar plugin); monthly grid (em-cal-event with data-event-url/data-event-id) plus per-event modal popups (div.em-modal-title > a.href). Each modal's body includes 'em-item-meta-line em-event-date' (e.g. 'April 27, 2026') and 'em-event-time' (e.g. '11:00 am &#8211; 11:45 am'). Many events recur. Title evidence from modal title anchor; date evidence from em-event-date line in the same modal block. Times are America/New_York → EDT (UTC-04:00) for late April through early June 2026.",
+  "expected_events": [
+    {
+      "title": "LEGO Sundays",
+      "starts_at": "2026-04-26T13:00:00-04:00",
+      "recurrence_text": "Sundays (e.g., Apr 12, Apr 19, Apr 26, May 3, May 10)",
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/lego-sundays-6-2026-04-12-2026-04-19-2026-04-26/\">LEGO Sundays</a>",
+      "date_evidence": "April 26, 2026"
+    },
+    {
+      "title": "Kombucha Paper Making Workshop",
+      "starts_at": "2026-04-26T13:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/possible-earth-day-event-4/\">Kombucha Paper Making Workshop</a>",
+      "date_evidence": "April 26, 2026"
+    },
+    {
+      "title": "Preschool Storytime",
+      "starts_at": "2026-04-27T11:00:00-04:00",
+      "recurrence_text": "Mondays (e.g., Apr 13, Apr 20, Apr 27, May 4, May 11)",
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/preschool-storytime-6-2026-04-13-2026-04-20-2026-04-27/\">Preschool Storytime</a>",
+      "date_evidence": "April 27, 2026"
+    },
+    {
+      "title": "Monday Afternoon @ the Movies: The Two Popes (2019)",
+      "starts_at": "2026-04-27T13:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/monday-afternoon-the-movies-2026-04-27/\">Monday Afternoon @ the Movies: The Two Popes (2019)</a>",
+      "date_evidence": "April 27, 2026"
+    },
+    {
+      "title": "Drop-in Family Chess",
+      "starts_at": "2026-04-27T16:00:00-04:00",
+      "recurrence_text": "Mondays (e.g., Apr 13, Apr 20, Apr 27, May 4, May 11)",
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/drop-in-family-chess-5-2026-04-13-2026-04-20-2026-04-27/\">Drop-in Family Chess</a>",
+      "date_evidence": "April 27, 2026"
+    },
+    {
+      "title": "Toddler Time",
+      "starts_at": "2026-04-30T10:00:00-04:00",
+      "recurrence_text": "Thursdays and Fridays (e.g., Apr 30, May 1, May 7, May 8, May 14, May 15)",
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/toddler-time-11-2026-04-30/\">Toddler Time</a>",
+      "date_evidence": "April 30, 2026"
+    },
+    {
+      "title": "Read To The Dogs &#8211; Junior and Posey",
+      "starts_at": "2026-04-29T16:00:00-04:00",
+      "recurrence_text": "Wednesdays (e.g., Apr 15, Apr 22, Apr 29, May 6, May 13)",
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/read-to-the-dogs-junior-and-posey-5-2026-04-15-2026-04-22-2026-04-29/\">Read To The Dogs &#8211; Junior and Posey</a>",
+      "date_evidence": "April 29, 2026"
+    },
+    {
+      "title": "Dungeons &amp; Dragons",
+      "starts_at": "2026-04-30T17:00:00-04:00",
+      "recurrence_text": "Thursdays (e.g., Apr 2, Apr 9, Apr 16, Apr 23, Apr 30, May 7, May 14, May 21, May 28, Jun 4)",
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/dungeons-dragons-2-2025-12-25-2026-01-01-2026-01-08-2026-01-15-2026-01-22-2026-01-29-2026-02-05-2026-02-12-2026-02-19-2026-02-26-2026-03-05-2026-03-12-2026-03-19-2026-03-26-2026-04-02-20-23-2026-04-30/\">Dungeons &amp; Dragons</a>",
+      "date_evidence": "April 30, 2026"
+    },
+    {
+      "title": "Tuesday Evening Book Group reads &quot;God of the Woods&quot; by Liz Moore",
+      "starts_at": "2026-05-05T18:30:00-04:00",
+      "recurrence_text": "First Tuesday of the month (e.g., Feb 3, Mar 3, Apr 7, May 5)",
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/tuesday-evening-book-group-2-2026-02-03-2026-03-03-2026-04-07-2026-05-05/\">Tuesday Evening Book Group reads &quot;God of the Woods&quot; by Liz Moore</a>",
+      "date_evidence": "May 5, 2026"
+    },
+    {
+      "title": "America250 &#8211; Aaron Burr and the Hamilton Musical",
+      "starts_at": "2026-05-07T18:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/possible-program-2026-05-07/\">America250 &#8211; Aaron Burr and the Hamilton Musical</a>",
+      "date_evidence": "May 7, 2026"
+    },
+    {
+      "title": "Creativity Club &#8211; Candles For Mom",
+      "starts_at": null,
+      "recurrence_text": null,
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/creativity-club-candles-for-mom/\">Creativity Club &#8211; Candles For Mom</a>",
+      "date_evidence": null
+    },
+    {
+      "title": "Music on McFarland: Classical Guitarist Peter Fletcher",
+      "starts_at": null,
+      "recurrence_text": null,
+      "title_evidence": "<a href=\"https://albertwisnerlibrary.org/events/music-on-mcfarland-classical-guitarist-peter-fletcher/\">Music on McFarland: Classical Guitarist Peter Fletcher</a>",
+      "date_evidence": null
+    }
+  ]
+}

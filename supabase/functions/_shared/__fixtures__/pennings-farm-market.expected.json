@@ -1,0 +1,49 @@
+{
+  "venue_name": "Pennings Farm Market",
+  "source_url": "https://www.penningsfarmmarket.com/",
+  "notes": "Off-season homepage (modified 2026-05-11). The 'HAPPENINGS' sidebar lists ~5 ticketed events as buttons linking to penningsfarm.ticketspice.com, but the homepage itself surfaces only the event titles and slugs — no explicit dates appear in the HTML (dates live on the linked TicketSpice pages). One generic recurring program is mentioned ('live music every weekend'). All other content is marketing copy, hours, or category descriptions and was excluded. Note: substituted for the original Pennings Farm Cidery target since the cidery domain is now parked.",
+  "expected_events": [
+    {
+      "title": "Honor Flight Festival",
+      "starts_at": null,
+      "recurrence_text": null,
+      "title_evidence": "<span class=\"w-btn-label\">Honor Flight Festival Tickets</span>",
+      "date_evidence": null
+    },
+    {
+      "title": "Goat Yoga",
+      "starts_at": null,
+      "recurrence_text": null,
+      "title_evidence": "<span class=\"w-btn-label\">Goat Yoga Tickets</span>",
+      "date_evidence": null
+    },
+    {
+      "title": "Barre3 Outdoor Workout at the Cidery",
+      "starts_at": null,
+      "recurrence_text": null,
+      "title_evidence": "<span class=\"w-btn-label\">Barre3 Outdoor Workout Tickets&#8230;at the Cidery</span>",
+      "date_evidence": null
+    },
+    {
+      "title": "Gingerbread Houses 2025",
+      "starts_at": null,
+      "recurrence_text": null,
+      "title_evidence": "href=\"https://penningsfarm.ticketspice.com/gingerbread-houses-2025\"",
+      "date_evidence": null
+    },
+    {
+      "title": "Uncle Shoehorn NYE Masquerade Party",
+      "starts_at": null,
+      "recurrence_text": null,
+      "title_evidence": "href=\"https://penningsfarm.ticketspice.com/uncle-shoehorn-nye-masquerade-party\"",
+      "date_evidence": null
+    },
+    {
+      "title": "Live Music at Pennings Beer Garden and Cidery",
+      "starts_at": null,
+      "recurrence_text": "every weekend",
+      "title_evidence": "<div class=\"w-image-title\">Music at Pennings Farm</div>",
+      "date_evidence": "Listen to live music every weekend on stage at Pennings Beer Garden and Pennings Cidery."
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "venue_name": "Sugar Loaf NY Arts & Crafts Village",
+  "source_url": "https://www.sugarloafnewyork.com/events/",
+  "notes": "Upcoming Events page lists exactly two annual village-wide festivals. Image upload paths (/uploads/2026/02/ and /uploads/2026/03/) confirm the 2026 edition. Spring Festival has a specific time (10am-5pm); Fall Festival only gives the dates (Oct 10 & 11) with no time, so starts_at is set to local midnight of the first day. Both span two days, captured via recurrence_text. No gallery openings, market days, or other dated programming appears on this page — just the two flagship festivals plus marketing copy.",
+  "expected_events": [
+    {
+      "title": "Sugar Loaf Spring Festival, Memorial Day Weekend",
+      "starts_at": "2026-05-23T10:00:00-04:00",
+      "recurrence_text": "May 23-24, 10am to 5pm",
+      "title_evidence": "Sugar Loaf Spring Festival, Memorial Day Weekend",
+      "date_evidence": "May 23-24, 10am to 5pm"
+    },
+    {
+      "title": "Sugar Loaf Fall Festival",
+      "starts_at": "2026-10-10T00:00:00-04:00",
+      "recurrence_text": "Oct 10 & 11",
+      "title_evidence": "Sugar Loaf Fall Festival",
+      "date_evidence": "Oct 10 &amp; 11"
+    }
+  ]
+}

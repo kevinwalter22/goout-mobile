@@ -1,0 +1,14 @@
+{
+  "venue_name": "Mountain Creek Resort",
+  "source_url": "https://www.mountaincreek.com/events",
+  "notes": "Fixture is actually the Mountain Creek homepage (page-id-2), not the /events or /event-calendar page. The page links to an Event Calendar at /activities-events/event-calendar/ but does not enumerate event listings inline. The only dated, event-like item promoted on this page is the Wedding Expo on May 30th (post URL slug /2026/03/11/wedding-expo-2026/ implies the 2026 edition; today is 2026-05-19, so the next May 30th resolves to 2026-05-30 in America/New_York). Everything else on the page is evergreen marketing (Summit Celebration Series promo, Bike Park Triple Play Cards, Gift Cards), navigation, operating-hours taglines (\"Now Open Thu-Sun\"), lodging/lift/rental/lesson CTA tabs, a YouTube embed, and an Instagram feed widget -- all of which are correctly rejected per the rules.",
+  "expected_events": [
+    {
+      "title": "Wedding Expo",
+      "starts_at": "2026-05-30T00:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<h4>Wedding Expo</h4>",
+      "date_evidence": "Mark your calendars for our next Wedding Expo on May 30th"
+    }
+  ]
+}

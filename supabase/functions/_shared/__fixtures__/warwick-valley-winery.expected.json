@@ -1,0 +1,42 @@
+{
+  "venue_name": "Warwick Valley Winery & Distillery",
+  "source_url": "https://www.wvwinery.com/events",
+  "notes": "ARCHIVAL FIXTURE — all 5 events are from September-October 2020. These ARE listed in expected_events deliberately. The extractor's job is extraction, not temporal filtering: surfacing past events is correct behavior. Downstream pipeline (enrichment + explore_items ranker) handles hiding events whose starts_at is in the past. Test recall/precision should treat these as valid expectations. Page is page 1 of paginated /events/ archive. Each event is a WordPress <article class=\"... event type-event ...\"> with an <h2 class=\"entry-title\"> for the title and a <span class=\"published\"> for the date, followed by a free-text snippet containing the start/end time in DD/MM/YYYY format (e.g. '26/09/2020 2:00 pm - 5:00 pm'). All 5 are single-occurrence live-music sets in the tasting room (2:00 pm - 5:00 pm America/New_York). Smart-quote apostrophes (U+2019) appear as literal '’' chars, not as &#8217; entities.",
+  "expected_events": [
+    {
+      "title": "Tony Vee’s Shoehorn Trio",
+      "starts_at": "2020-09-26T14:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "Tony Vee’s Shoehorn Trio</a></h2>",
+      "date_evidence": "<span class=\"published\">Sep 26, 2020</span></p>26/09/2020 2:00 pm - 5:00 pm"
+    },
+    {
+      "title": "Dylan Doyle",
+      "starts_at": "2020-09-27T14:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<a href=\"https://wvwinery.com/events/dylan-doyle/\">Dylan Doyle</a></h2>",
+      "date_evidence": "<span class=\"published\">Sep 27, 2020</span></p>27/09/2020 2:00 pm - 5:00 pm"
+    },
+    {
+      "title": "E’lissa Jones Band",
+      "starts_at": "2020-10-04T14:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "E’lissa Jones Band</a></h2>",
+      "date_evidence": "<span class=\"published\">Oct 4, 2020</span></p>04/10/2020 2:00 pm - 5:00 pm"
+    },
+    {
+      "title": "Tim O’Donahue & Craig Sheppard",
+      "starts_at": "2020-10-04T14:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "Tim O’Donahue &#038; Craig Sheppard</a></h2>",
+      "date_evidence": "<span class=\"published\">Oct 4, 2020</span></p>04/10/2020 2:00 pm - 5:00 pm"
+    },
+    {
+      "title": "Diablo Station",
+      "starts_at": "2020-10-10T14:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<a href=\"https://wvwinery.com/events/diablo-station/\">Diablo Station</a></h2>",
+      "date_evidence": "<span class=\"published\">Oct 10, 2020</span></p>10/10/2020 2:00 pm - 5:00 pm"
+    }
+  ]
+}
