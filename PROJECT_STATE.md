@@ -100,10 +100,11 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 - ✅ **Migration 129 applied + edge function redeployed** — verified via service-role probe
 - ✅ **Atomic flip executed**: 5 Week-0 targets now is_enabled=TRUE + use_llm_fallback=TRUE
 - ✅ **Week 0 single-venue validation (Albert Wisner) PASSED** — end-to-end pipeline works. See Section 5 for numbers.
-- ✅ **Phase 5.3 prep: chain venue policy infrastructure built** (migration 130, `_shared/chain-detection.ts`, adapter+normalizer changes, backfill script, unit test, ranker penalty). Awaiting backfill run + Pause B sanity check.
-- ⏳ Week 1: monitor the other 4 venues (Bethel Woods, Storm King, Drowned Lands, Sugar Loaf PAC) as they pick up via next pg_cron tick (every */30 min)
-- ⏳ Atomic enable of remaining Warwick targets — deferred until Week 0/1/2 metrics confirm health
-- ⏳ Phase 5.3 proper (venue_crawl_state + discover-venues-to-crawl + ingest-venue-website) — starts after Pause C confirms chain infra ships cleanly
+- ✅ **Phase 5.3 prep: chain venue policy infrastructure shipped** (migration 130 + `_shared/chain-detection.ts` + adapter/normalizer/backfill/test/ranker). Backfill flagged 53/1168 rows; 0 false positives in inspected sample; well under the 150-row sanity threshold.
+- ✅ **Phase 5.3 proper shipped: venue-discovery bridge** (migration 131 + `discover-venues-to-crawl` + `ingest-venue-website`). 10 venues enqueued and smoke-tested end-to-end; pipeline_health log writing; budget integration confirmed.
+- ⏳ Week 1: monitor the other 4 Warwick collector_targets venues (Bethel Woods, Storm King, Drowned Lands, Sugar Loaf PAC) as they pick up via next pg_cron tick (every */30 min)
+- ⏳ Atomic enable of remaining Warwick collector_targets — deferred until Week 0/1/2 metrics confirm health
+- ⏳ Cron schedule for `discover-venues-to-crawl` + `ingest-venue-website` (hourly per design doc; NOT auto-applied — enable when satisfied with smoke-test cohort yield)
 - ⏳ Onboarding brothers and friends in Warwick
 
 **Active blockers:** None. Production ingestion is restored, pg_cron will auto-fire correctly on next */30 tick.
@@ -161,6 +162,9 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 | [05/20/2026] | Grocery + bookstore brands (Whole Foods, Trader Joe's, Wegmans, Barnes & Noble) default to is_chain=TRUE with per-location `is_chain_override=FALSE` for chains that DO host real events | Default-suppress is the safer error direction; per-location upgrade is cheap and gives us "this Whole Foods runs cooking classes" without compromising the rule for the other locations | Kevin |
 | [05/20/2026] | Phase 5.3 enqueue query anchored on `relevance_tier >= 2` and `COALESCE(is_chain_override, is_chain) = FALSE` (NOT the design doc's original `venue_score >= 3` which referenced a column that was never built) | Documented and corrected in `docs/llm_extraction_design.md §C` | Claude (design-doc audit) |
 | [05/20/2026] | Ranker chain penalty strength: ×0.5 (firm suppression). Tunable to ×0.6 in production if chains fail to surface even in sparse-content scenarios | At ×0.5 a chain has to score substantially better than non-chain alternatives to break into the top 10 — that's the desired discovery shape | Kevin |
+| [05/20/2026] | Phase 5.3 anchors on `source_url` (not the design-doc's `website_url`); enqueue scoped to `kind='activity'` to avoid crawling event ticket pages | The design doc spec was written before checking the explore_items schema. Google Places adapter maps `websiteUri → source_url`; for `kind='event'` rows source_url is typically a Ticketmaster-style ticket page (don't crawl). Corrected during smoke testing | Claude (discovered during integration) |
+| [05/20/2026] | venue_crawl_state.events_found_count counts ALL LLM-extracted candidates regardless of `is_valid`, not just dated/queueable ones | "Events without dates" venues (e.g., SpencerCity Bar & Grill — has events listed but no dates extractable) shouldn't be backed off prematurely; their content surface is genuine, just not yet structured enough to queue. Conservative for v1; tune later if data shows these venues never start yielding dated events | Claude |
+| [05/20/2026] | Cron schedule for 5.3 functions NOT auto-applied at ship time | Standard rollout pattern: deploy code, smoke-test manually, then enable cron once the Week-1 yield validates the cohort. Avoids accidentally burning LLM budget on a broken filter. Operator enables in dashboard or via separate migration | Claude (manual-fetch-first pattern) |
 
 ---
 
@@ -289,6 +293,13 @@ Per-crawl cost is **$0.027** (above design doc's $0.005 estimate). Monthly proje
 - `supabase/migrations/129_phase52_llm_fallback.sql` — adds `use_llm_fallback` column, redefines `get_enabled_collector_targets()` RPC, seeds `api_usage_counters('anthropic_haiku')` at 5000 cents, flips the 5 Week-0 venues to `use_llm_fallback=TRUE`. is_enabled stays FALSE pending atomic flip after deploy.
 - `supabase/functions/ingest-web-collector/index.ts` — added LLM fallback block + budget guard + per-target/aggregate telemetry. ~200 lines added.
 - `supabase/functions/_shared/web-collector.ts` — added `use_llm_fallback?: boolean` to `CollectorTarget` interface.
+
+### Phase 5.3 proper — venue-discovery bridge (05/20/2026, deployed + smoke-tested)
+- `supabase/migrations/131_venue_crawl_state.sql` — creates `venue_crawl_state` table (one row per `(explore_item, distinct URL)`) with partial indexes, an `updated_at` touch trigger, RLS enabled (service-role only), and a synthetic `Auto-Discovered Venue` event_sources row (type=`web_collector`).
+- `supabase/functions/discover-venues-to-crawl/index.ts` — service-role enqueue function. Reads explore_items where `kind='activity'`, `source_url IS NOT NULL`, `relevance_tier >= 2`, sub_category NOT IN the 14-entry exclusion list, `COALESCE(is_chain_override, is_chain) = FALSE`. Inserts up to `max_per_run` (default 50, cap 500) new rows into venue_crawl_state. Idempotent via the `(explore_item_id, website_url)` unique constraint.
+- `supabase/functions/ingest-venue-website/index.ts` — service-role consumer function. Claims rows where `next_eligible_at <= NOW()` and `status != 'disabled'`. For each: robots.txt check (lightweight — only catches blanket `Disallow: /`), fetch root with 800KB cap + 15s timeout, discover up to 2 events-like subpages (`/events|/calendar|/whats-on|/programs|/shows|/happenings`), fetch with 6s inter-page rate-limit delay, run `extractEvents()` per page, upsert valid candidates into event_ingest_raw under the synthetic source_id with provenance markers (`_llm_extracted=true`, `_target_kind='auto_discovered'`, `_target_venue_name`, `_target_town`, `_target_default_category`).
+- Backoff logic: empty 0-1 → 7d, empty 2-5 → 14d, empty 6-11 → 30d + status='backing_off', empty ≥12 → status='disabled'. Errors: 1h, 2h, 4h, 8h, 16h, then status='disabled' at 5. Per-venue lifetime LLM cap: 100¢ ($1) → status='disabled'.
+- Smoke test results: discoverer enqueued 10 venues (200 scanned, 173 eligible). Consumer tested on 3 venues: 1/2 Ton's (404 → error path verified, status=active, consecutive_errors=1), Robert Moses State Park (3 pages, 0 events, $0.04, success path verified, consecutive_empty_runs=1, next_eligible=7d), SpencerCity Bar & Grill (1 page, 3 events extracted but 0 valid — events listed without dates, candidates_queued=0).
 
 ### Phase 5.3 prep — chain venue policy infrastructure (05/20/2026)
 - `supabase/migrations/130_chain_venue_columns.sql` — adds `is_chain` / `chain_brand` / `is_chain_override` to `explore_items` + partial indexes. Schema-only; backfill is via script.
