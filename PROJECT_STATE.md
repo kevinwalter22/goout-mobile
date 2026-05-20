@@ -96,8 +96,10 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 - ✅ LLM extraction design doc approved (`docs/llm_extraction_design.md`)
 - ✅ Production ingestion restored after discovering 3-month dormancy
 - ✅ **Phase 5.1: LLM extractor built + 10-fixture test passing** — see Section 5 for metrics
-- ⏳ Phase 5.2 (wire LLM fallback into ingest-web-collector) — in flight this session
-- ⏳ Week 0 single-venue validation (Albert Wisner) — after 5.2 ships
+- ✅ **Phase 5.2: LLM fallback wired into ingest-web-collector** (code complete, committed) — awaiting deploy
+- ⏳ Phase 5.2 DEPLOY (apply migration 129 + redeploy `ingest-web-collector`) — Kevin to run
+- ⏳ Atomic flip of 5 Week-0 targets to is_enabled=TRUE (Bethel Woods, Storm King, Albert Wisner, Drowned Lands, Sugar Loaf PAC) — after deploy
+- ⏳ Week 0 single-venue validation (Albert Wisner manual fetch + verify end-to-end into explore_items) — after atomic flip
 - ⏳ Atomic enable of remaining Warwick partitions/targets — deferred until Week 0/1/2 validation
 - ⏳ Onboarding brothers and friends in Warwick
 
@@ -108,6 +110,13 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 - Weekly email day-of-week preference
 - Decision on V1.1 timing trade-off: 7-day TestFlight target (tight, zero buffer) vs 10-day (comfortable, given Phase 2 surprises)
 - *(sb_secret rotation confirmed done by Kevin — old key revoked, new key in place, all functions verified working post-rotation)*
+
+**Phase 5.2 deploy handoff (for Kevin):**
+1. Apply migration 129: `supabase db push` (from a directory with the linked project config). Validates by `SELECT name, use_llm_fallback, is_enabled FROM collector_targets WHERE use_llm_fallback = TRUE` → expect 5 rows, all is_enabled=FALSE.
+2. Redeploy `ingest-web-collector`: `supabase functions deploy ingest-web-collector --no-verify-jwt --project-ref <ref>`.
+3. Atomic flip: `UPDATE collector_targets SET is_enabled = TRUE WHERE name IN ('Bethel Woods Center for the Arts', 'Storm King Art Center', 'Albert Wisner Public Library', 'Drowned Lands Brewery', 'Sugar Loaf Performing Arts Center');`
+4. Manual Week-0 fetch on Albert Wisner: POST to `ingest-web-collector` with body `{"target_id": "<albert-wisner-uuid>"}` and inspect the response. Expect to see `llm_calls_made >= 1`, `llm_candidates_added > 0`, `llm_cost_cents` populated, plus `candidates_queued > 0` flowing to `event_ingest_raw`.
+5. Verify end-to-end: a few minutes later (after enrichment runs), `SELECT title, starts_at FROM explore_items WHERE source_id = '<web-collector-source-id>' AND created_at > NOW() - INTERVAL '15 minutes' ORDER BY created_at DESC LIMIT 20`.
 
 ---
 
@@ -139,6 +148,9 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 | [05/20/2026] | Albert Wisner GT trimmed 20 → 12 (in-window events only); Drowned Lands GT trimmed 18 → 3; Cornerstone GT trimmed 5 → 0 | First two: 40K-char truncation cliff makes out-of-window events untestable for extraction skill (only truncation skill). Cornerstone: the 2026-season.html page has zero datable events; the 5 nav-menu titles aren't presented as events. expected_events:[] tests the model's discipline at NOT hallucinating from nav text | Kevin (approved at C-prime) |
 | [05/20/2026] | Phase 5.1 SHIP — recall 84.4%, precision 96.8%, 0 true hallucinations, $0.027/crawl | Both design-doc pass criteria met (recall ≥80%, precision ≥90%). Cost slightly above $0.025 stop-gate but noted-and-monitored; existing budget controls (per-venue ceiling, monthly cap, backoff) handle the failure modes the gate was protecting against | Kevin |
 | [05/20/2026] | Migration 129 reserved for Phase 5.2 (use_llm_fallback column + 5-venue flip + anthropic_haiku budget seed) | Per the 129–132 reservation from 05/18; 5.2 only needs one migration | Claude (approved by Kevin) |
+| [05/20/2026] | `api_usage_counters` uses per-service unit semantic: for `anthropic_haiku`, 1 unit = 1 cent | Reuses existing schema rather than adding a cents column. `requests_limit=5000` ⇒ $50/mo cap matches Phase 5 design. extractEvents() rounds cents up; the budget guard reads `requests_remaining` and treats 0-or-less as "skip the LLM call this run" | Claude (approved by Kevin) |
+| [05/20/2026] | LLM-sourced EventCandidates use extraction_strategy='html_dom' + raw_json._llm_extracted=true marker rather than introducing a new 'llm' enum value | Avoids a follow-up migration to ALTER TYPE parsing_strategy. The underscore-prefix marker convention is already used for `_target_*` enrichment fields; downstream can distinguish LLM rows when needed | Claude |
+| [05/20/2026] | LLM fallback triggers per-page at threshold=2 (matches design-doc default), not per-target | Each cached page is its own extraction unit; some pages may yield enough deterministic candidates while sibling pages on the same target need the LLM. Per-page is the more granular and correct integration point | Claude |
 
 ---
 
@@ -177,10 +189,10 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 ## 5. Bug & Feature Backlog
 
 ### In flight
-- (Phase 5.2) Wire LLM fallback into ingest-web-collector for collector_targets — in flight this session (05/20/2026)
+- (Phase 5.2 DEPLOY) Apply migration 129 + redeploy `ingest-web-collector` — Kevin to run (see Section 2 handoff)
 - (Phase 5.3) Build Google Places venue-discovery bridge (new function + venue_crawl_state table) — separate session
-- (Phase 5.4 Week 0) Manual single-venue end-to-end validation on Albert Wisner — after 5.2 ships
-- (Atomic flip) Enable 5 hand-picked Warwick targets (Bethel Woods, Storm King, Albert Wisner, Drowned Lands, Sugar Loaf PAC) is_enabled=TRUE — after 5.2 ships
+- (Phase 5.4 Week 0) Manual single-venue end-to-end validation on Albert Wisner — after 5.2 deploys
+- (Atomic flip) Enable 5 hand-picked Warwick targets (Bethel Woods, Storm King, Albert Wisner, Drowned Lands, Sugar Loaf PAC) is_enabled=TRUE — after 5.2 deploys
 - (Atomic flip) Enable remaining Warwick partitions and targets — DEFERRED until Week 1/2 validation
 - (Civic classifier) Folded into Phase 5.5 — handled by LLM extractor's structured output, no separate classifier prompt
 - (V1.1 release) Bundle bug fixes + Warwick LLM (10 venues) + impression logging for TestFlight
@@ -192,6 +204,12 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
   - 10-fixture unit test ([`scripts/llm_extractor_test.ts`]): **84.4% recall, 96.8% precision, 0 true hallucinations, $0.027/crawl**
   - Pass criteria: recall ≥ 80% ✓, precision ≥ 90% ✓, zero hallucinations ✓
   - Total fixture-set events: 45 (across 10 venues spanning Squarespace, Wix, MEC, WordPress, static .html, JSON-LD-bearing, dateless-button-only, and wrong-page-redirect scenarios)
+
+- **Phase 5.2 — LLM fallback wired into ingest-web-collector** (build complete, deploy pending)
+  - Migration 129 ([`supabase/migrations/129_phase52_llm_fallback.sql`]): `collector_targets.use_llm_fallback BOOLEAN DEFAULT FALSE` + redefined `get_enabled_collector_targets()` RPC to include the field + `api_usage_counters('anthropic_haiku', 5000 cents = $50/mo)` seeded + `use_llm_fallback=TRUE` flipped for the 5 Week-0 targets (Bethel Woods, Storm King, Albert Wisner, Drowned Lands, Sugar Loaf PAC; all stay is_enabled=FALSE until atomic flip after deploy).
+  - [`supabase/functions/ingest-web-collector/index.ts`]: after deterministic strategies, if `target.use_llm_fallback && candidates.length < 2`, calls `extractEvents()` on the cached HTML. Budget guard via `get_api_budget('anthropic_haiku')` BEFORE the call; extractor logs cost via `increment_api_usage` AFTER. LLM-sourced rows ride as `EventCandidate` with `extraction_strategy='html_dom'` and `raw_json._llm_extracted=true` (underscore-prefix marker convention, same as existing `_target_*` fields).
+  - [`supabase/functions/_shared/web-collector.ts`]: `CollectorTarget.use_llm_fallback?: boolean` (optional for back-compat with rows from old RPC).
+  - Telemetry: per-target and aggregate `llm_calls_made`, `llm_candidates_added`, `llm_cost_cents` flow into the response, console log, and pipeline_health_log details.
 
 ### Known limitations (Phase 5.1, accepted)
 - **Strict-evidence check rejects events with model-fabricated day-of-week context.** Example: source has "Next Jam: May 29"; model emits `date_evidence: "Friday, May 29"` (inferring the day). The check rejects because "Friday, May 29" isn't in source. Cost: ~3 events dropped per Bethel Woods crawl. Next crawl typically produces different evidence forms that pass. Revisit prompt tightening in Phase 5.2+ only if production data shows this is widespread.
@@ -241,11 +259,16 @@ Per-crawl cost is **$0.027** (above design doc's $0.005 estimate). Monthly proje
 - **Migration 127** (Warwick collector targets): applied; 30 targets staged is_enabled=FALSE (32 originally, 2 deleted in 128)
 - **Migration 128** (URL fixes + 2 deletions): applied
 
-### Phase 5.1 — new files (05/20/2026, awaiting deploy via 5.2 integration)
+### Phase 5.1 — new files (05/19-20/2026, deployed via 5.2 redeploy)
 - `supabase/functions/_shared/llm-extractor.ts` — extractEvents() + preprocessHtmlForPrompt() + evidenceAppearsInSource() + Haiku 4.5 prompts. Standalone module; no DB or network side effects beyond the LLM call (optional cost logging via opts.supabase).
 - `supabase/functions/_shared/__fixtures__/` — 10 .html + 10 .expected.json ground-truth pairs for unit testing. Total 45 ground-truth events across Bethel Woods, Storm King, Albert Wisner Library, Drowned Lands, Pennings Farm Market, Sugar Loaf Guild, Warwick Valley Winery, Sugar Loaf PAC, Mountain Creek Resort, Cornerstone Theatre Arts.
 - `scripts/llm_extractor_test.ts` — recall/precision/cost test harness with retry-on-429 + fuzzy-match diagnostic for misses. Outputs report to `scripts/llm_extractor_test_report.json`.
 - `scripts/llm_extractor_preflight.ts` — char-to-token ratio measurement via Anthropic count_tokens API + per-fixture truncation analysis.
+
+### Phase 5.2 — new + modified files (05/20/2026, awaiting deploy)
+- `supabase/migrations/129_phase52_llm_fallback.sql` — adds `use_llm_fallback` column, redefines `get_enabled_collector_targets()` RPC, seeds `api_usage_counters('anthropic_haiku')` at 5000 cents, flips the 5 Week-0 venues to `use_llm_fallback=TRUE`. is_enabled stays FALSE pending atomic flip after deploy.
+- `supabase/functions/ingest-web-collector/index.ts` — added LLM fallback block + budget guard + per-target/aggregate telemetry. ~200 lines added.
+- `supabase/functions/_shared/web-collector.ts` — added `use_llm_fallback?: boolean` to `CollectorTarget` interface.
 
 ### In flight
 - *(nothing — Phase 5.1 ready to start in next session)*
@@ -310,6 +333,14 @@ When multiple Claude Code sessions run in parallel, they need to reserve migrati
 - **Schema (Zod-doc-equivalent, hand-rolled):** title (3-200), starts_at (strict ISO 8601 nullable), ends_at (same), recurrence_text, description (≤500), price_text, source_url_path, title_evidence (≥3 verbatim), date_evidence (verbatim or null).
 - **Known limitations** (see Section 5).
 - **Test harness:** `scripts/llm_extractor_test.ts` runs all 10 fixtures with retry-on-429 + 1.5s inter-fixture pacing. Recall computed against all GT; precision computed only on `expected_complete=true` fixtures (truncated fixtures excluded). Two-phase matcher: primary match (claims an unclaimed GT slot) + secondary recurring match (extra instances of an already-matched recurring GT entry count toward precision, not recall).
+
+### LLM fallback integration in ingest-web-collector (Phase 5.2, 05/20/2026)
+- **Entry point:** [`supabase/functions/ingest-web-collector/index.ts`]. After `extractCandidates()` (deterministic) returns for each cached page, if `target.use_llm_fallback && candidates.length < LLM_FALLBACK_THRESHOLD (2)`, the LLM fallback block runs.
+- **Budget guard:** call-site checks `get_api_budget('anthropic_haiku')` BEFORE the LLM call. Skips with `extractErrors.push('llm_fallback_skipped: ...')` if budget exhausted. `extractEvents()` itself then calls `increment_api_usage('anthropic_haiku', cost_cents)` AFTER successful run via `opts.supabase`. Both ends are protected — runaway-cost scenarios can't slip through.
+- **Per-service unit semantic on `api_usage_counters`:** for `service='anthropic_haiku'`, 1 unit = 1 cent (not 1 request as it is for `google_places`). `requests_limit=5000` ⇒ $50/mo cap, matching the Phase 5 design-doc hard cap.
+- **LLM-sourced row marker:** the raw_json upserted into `event_ingest_raw` carries `_llm_extracted: true` (underscore-prefix convention, same as `_target_*`). Downstream queries can distinguish LLM rows: `SELECT * FROM event_ingest_raw WHERE raw_json->>'_llm_extracted' = 'true'`. Additional fields: `_llm_title_evidence`, `_llm_date_evidence`, `_llm_price_text` preserve the original LLM output for audit.
+- **Validity filter:** LLM events without a temporal signal (no `starts_at` AND no `recurrence_text`) get `is_valid=false` and are filtered before the upsert — matches the existing pipeline contract. This means Pennings-style button-only events with title-but-no-date are extracted by the LLM, surface in the diagnostic log, but DON'T flow to `event_ingest_raw`. Acceptable for now; null-date handling is a separate downstream concern.
+- **Telemetry:** per-target result and aggregate summary expose `llm_calls_made`, `llm_candidates_added`, `llm_cost_cents`. Surfaced in console log, response body, and `pipeline_health_log.details_json` for monitoring. Watch these once Week 0/1 venues are enabled.
 
 ### Push notifications
 - Expo Push Notification Service
