@@ -100,8 +100,10 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 - ✅ **Migration 129 applied + edge function redeployed** — verified via service-role probe
 - ✅ **Atomic flip executed**: 5 Week-0 targets now is_enabled=TRUE + use_llm_fallback=TRUE
 - ✅ **Week 0 single-venue validation (Albert Wisner) PASSED** — end-to-end pipeline works. See Section 5 for numbers.
+- ✅ **Phase 5.3 prep: chain venue policy infrastructure built** (migration 130, `_shared/chain-detection.ts`, adapter+normalizer changes, backfill script, unit test, ranker penalty). Awaiting backfill run + Pause B sanity check.
 - ⏳ Week 1: monitor the other 4 venues (Bethel Woods, Storm King, Drowned Lands, Sugar Loaf PAC) as they pick up via next pg_cron tick (every */30 min)
 - ⏳ Atomic enable of remaining Warwick targets — deferred until Week 0/1/2 metrics confirm health
+- ⏳ Phase 5.3 proper (venue_crawl_state + discover-venues-to-crawl + ingest-venue-website) — starts after Pause C confirms chain infra ships cleanly
 - ⏳ Onboarding brothers and friends in Warwick
 
 **Active blockers:** None. Production ingestion is restored, pg_cron will auto-fire correctly on next */30 tick.
@@ -153,6 +155,12 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 | [05/20/2026] | LLM-sourced EventCandidates use extraction_strategy='html_dom' + raw_json._llm_extracted=true marker rather than introducing a new 'llm' enum value | Avoids a follow-up migration to ALTER TYPE parsing_strategy. The underscore-prefix marker convention is already used for `_target_*` enrichment fields; downstream can distinguish LLM rows when needed | Claude |
 | [05/20/2026] | LLM fallback triggers per-page at threshold=2 (matches design-doc default), not per-target | Each cached page is its own extraction unit; some pages may yield enough deterministic candidates while sibling pages on the same target need the LLM. Per-page is the more granular and correct integration point | Claude |
 | [05/20/2026] | Phase 5.2 deploy + Week-0 Albert Wisner validation completed in-session | Migration applied by Kevin via dashboard SQL; function deployed via `npx supabase` after Kevin's `supabase login`; atomic flip + manual fetch + verify done via service-role REST. 62 events extracted at $0.10 cost; 30+ explore_items live; pipeline healthy end-to-end | Claude (manual fetch + verify) |
+| [05/20/2026] | Chain venue policy: "ingest broadly, crawl narrowly, rank conservatively" — chains stay in catalog (search/proximity), are excluded from Phase 5.3 auto-crawling, and get a ×0.5 ranker penalty in discovery (overridden by active search and friends-checked-in signals) | Avoids burning LLM budget on Starbucks/CVS pages that virtually never host events; suppresses chains from discovery feeds since users browse for local-flavored places, not chains. Search ("find me a Dunkin") and social ("a friend just checked in at Starbucks") bypass the penalty | Kevin |
+| [05/20/2026] | Chain brand vocabulary lives only in `_shared/chain-detection.ts` (TypeScript); migration 130 is schema-only; backfill via `scripts/backfill_chain_venues.ts` re-runnable as vocabulary grows | Single source of truth; cleaner migration file; vocabulary changes don't require SQL migrations | Kevin |
+| [05/20/2026] | Chain brand list v1: 130 entries (fast food, casual dining, pizza chains, coffee/donut, ice cream, big-box retail, off-price, specialty retail, pharmacy/convenience, banks, grocery). Hotels + gas chains intentionally excluded (already filtered at ingest by SKIP_PRIMARY_TYPES). "Gap" and "H&M" excluded as too short / collision-prone | Belt-and-suspenders dropped to keep vocabulary focused; short ambiguous brands need future expansion when production data shows misses (Boston catalog will be the first test) | Kevin |
+| [05/20/2026] | Grocery + bookstore brands (Whole Foods, Trader Joe's, Wegmans, Barnes & Noble) default to is_chain=TRUE with per-location `is_chain_override=FALSE` for chains that DO host real events | Default-suppress is the safer error direction; per-location upgrade is cheap and gives us "this Whole Foods runs cooking classes" without compromising the rule for the other locations | Kevin |
+| [05/20/2026] | Phase 5.3 enqueue query anchored on `relevance_tier >= 2` and `COALESCE(is_chain_override, is_chain) = FALSE` (NOT the design doc's original `venue_score >= 3` which referenced a column that was never built) | Documented and corrected in `docs/llm_extraction_design.md §C` | Claude (design-doc audit) |
+| [05/20/2026] | Ranker chain penalty strength: ×0.5 (firm suppression). Tunable to ×0.6 in production if chains fail to surface even in sparse-content scenarios | At ×0.5 a chain has to score substantially better than non-chain alternatives to break into the top 10 — that's the desired discovery shape | Kevin |
 
 ---
 
@@ -282,8 +290,21 @@ Per-crawl cost is **$0.027** (above design doc's $0.005 estimate). Monthly proje
 - `supabase/functions/ingest-web-collector/index.ts` — added LLM fallback block + budget guard + per-target/aggregate telemetry. ~200 lines added.
 - `supabase/functions/_shared/web-collector.ts` — added `use_llm_fallback?: boolean` to `CollectorTarget` interface.
 
+### Phase 5.3 prep — chain venue policy infrastructure (05/20/2026)
+- `supabase/migrations/130_chain_venue_columns.sql` — adds `is_chain` / `chain_brand` / `is_chain_override` to `explore_items` + partial indexes. Schema-only; backfill is via script.
+- `supabase/functions/_shared/chain-detection.ts` — 130-entry brand vocabulary + `isChainVenue(name)` whole-word matcher with apostrophe normalization. Pure helper, no DB/network.
+- `supabase/functions/_shared/source-adapters/google_places.ts` — calls `isChainVenue(title)` and emits `is_chain` + `chain_brand` on the `NormalizedEvent` returned to normalize-raw-events.
+- `supabase/functions/_shared/source-adapters/ticketmaster.ts` — added optional `is_chain` + `chain_brand` to the `NormalizedEvent` interface (other adapters ignore them; only Google Places populates).
+- `supabase/functions/normalize-raw-events/index.ts` — clarifying comment on how chain fields flow through the upsert (no logic change — `...normalized` spread already carries them; `is_chain_override` is preserved across re-normalizations).
+- `scripts/backfill_chain_venues.ts` — one-shot script that scans `explore_items`, computes `isChainVenue(title)`, bulk-updates mismatches via service-role. Re-runnable. Reports flagged count + sample + per-location report for default-suppress brands (Whole Foods / Trader Joe's / Wegmans / Barnes & Noble) per Pause B.
+- `scripts/chain_detection_test.ts` — 30 MUST_MATCH + 30 MUST_NOT_MATCH + 5 DOCUMENTED (accepted limitations) cases. All 60 strict cohorts pass.
+- `src/lib/scoring.ts` — added `chainPenalty` field to `ScoreBreakdown`, `searchActive?: boolean` to `ScoringContext`, and post-weighted-sum ×0.5 multiplier when `COALESCE(is_chain_override, is_chain)` is TRUE AND no search/friends override.
+- `src/hooks/useRecommender.ts` — plumbs `searchActive` from `exploreFilters.filters.searchQuery` into the scoring context; updated `defaultScored` stub.
+- `src/lib/__tests__/groupingEngine.test.ts` + `app/(tabs)/explore.tsx` — updated mock breakdowns to include `chainPenalty: 1.0` (existing-test infrastructure compatibility).
+- `docs/llm_extraction_design.md §C` — updated to reflect the chain filter and the corrected `relevance_tier >= 2` anchor (the original `venue_score >= 3` referenced a column that was never built).
+
 ### In flight
-- *(nothing — Phase 5.1 ready to start in next session)*
+- *(nothing — chain infra coded; awaiting Pause B backfill run)*
 
 ### Disabled / Feature-flagged
 - LLM reranker (`rerank-explore-items` edge function): deployed but feature flag off
