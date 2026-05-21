@@ -60,6 +60,24 @@ const EXCLUDED_SUB_CATEGORIES = [
 interface RequestConfig {
   max_per_run?: number;
   dry_run?: boolean;
+  /**
+   * Optional geographic bounding box. When supplied, only explore_items
+   * with lat/lng inside the box are enqueued. Used to prioritize specific
+   * regions (e.g., Warwick during Hudson Valley launch).
+   * Format: { min_lat, max_lat, min_lng, max_lng }.
+   */
+  bbox?: {
+    min_lat: number;
+    max_lat: number;
+    min_lng: number;
+    max_lng: number;
+  };
+  /**
+   * Optional town-name allowlist. When supplied, only explore_items whose
+   * town field matches one of these strings (case-insensitive exact match)
+   * are enqueued.
+   */
+  towns?: string[];
 }
 
 Deno.serve(async (req) => {
@@ -118,16 +136,32 @@ Deno.serve(async (req) => {
     // crawl. For events (kind='event'), source_url is typically a ticket
     // page (Ticketmaster, etc.) which we explicitly do NOT want to crawl.
     const overdraft = maxPerRun * 4;
-    const { data: candidates, error: candErr } = await supabase
+    let query = supabase
       .from("explore_items")
       .select(
-        "id, title, source_url, town, category, sub_category, is_chain, is_chain_override, normalized_confidence",
+        "id, title, source_url, town, category, sub_category, is_chain, is_chain_override, normalized_confidence, lat, lng",
       )
       .eq("kind", "activity")
       .not("source_url", "is", null)
       .is("deleted_at", null)
       .gte("relevance_tier", 2)
-      .not("sub_category", "in", `(${EXCLUDED_SUB_CATEGORIES.join(",")})`)
+      .not("sub_category", "in", `(${EXCLUDED_SUB_CATEGORIES.join(",")})`);
+
+    // Optional geographic filter. PostgREST applies these as additional
+    // WHERE clauses; nothing fancy required — small bounding boxes with
+    // lat/lng index lookups perform well at our catalog scale (~1K rows).
+    if (config.bbox) {
+      query = query
+        .gte("lat", config.bbox.min_lat)
+        .lte("lat", config.bbox.max_lat)
+        .gte("lng", config.bbox.min_lng)
+        .lte("lng", config.bbox.max_lng);
+    }
+    if (config.towns && config.towns.length > 0) {
+      query = query.in("town", config.towns);
+    }
+
+    const { data: candidates, error: candErr } = await query
       .order("normalized_confidence", { ascending: false, nullsFirst: false })
       .limit(overdraft);
 
@@ -213,6 +247,8 @@ Deno.serve(async (req) => {
       already_enqueued: alreadyEnqueued,
       inserted,
       dry_run: dryRun,
+      bbox: config.bbox ?? null,
+      towns: config.towns ?? null,
     };
 
     await logPipelineHealth(supabase, {
