@@ -174,6 +174,14 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 | [05/21/2026] | Google Places ingest blocker logged for follow-up: 0 results across all regions | Root cause unconfirmed — possibly expired/quota-blocked API key, possibly Places API (New) endpoint change. The function returns success but with `unique_places: 0` after 1-2 API calls. Same symptom across Warwick (today) and Potsdam (5/18 historical). Doesn't block Warwick collector_targets pipeline (which has 87 events live), only blocks Phase 5.3 auto-discovery for Warwick venues that haven't been catalogued. Workaround: collector_targets covers the high-value curated set | Claude (diagnosed) |
 | [05/21/2026] | Google Places fixed via paid-tier API key upgrade | Confirmed root cause was API key/quota. After Kevin's upgrade, Warwick 50km region returned 1054 unique places in one run; 997 normalized into explore_items. The 939-item Warwick-bbox catalog is now feeding the Phase 5.3 venue-discovery bridge | Kevin |
 | [05/21/2026] | pg_cron execution root-cause + fix: `current_setting('app.supabase_url')` was unset → cron jobs from migration 088 (Feb 2026) had been silently failing on every tick for ~3 months. Kevin's "Set service role key for app" snippet from 5/18 didn't take effect (`ALTER DATABASE` is permission-denied on Supabase, even for supabase_admin). Fix: rewrote each cron.job.command to embed URL + bearer as literals. | Diagnosed via temporary `diagnose-cron` edge function that uses SUPABASE_DB_URL to query cron.* schema (PostgREST exposes only public). The "permission denied" finding turned a "set the missing config" task into a "redesign the auth-passing pattern" task. Embedding the legacy JWT in cron.job.command is acceptable: cron schema is superuser-only-readable, no broader exposure than the existing per-function LEGACY_SERVICE_ROLE_JWT env var. Verified at 15:00 UTC: 6/6 jobs succeeded with the rewritten commands | Claude (diagnosed + fixed) |
+| [05/21/2026] | Post-Warwick-launch hard distance gate: `applyDistanceFilter` now excludes null-coord items when a radius is set and the user has a location. Active search bypasses the gate. | A Potsdam, NY parade (5+ hrs from Warwick) was surfacing at position #2 because the soft gate let items without lat/lng through unconditionally. The proximity scoring signal (0.20 weight) was not enough to suppress them when other signals fired. The strict variant lands the user's "default feed should never show >50mi events" requirement; search keeps the door open for explicit cross-region queries | Claude (post-launch triage) |
+| [05/21/2026] | LLM-extracted venue-website events now inherit lat/lng from the parent explore_item venue | Map view requires lat/lng IS NOT NULL but LLM extraction never derived coordinates from page HTML, leaving every Warwick venue-website event invisible on the map. The venue (an explore_item from Google Places) already has authoritative lat/lng. Inheriting from the parent is correct because the event is happening AT the venue | Claude |
+| [05/21/2026] | Google Places `FIELD_MASK` now includes `places.photos`; cache-place-photos scheduled every 15 min via migration 133 | The field-mask omission silently broke the image pipeline for every Warwick venue: place_details_cache never received photo refs, cache-place-photos was never invoked from anywhere, so 939 items displayed the category placeholder. Adding the field is necessary but not sufficient — the cron schedule is what actually drains the queue. Cost envelope at full backlog: ~$0.70/hr while draining, negligible at steady state | Claude |
+| [05/21/2026] | Web-collector LLM extractor demotes "facility hours / season range" rows from kind=event to kind=activity (e.g., "Museum at Bethel Woods" w/ April 1 - December 31 operating range) | The LLM faithfully extracted "April 1 - December 31" as date_evidence and downstream blindly set kind=event because starts_at was non-null. Guardrail triggers on midnight start time + facility/exhibit/visit title pattern. LLM prompt also tightened to reject seasonal operating ranges and permanent exhibitions explicitly. Existing Bethel Woods row needs one-off SQL update — does not retroactively re-classify | Claude (post-launch triage) |
+| [05/21/2026] | Event detail screen's `formatDateTime` now uses `formatOpeningHours.summaryLine` before falling back to raw `schedule_text` | Sugar Loaf PAC and similar Google Places venues without enrichment-generated time_text were leaking raw "Monday: Closed; Tuesday: ..." into the WHEN slot. The summary form is what GroupedExploreFeed already uses; the detail screen was the lone holdout | Claude |
+| [05/21/2026] | Recurring-event-on-holiday issue (Albert Wisner showing instances on Memorial Day when library is closed) deferred. | Would require a new `venue_closures` table + RPC change to `advance_recurring_events()` (migration 109). User flagged this as MEDIUM priority, "fix if straightforward, defer with documentation if not." The closures table is new architecture, not a one-line fix, so deferred | Kevin (priority call) |
+| [05/21/2026] | Civic content explicit exclusion: zoning boards, planning commissions, town councils, public hearings, committee meetings filtered out at ingestion via `_shared/civic-filter.ts`. Community-focused civic events (parades, ceremonies, picnics) are NOT excluded. | Euda is for discovering things to do; nobody uses this app to track local government business. Two-layer pattern: explicit title pattern + (municipal venue × meeting/hearing title) combo. Test matrix (25 cases) passes; backfill soft-deleted 20 existing rows (12 Zoning Board Meetings at Village of Potsdam Civic Center + 8 misc). Wired into both LLM ingestion paths (ingest-web-collector + ingest-venue-website) BEFORE event_ingest_raw upsert | Kevin |
+| [05/21/2026] | Dr. Kaboom row at SUNY Potsdam left as-is. | Real event with missing time field (LLM extracted a date but no time; ISO renders as midnight). Not a misclassification; the new facility-pattern guardrail correctly did not flag it. Logged as a known data-quality category: "LLM-extracted events with missing time fields." Revisit if prevalent (>20 cases over next week) | Claude (post-triage review) |
 
 ---
 
@@ -252,6 +260,36 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 
 ### Phase 5.1 cost watchpoint
 Per-crawl cost is **$0.027** (above design doc's $0.005 estimate). Monthly projection at 500 venues × weekly = $54/mo, just over the $50 hard cap. With backoff schedule (design doc Section D — bi-weekly after 2 empties, monthly after 6, disable after 12), realistic operation should land at $30-40/mo. Monitor `api_usage_counters('anthropic_haiku')` once Phase 5.4 enrollment begins. Acceptable in isolation; will need scale-time efficiency work if catalog grows to 5000+ venues (potential levers: smaller critique-pass HTML excerpt, prompt-cache the system prompt, or cadence-based budget allocation).
+
+### Post-Warwick-launch triage (05/21/2026)
+- **Recurring-event-on-holiday closure (DEFERRED).** Albert Wisner library shows recurring instances on May 25 (Memorial Day) even though the library publishes that closure on its website. `advance_recurring_events()` (migration 109) has no awareness of holidays or per-venue closure exceptions. Fixing this needs a `venue_closures` table (or an `availability_exceptions JSONB[]` column on explore_items) plus a join in the cron function. Out of scope for the launch-week triage pass. Workaround: users can see the closure date if they tap through to the library's site via the MORE INFO link. Priority: MEDIUM (per Kevin's "fix if straightforward, defer with documentation if not"). [[issue5-deferred]]
+- **One-off cleanup needed for existing Bethel Woods Museum row.** The web-collector guardrail prevents future occurrences but doesn't retroactively re-classify the row already in the DB. Run via Supabase dashboard SQL editor:
+  ```sql
+  UPDATE explore_items
+     SET kind = 'activity', starts_at = NULL, ends_at = NULL
+   WHERE title ILIKE '%museum at bethel woods%'
+     AND kind = 'event';
+  -- Also look for similar mis-classifications:
+  SELECT id, title, starts_at, location_name
+    FROM explore_items
+   WHERE kind = 'event'
+     AND starts_at IS NOT NULL
+     AND EXTRACT(hour FROM starts_at) = 0 AND EXTRACT(minute FROM starts_at) = 0
+     AND (title ~* '\\b(museum|gallery|exhibit|visit the|hours)\\b'
+       OR description ~* '\\b(open year[\\s-]?round|permanent exhibit|always open)\\b');
+  ```
+- **Backfill lat/lng for existing venue-website-extracted events.** The inheritance fix in `ingest-venue-website` applies to new crawls; rows already in `explore_items` from earlier crawls still have null coordinates. One-off:
+  ```sql
+  UPDATE explore_items e
+     SET lat = v.lat, lng = v.lng, address = COALESCE(e.address, v.address)
+    FROM venue_crawl_state s
+    JOIN explore_items v ON v.id = s.explore_item_id
+   WHERE e.source_id = (SELECT id FROM event_sources WHERE name = 'Auto-Discovered Venue')
+     AND e.kind = 'event'
+     AND e.lat IS NULL AND v.lat IS NOT NULL;
+  -- match by venue title since explore_items don't track parent venue directly
+  ```
+  Note: that JOIN heuristic is approximate; the surgical version requires tracing event → source_url → venue_crawl_state.website_url. Operator's call which is cheaper.
 
 ### Open bugs (NEW this session)
 - **Path-allow bug in `_shared/web-collector.ts`** — discovery_urls without trailing slash failed prefix check against allowed_paths with trailing slash. FIXED & deployed to ingest-web-collector. Was a latent bug across the whole catalog since migration 045 (every Potsdam target also affected).
@@ -450,6 +488,22 @@ When multiple Claude Code sessions run in parallel, they need to reserve migrati
 - The platform migrated SUPABASE_SERVICE_ROLE_KEY from legacy JWT to sb_secret_* sometime between Feb and May 2026, silently. Cost us 3 months of ingestion before discovery.
 - Lesson: every cron-driven function should write to `pipeline_health_log` even on success, so the LACK of recent entries is detectable.
 - Lesson: monitoring dashboard (Phase 6 originally) should surface "no recent activity per source" as a top-level alert.
+
+**6. `get_items_needing_images` returns rows whose source doesn't support Places photo API.**
+- Currently returns non-Places rows (e.g., the soft-deleted "Zoning Board Meeting" rows from the Web Collector source) that fail every cache-place-photos drain — wastes Google Places API calls and pollutes `pipeline_health_log`.
+- One-line WHERE clause to add: `external_id LIKE 'places/%'` (or equivalent join to source type `api_google_places`).
+- Most of these rows are also caught by the new civic filter (Item 2 this session), but the underlying SQL bug stands and will hit again the next time a non-Places source ends up in the catalog without an image.
+- Fix in next session.
+
+**7. Distance filtering is client-side only.**
+- This session's fix made the gate strict (drop null-coord items when filter active) but the architecture is still "fetch everything, filter in app." At Boston/NYC scale this needs to move server-side via an RPC parameter on `filter_explore_items`.
+- Latent cost: paginated lists may surface uneven counts after distance filter trims them (e.g., page of 20 → 7 visible).
+- Phase 2 work (the recommendation overhaul touches `filter_explore_items` anyway).
+
+**8. Pipeline lacks a semantic gatekeeper between LLM extraction and user-facing feed.**
+- Current point fixes — civic filter, facility-pattern guardrail in `web_collector.ts`, dateless-event omission via `is_valid` — are all tactical patterns on specific failure modes. Each adds maintenance load.
+- Phase 5.5 (enrichment overhaul with `audience_fit` classifier + two-tier tag taxonomy) is the systemic fix: a single classifier that decides "would a real person want to do this?" replaces the growing list of hand-written regexes.
+- Prioritize before catalog scales 10x. Once Phase 5.5 ships, the per-pattern filters can be deprecated.
 
 ---
 
