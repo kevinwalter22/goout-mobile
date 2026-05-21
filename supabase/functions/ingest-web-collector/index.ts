@@ -34,6 +34,7 @@ import { extractEvents, type ExtractedEvent, type ExtractionHints } from "../_sh
 import { logPipelineHealth } from "../_shared/health-log.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
+import { isCivicContent } from "../_shared/civic-filter.ts";
 
 // ============================================================================
 // Phase 5.2 — LLM fallback constants
@@ -254,6 +255,7 @@ serve(async (req) => {
     valid_candidates: 0,
     candidates_queued: 0,  // Candidates inserted into event_ingest_raw
     candidates_blocklisted: 0,
+    candidates_civic_filtered: 0,
     // Phase 5.2 — LLM fallback telemetry
     llm_calls_made: 0,
     llm_candidates_added: 0,
@@ -495,6 +497,23 @@ serve(async (req) => {
                     continue;
                   }
 
+                  // Civic-content filter — drop zoning boards, planning
+                  // commissions, town council meetings, public hearings, etc.
+                  // before they reach event_ingest_raw. Community-focused
+                  // civic events (parades, ceremonies, festivals) pass.
+                  // See _shared/civic-filter.ts for pattern rationale.
+                  const civic = isCivicContent(
+                    candidate.title,
+                    target.venue_name ?? candidate.location_name ?? null,
+                  );
+                  if (civic.isCivic) {
+                    summary.candidates_civic_filtered++;
+                    console.log(
+                      `    Civic-filtered: "${candidate.title}" (${civic.reason})`,
+                    );
+                    continue;
+                  }
+
                   try {
                     // Add target metadata to candidate for normalization adapter
                     const enrichedCandidate = {
@@ -635,6 +654,7 @@ serve(async (req) => {
       valid_candidates: summary.valid_candidates,
       candidates_queued: summary.candidates_queued,
       candidates_blocklisted: summary.candidates_blocklisted,
+      candidates_civic_filtered: summary.candidates_civic_filtered,
       // Phase 5.2 — LLM fallback aggregate
       llm_calls_made: summary.llm_calls_made,
       llm_candidates_added: summary.llm_candidates_added,
@@ -647,7 +667,7 @@ serve(async (req) => {
   console.log(`\n=== Web Collector Complete ===`);
   console.log(`  Targets: ${summary.targets_processed} processed, ${summary.targets_skipped} skipped`);
   console.log(`  Pages: ${summary.pages_fetched} fetched, ${summary.pages_cached_hit} cached`);
-  console.log(`  Candidates: ${summary.candidates_found} found, ${summary.valid_candidates} valid, ${summary.candidates_queued} queued, ${summary.candidates_blocklisted} blocklisted`);
+  console.log(`  Candidates: ${summary.candidates_found} found, ${summary.valid_candidates} valid, ${summary.candidates_queued} queued, ${summary.candidates_blocklisted} blocklisted, ${summary.candidates_civic_filtered} civic-filtered`);
   if (summary.llm_calls_made > 0) {
     console.log(
       `  LLM fallback: ${summary.llm_calls_made} calls, ${summary.llm_candidates_added} candidates added, ${summary.llm_cost_cents}¢ ($${(summary.llm_cost_cents / 100).toFixed(4)})`,

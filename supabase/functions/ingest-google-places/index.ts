@@ -45,6 +45,10 @@ const FIELD_MASK = [
   "places.primaryType",
   "places.primaryTypeDisplayName",
   "places.googleMapsUri",
+  // `places.photos` was omitted; without it, place_details_cache never sees
+  // photo references and cache-place-photos has nothing to fetch. Adding it
+  // restores the venue image pipeline for Warwick (and every region).
+  "places.photos",
 ].join(",");
 
 // ============================================================================

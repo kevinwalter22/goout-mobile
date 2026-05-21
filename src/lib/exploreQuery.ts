@@ -562,11 +562,17 @@ function applyDistanceFilter(
   }
 
   // Step 1: Apply distance filtering (only when a radius is set)
+  // Strict gate for the default feed: when a radius is set and the user has
+  // a location, items must have lat/lng AND fall within the radius. Previously,
+  // null-coord items slipped through and far-away events (e.g., Potsdam, NY in
+  // a Warwick feed) surfaced. Active search overrides the distance gate —
+  // users who explicitly search are asking to look beyond their default radius.
+  const searchActive = (filters.searchQuery?.trim().length ?? 0) > 0;
   let result = data;
-  if (filters.distance !== "any") {
+  if (filters.distance !== "any" && !searchActive) {
     const maxDistance = filters.distance;
     result = data.filter((item) => {
-      if (!item.lat || !item.lng) return true;
+      if (!item.lat || !item.lng) return false;
       const dist = getDistanceInMiles(
         userLocation.lat,
         userLocation.lng,

@@ -196,7 +196,7 @@ CRITICAL RULES:
 2. date_evidence MUST also be an exact (minimal) substring of the HTML if non-null. If the page has no visible date for an event, set BOTH starts_at AND date_evidence to null.
 3. DO NOT INFER dates from context, today's date, or your training data. Only emit starts_at when you can quote the date verbatim in date_evidence.
 4. DO NOT FABRICATE events. If you are not certain something is an event with a clear title, OMIT it.
-5. REJECT non-events: navigation links, "Read more"/"Buy tickets" buttons, blog post titles, About sections, hours, FAQ, contact info, newsletter signups, marketing copy without specific scheduled events, member portals.
+5. REJECT non-events: navigation links, "Read more"/"Buy tickets" buttons, blog post titles, About sections, hours, FAQ, contact info, newsletter signups, marketing copy without specific scheduled events, member portals, museum/exhibit/library OPERATING DATES OR SEASONAL RANGES (e.g., "April 1 - December 31" describing when a museum is open is NOT an event — that's hours of operation), permanent exhibitions, "Visit the Museum" / "Visit Us" listings, generic facility availability ("Open daily", "Open year-round").
 6. RECURRING events: emit ONE entry with recurrence_text populated. starts_at can be the next-known instance or null.
 7. ARCHIVAL events (past dates): EXTRACT THEM if they appear on the page. Temporal filtering is downstream's job — your job is faithful extraction.
 8. If a venue lists ticketed events with titles but no inline dates (e.g. button labels linking to a ticketing site), STILL extract them with date_evidence: null.

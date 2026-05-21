@@ -34,6 +34,7 @@ import type { ExploreItem } from "../../src/types/database";
 import { captureError } from "../../src/lib/logger";
 import { friendlyMessage } from "../../src/lib/errorMessages";
 import { getFallbackImage } from "../../src/lib/categoryFallbackImages";
+import { formatOpeningHours } from "../../src/utils/formatOpeningHours";
 
 /** Returns true for any Google Maps URL — these should not appear as "MORE INFO" links
  *  because the detail screen already has a dedicated "Open in Google Maps" CTA. */
@@ -296,6 +297,12 @@ export default function EventDetail() {
       return item.time_text;
     }
     if (item.schedule_text) {
+      // Prefer the compact summary ("Open · Closes at 8 PM") over the raw
+      // Google Places weekday string ("Monday: Closed; Tuesday: ..."). The
+      // raw form was leaking through to the WHEN slot on venues like Sugar
+      // Loaf PAC where no enrichment-generated time_text exists.
+      const { summaryLine } = formatOpeningHours(item.schedule_text);
+      if (summaryLine) return summaryLine;
       return item.schedule_text;
     }
     return "Ongoing";

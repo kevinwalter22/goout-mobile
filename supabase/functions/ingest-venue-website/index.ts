@@ -44,6 +44,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { logPipelineHealth } from "../_shared/health-log.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
+import { isCivicContent } from "../_shared/civic-filter.ts";
 import {
   extractEvents,
   type ExtractedEvent,
@@ -84,6 +85,9 @@ interface ExploreItemContext {
   title: string;
   town: string | null;
   category: string | null;
+  lat: number | null;
+  lng: number | null;
+  address: string | null;
 }
 
 interface PerVenueResult {
@@ -93,6 +97,7 @@ interface PerVenueResult {
   pages_fetched: number;
   events_found: number;
   candidates_queued: number;
+  candidates_civic_filtered: number;
   cost_cents: number;
   status: "ok" | "robots_blocked" | "fetch_error" | "extractor_error" | "budget_exhausted";
   error?: string;
@@ -309,6 +314,14 @@ function llmEventToCandidate(
     ends_at: ev.ends_at ?? undefined,
     recurrence_text: ev.recurrence_text ?? undefined,
     description_snippet: ev.description ?? undefined,
+    // Inherit the parent venue's coordinates. LLM extraction does not derive
+    // lat/lng from page HTML, so without this inheritance every venue-website
+    // event is map-invisible. Inheriting from the explore_item that owns the
+    // crawl is correct: the event is happening AT the venue.
+    location_name: ctx.title,
+    address: ctx.address ?? undefined,
+    lat: ctx.lat ?? undefined,
+    lng: ctx.lng ?? undefined,
     evidence,
     extraction_strategy: "html_dom",
     confidence: LLM_CANDIDATE_CONFIDENCE,
@@ -449,7 +462,7 @@ Deno.serve(async (req) => {
     const itemIds = claimed.map((r) => r.explore_item_id);
     const { data: itemRows, error: itemErr } = await supabase
       .from("explore_items")
-      .select("id, title, town, category")
+      .select("id, title, town, category, lat, lng, address")
       .in("id", itemIds);
     if (itemErr) throw new Error(`item context query failed: ${itemErr.message}`);
     const itemCtx = new Map<string, ExploreItemContext>(
@@ -460,6 +473,7 @@ Deno.serve(async (req) => {
     let aggregateCostCents = 0;
     let aggregateEventsFound = 0;
     let aggregateCandidatesQueued = 0;
+    let aggregateCandidatesCivicFiltered = 0;
 
     // ── Per-venue processing ─────────────────────────────────────────
     for (const row of claimed) {
@@ -472,6 +486,7 @@ Deno.serve(async (req) => {
         pages_fetched: 0,
         events_found: 0,
         candidates_queued: 0,
+        candidates_civic_filtered: 0,
         cost_cents: 0,
         status: "ok",
         duration_ms: 0,
@@ -565,8 +580,28 @@ Deno.serve(async (req) => {
           }
         }
 
-        const validCandidates = allCandidates.filter((c) => c.is_valid);
-        r.events_found = allCandidates.length;
+        // Civic-content filter — drop municipal-meeting nomenclature
+        // before it reaches event_ingest_raw. Parades, ceremonies, and
+        // festivals at municipal venues PASS; "Zoning Board Meeting",
+        // "Public Hearing", "Town Council Workshop" etc. are rejected.
+        // The venue (parent explore_item title) is included in the venue
+        // check, which catches generic "Regular Meeting" titles when the
+        // host is a town/village hall.
+        const filteredCandidates: typeof allCandidates = [];
+        for (const c of allCandidates) {
+          const civic = isCivicContent(c.title, ctx?.title ?? null);
+          if (civic.isCivic) {
+            r.candidates_civic_filtered++;
+            console.log(
+              `  civic-filtered "${c.title}" at ${ctx?.title || "unknown venue"} (${civic.reason})`,
+            );
+            continue;
+          }
+          filteredCandidates.push(c);
+        }
+
+        const validCandidates = filteredCandidates.filter((c) => c.is_valid);
+        r.events_found = filteredCandidates.length;
 
         // Upsert into event_ingest_raw
         if (!dryRun && validCandidates.length > 0) {
@@ -664,6 +699,7 @@ Deno.serve(async (req) => {
       aggregateCostCents += r.cost_cents;
       aggregateEventsFound += r.events_found;
       aggregateCandidatesQueued += r.candidates_queued;
+      aggregateCandidatesCivicFiltered += r.candidates_civic_filtered;
     }
 
     const durationMs = Date.now() - startTime;
@@ -673,6 +709,7 @@ Deno.serve(async (req) => {
       pages_fetched: results.reduce((s, r) => s + r.pages_fetched, 0),
       events_found: aggregateEventsFound,
       candidates_queued: aggregateCandidatesQueued,
+      candidates_civic_filtered: aggregateCandidatesCivicFiltered,
       cost_cents: aggregateCostCents,
       errors: results.filter((r) => r.status !== "ok").length,
       dry_run: dryRun,
