@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
 import { logInteraction } from "../lib/interactionLogger";
+import { getSessionId } from "../lib/sessionId";
+import { logEngagement } from "../lib/engagementBuffer";
 
 interface UseExploreItemRSVPOptions {
   /** Tags from the explore item (kept for backward compat, affinity now server-side) */
@@ -86,6 +88,19 @@ export function useExploreItemRSVP(
       if (!error) {
         setIsGoing(false);
         setGoingCount((prev) => Math.max(0, prev - 1));
+        // Engagement log — un-RSVP
+        try {
+          const sid = await getSessionId();
+          void logEngagement({
+            user_id: user.id,
+            explore_item_id: exploreItemId,
+            event_type: "unrsvp",
+            occurred_at: new Date().toISOString(),
+            session_id: sid,
+            feed_context: "event_detail",
+            item_snapshot: itemKind ? { kind: itemKind } : undefined,
+          });
+        } catch {}
       }
     } else {
       // Delete any existing expired RSVP first (activity re-RSVP next day)
@@ -136,6 +151,19 @@ export function useExploreItemRSVP(
             itemKind,
           });
         }
+        // Engagement log — RSVP. Intermediate funnel event, never sampled.
+        try {
+          const sid = await getSessionId();
+          void logEngagement({
+            user_id: user.id,
+            explore_item_id: exploreItemId,
+            event_type: "rsvp",
+            occurred_at: new Date().toISOString(),
+            session_id: sid,
+            feed_context: "event_detail",
+            item_snapshot: itemKind ? { kind: itemKind } : undefined,
+          });
+        } catch {}
       }
     }
   }

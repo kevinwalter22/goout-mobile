@@ -22,6 +22,8 @@ import { verifyCheckInLocation, getLocationPermissionStatus } from "../../src/ut
 import { openDirections, hasLocationData } from "../../src/utils/maps";
 import { shareItem } from "../../src/utils/share";
 import { logInteraction } from "../../src/lib/interactionLogger";
+import { logEngagement } from "../../src/lib/engagementBuffer";
+import { getSessionId } from "../../src/lib/sessionId";
 import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
 import { useItemFeedback, type FeedbackType } from "../../src/hooks/useItemFeedback";
 import { FriendsGoingSheet } from "../../src/components/FriendsGoingSheet";
@@ -430,6 +432,18 @@ export default function EventDetail() {
         eventType: "share",
         itemKind: item.kind,
       });
+      try {
+        const sid = await getSessionId();
+        void logEngagement({
+          user_id: user.id,
+          explore_item_id: item.id,
+          event_type: "share",
+          occurred_at: new Date().toISOString(),
+          session_id: sid,
+          feed_context: "event_detail",
+          item_snapshot: { title: item.title, category: item.category ?? undefined, town: item.town ?? undefined, kind: item.kind ?? undefined },
+        });
+      } catch {}
     }
   };
 
