@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import * as Location from "expo-location";
-import { getCurrentLocation, requestLocationPermission } from "../../src/utils/location";
+import { getCurrentLocation, requestLocationPermission, verifyCheckInLocation } from "../../src/utils/location";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../src/lib/supabase";
@@ -825,13 +825,45 @@ export default function Explore() {
     [user, orderedItems, sessionId, userLocation, engagement, resolveItemForEngagement],
   );
 
-  // Double-tap shortcut on postable-now cards → skip event detail, go straight to camera
+  // Double-tap shortcut on postable-now cards → skip event detail, go straight
+  // to camera. Still must run the verifyCheckInLocation gate so the post
+  // insert can satisfy the geo+time invariant (migration 137). Adds a 2-3s
+  // GPS lock on tap — acceptable for the data integrity gain.
   const handleCameraShortcut = useCallback(
-    (itemId: string) => {
+    async (itemId: string) => {
       if (didSwipeNavigateRecently()) return;
       const item = orderedItems.find((i) => i.id === itemId);
-      if (!item) return;
-      router.push(`/checkin/${itemId}?itemKind=${item.kind}` as any);
+      if (!item || item.lat == null || item.lng == null) return;
+      try {
+        const result = await verifyCheckInLocation(item.lat, item.lng);
+        if (!result.allowed) {
+          // Match the messaging of the event detail check-in path.
+          if (result.denied) {
+            Alert.alert(
+              "Enable Location for Euda",
+              "Euda needs your location to verify you’re at the venue.",
+            );
+          } else {
+            Alert.alert("Cannot Check In", result.error || "You must be at the location");
+          }
+          return;
+        }
+        router.push({
+          pathname: "/checkin/[eventId]",
+          params: {
+            eventId: itemId,
+            itemKind: item.kind,
+            verified_lat: String(result.user_lat),
+            verified_lng: String(result.user_lng),
+            verified_at: result.verified_at!,
+          },
+        } as any);
+      } catch (err) {
+        Alert.alert(
+          "Error",
+          err instanceof Error ? err.message : "Failed to verify location",
+        );
+      }
     },
     [orderedItems],
   );
