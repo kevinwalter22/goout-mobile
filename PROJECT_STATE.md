@@ -201,6 +201,7 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 | [06/14/2026] | Re-added prod approval gate via `Production` GitHub Environment (Kevin is required reviewer). Staging stays gate-free. | Kevin's final call: keep human review before prod, none for non-prod. | Kevin |
 | [06/14/2026] | **Migration replayability FIXED + staging fully built.** Two from-zero replay bugs found and fixed: (1) `events` + `app_config` were created by hand pre-migrations and no migration CREATEs them → added `000_legacy_baseline.sql` (reconstructed from prod via catalog introspection, `IF NOT EXISTS` so it's a prod no-op); (2) `020_add_ticketmaster_source.sql` had nested same-tag dollar quoting (`DO $$ … cron.schedule(…, $$…$$) … $$`) that fails the parser — outer block retagged `$do$`. The migration set now replays clean from zero. | Docker/pg_dump/psql were all unavailable in the environment, so the planned `supabase db dump` couldn't run; introspected the 2 ghost tables via node-postgres instead. Both fixes are prod-safe (prod has these migrations recorded/objects present). | Claude |
 | [06/15/2026] | Staging build gets its own identity via app variants (`app.config.js`): staging → `com.euda.app.staging` / "Euda (Staging)" / scheme `euda-staging`; prod + local dev unchanged. | iOS refuses two apps with the same bundle id, so the staging internal build collided with the App Store app ("Euda is already installed"). Distinct id lets staging install alongside prod. New id auto-provisions under Kevin's Apple account at build time. | Claude |
+| [06/15/2026] | **CHIEF ENGINEER PHASE 2: Sentry.** Two projects under org `euda-2e`: mobile `euda-mobile` (existing, `EXPO_PUBLIC_SENTRY_DSN`) + new `euda-edge` (`SENTRY_DSN_EDGE`). Staging/prod split by environment tag, not separate projects. Plain crash/error reporting only — **replay, performance tracing, feedback widget, and Sentry Logs disabled by default** (were on from the wizard; commented out with re-enable note). Edge uses a dependency-free fetch client (`_shared/sentry.ts`) wired into 7 silent-failure-prone functions; new functions adopt `withSentry`. | Replay/perf cost money + add noise (Kevin's call); keep them deliberate. Hand-rolled edge client avoids cold-start cost of `@sentry/deno`. Mobile was ~90% pre-built by the wizard — Phase 2 mostly disabled extras, added session_id, and built the edge side. | Kevin (strategy) + Claude (build) |
 | [06/14/2026] | Staging environment is LIVE: schema reset clean, baseline + all 137 migrations applied (138 recorded), grants restored, 3 `[STAGING]` test items seeded. Verified: authenticated RLS policy makes seeded rows visible; anon correctly sees nothing (Euda is login-gated). | Completes the staging bring-up end-to-end. Only EAS build + TestFlight install (account/device-bound) remain. | Claude |
 
 ---
@@ -395,6 +396,7 @@ Per-crawl cost is **$0.027** (above design doc's $0.005 estimate). Monthly proje
 - **Migration 126** (Warwick fetch partitions): applied; 3 partitions staged is_enabled=FALSE
 - **Migration 127** (Warwick collector targets): applied; 30 targets staged is_enabled=FALSE (32 originally, 2 deleted in 128)
 - **Migration 128** (URL fixes + 2 deletions): applied
+- **Sentry (Chief Engineer Phase 2):** mobile `euda-mobile` project already live (`@sentry/react-native`, replay/perf now disabled). Edge integration (`_shared/sentry.ts` + 7 wrapped functions) is code-complete and ships with the chief-engineer PR; goes active once `SENTRY_DSN_EDGE` is set as a Supabase function secret (the new `euda-edge` project). See `docs/chief_engineer/sentry.md`.
 
 ### Phase 5.1 — new files (05/19-20/2026, deployed via 5.2 redeploy)
 - `supabase/functions/_shared/llm-extractor.ts` — extractEvents() + preprocessHtmlForPrompt() + evidenceAppearsInSource() + Haiku 4.5 prompts. Standalone module; no DB or network side effects beyond the LLM call (optional cost logging via opts.supabase).
@@ -526,6 +528,7 @@ When multiple Claude Code sessions run in parallel, they need to reserve migrati
 - Feature flags for all V2 changes — no untested code paths in production by default
 - All sheets/modals should refresh on visible (lesson from Bug 1)
 - All notification handlers should emit refresh events (lesson from Bug 3)
+- New edge functions should capture errors via the `_shared/sentry.ts` wrapper (`withSentry(name, handler)` or `captureEdgeException` in the catch) unless there's a specific reason not to — so silent failures surface in the `euda-edge` Sentry project
 
 ### Known tech debt (added this session)
 
@@ -568,6 +571,15 @@ When multiple Claude Code sessions run in parallel, they need to reserve migrati
 - Current point fixes — civic filter, facility-pattern guardrail in `web_collector.ts`, dateless-event omission via `is_valid` — are all tactical patterns on specific failure modes. Each adds maintenance load.
 - Phase 5.5 (enrichment overhaul with `audience_fit` classifier + two-tier tag taxonomy) is the systemic fix: a single classifier that decides "would a real person want to do this?" replaces the growing list of hand-written regexes.
 - Prioritize before catalog scales 10x. Once Phase 5.5 ships, the per-pattern filters can be deprecated.
+
+**9. Sentry replay + performance tracing are DISABLED by default.**
+- Commented out (not deleted) in `src/lib/sentry.ts` with a re-enable note (Chief Engineer Phase 2). They cost money and add noise.
+- Don't flip them on without a measured reason. If we do, budget for the Sentry quota impact and re-check the PII scrubbing covers replay payloads.
+
+**10. Production schema has dashboard-era drift — needs an audit.**
+- Phase 1 found `events` and `app_config` existed in prod with NO `CREATE` migration (made by hand pre-migration-tracking); they only entered the migration set via `000_legacy_baseline.sql` reconstructed from prod introspection.
+- Follow-up: audit the full production schema against the staging-rebuilt schema to find ALL dashboard-era drift — not just tables, but RLS policies, triggers, indexes, functions, grants. Document or rectify so the migration set is the complete source of truth.
+- Not blocking; do before the next geography launch. The staging rebuild is the cheap diff baseline (it's exactly what the migrations produce).
 
 ---
 
