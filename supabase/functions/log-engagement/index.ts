@@ -24,6 +24,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireUser } from "../_shared/auth-guard.ts";
 
 const MAX_BATCH = 200;
@@ -186,6 +187,10 @@ Deno.serve(async (req) => {
   const { error: insErr } = await supabase.from("engagement_log").insert(rows);
   if (insErr) {
     console.error("[log-engagement] insert failed:", insErr.message);
+    await captureEdgeException(new Error(insErr.message), {
+      function: "log-engagement",
+      tags: { stage: "insert" },
+    });
     // pipeline_health_log entry for observability — best-effort
     try {
       const svc = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);

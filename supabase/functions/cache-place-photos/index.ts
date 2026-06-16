@@ -17,6 +17,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 
 // Google Places API (New) endpoints
@@ -321,6 +322,7 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error("cache-place-photos error:", error);
+    await captureEdgeException(error, { function: "cache-place-photos" });
     return new Response(
       JSON.stringify({
         error: error instanceof Error ? error.message : "Unknown error",

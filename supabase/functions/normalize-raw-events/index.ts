@@ -24,6 +24,7 @@ import {
 import { normalizeFields } from "../_shared/normalize-fields.ts";
 import { logPipelineHealth } from "../_shared/health-log.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 
 interface WorkerConfig {
@@ -452,6 +453,7 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error("Normalizer error:", error);
+    await captureEdgeException(error, { function: "normalize-raw-events" });
     return new Response(
       JSON.stringify({
         error: error instanceof Error ? error.message : "Unknown error",
