@@ -11,8 +11,26 @@
     "preview": {
       "distribution": "internal"
     },
+    "staging": {
+      "distribution": "internal",
+      "channel": "staging",
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "staging",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://baulipaydofqtkihkghj.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhdWxpcGF5ZG9mcXRraWhrZ2hqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0NzM2MjgsImV4cCI6MjA5NzA0OTYyOH0.oE88rxo9AOYHiCR9PO0Ac38-HJJbJVA0nF3LtWKELDk",
+        "EXPO_PUBLIC_PHONE_HASH_SALT": "euda_phone_salt_2024"
+      }
+    },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "prod",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://lkmntknpaiaiqvupzjbz.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_mxVuiA0yXUaF88e_h0EWqw_pXUN-LL5",
+        "EXPO_PUBLIC_PHONE_HASH_SALT": "euda_phone_salt_2024",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://60d8d1f219118c505ce75b52dac29795@o4510868957691904.ingest.us.sentry.io/4510868967260160"
+      }
     }
   },
   "submit": {

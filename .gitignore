@@ -48,7 +48,11 @@ app-example
 
 .env
 .env.local
+.env.staging
+.env.production
 supabase/functions/.env
+supabase/functions/.env.staging
+supabase/functions/.env.prod
 supabase/anthropic_key.txt
 
 # Windows reserved device names
