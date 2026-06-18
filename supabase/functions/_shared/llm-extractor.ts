@@ -12,9 +12,15 @@
  *      not a substring of the original (unstripped) HTML. Primary anti-hallucination control.
  *   5. Critique pass — second LLM call reviews kept events against the source. Belt-and-suspenders
  *      against hallucinations that slip past the evidence check (e.g. accurate title evidence
- *      but the "event" is actually a blog post or nav link).
+ *      but the "event" is actually a blog post or nav link). COST-GATED: the critique re-sends
+ *      the full HTML (~doubling input tokens), so it is SKIPPED when every surviving candidate is
+ *      already dated + verbatim-verified (high confidence — the critique almost never drops these).
+ *      Undated / partially-rejected batches still get critiqued. Override with opts.forceCritique.
  *
- * Cost model: Haiku 4.5 at $0.80/MTok input, $4.00/MTok output. Per-crawl ~$0.005.
+ * Cost model: Haiku 4.5 at $0.80/MTok input, $4.00/MTok output. Input dominates (HTML), and the
+ * critique pass is ~half of it — hence the confidence gate. Unchanged pages cost $0 upstream
+ * (collector_page_cache content-hash + ETag/304 gating; the LLM only runs on changed pages whose
+ * deterministic extraction yielded < 2 candidates).
  *
  * No DB or network side effects beyond the LLM call. If a Supabase client is passed via
  * options.supabase, the function will increment api_usage_counters('anthropic_haiku', cost_cents)
@@ -62,6 +68,8 @@ export interface ExtractionDiagnostics {
   rejected_schema: number;
   rejected_evidence_check: number;
   rejected_critique: number;
+  /** True when the critique pass was skipped by the high-confidence cost gate. */
+  critique_skipped: boolean;
   final: number;
   source_html_chars: number;
   prompt_html_chars: number;
@@ -83,8 +91,13 @@ export interface ExtractEventsOptions {
   supabase?: any;
   /** Override the default 40,000-char prompt truncation. */
   maxPromptChars?: number;
-  /** Skip critique pass (testing only). */
+  /** Skip critique pass entirely (testing only). */
   skipCritique?: boolean;
+  /**
+   * Force the critique pass to run even when the high-confidence cost gate would
+   * skip it. Use when maximum precision matters more than the token saving.
+   */
+  forceCritique?: boolean;
 }
 
 // ============================================================================
@@ -495,7 +508,22 @@ export async function extractEvents(
   let critiqueRejected = 0;
   let finalEvents = afterEvidence;
 
-  if (!opts.skipCritique && afterEvidence.length > 0) {
+  // Cost gate: the critique pass RE-SENDS the full preprocessed HTML, so it
+  // roughly doubles input tokens (~half the per-crawl cost). It exists to catch
+  // hallucinations that pass the verbatim-evidence check — typically nav links,
+  // "Read more" buttons, or blog posts that lack a real date. When EVERY
+  // surviving candidate is already dated (date_evidence present and
+  // verbatim-verified) and nothing was evidence-rejected, the batch is
+  // high-confidence and the critique almost never finds anything to drop — so we
+  // skip it. Undated / partially-rejected batches (the risky ones) still get
+  // critiqued. forceCritique overrides the gate.
+  const highConfidence =
+    afterEvidence.length > 0 &&
+    evidenceRejected === 0 &&
+    afterEvidence.every((ev) => ev.date_evidence !== null);
+  const critiqueSkippedByGate = highConfidence && !opts.forceCritique;
+
+  if (!opts.skipCritique && !critiqueSkippedByGate && afterEvidence.length > 0) {
     try {
       const critiqueUserMsg = `Source HTML excerpt:\n\n${promptHtml}\n\n` +
         `Candidate events:\n\n${JSON.stringify(afterEvidence, null, 2)}`;
@@ -559,6 +587,7 @@ export async function extractEvents(
       rejected_schema: rejectedSchema,
       rejected_evidence_check: evidenceRejected,
       rejected_critique: critiqueRejected,
+      critique_skipped: !opts.skipCritique && critiqueSkippedByGate && afterEvidence.length > 0,
       final: finalEvents.length,
       source_html_chars: html.length,
       prompt_html_chars: promptHtml.length,
