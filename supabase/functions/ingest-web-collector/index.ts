@@ -33,6 +33,7 @@ import { extractCandidates } from "../_shared/web-extractors.ts";
 import { extractEvents, type ExtractedEvent, type ExtractionHints } from "../_shared/llm-extractor.ts";
 import { logPipelineHealth } from "../_shared/health-log.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 import { isCivicContent } from "../_shared/civic-filter.ts";
 
@@ -632,6 +633,7 @@ serve(async (req) => {
     const errorMsg = err instanceof Error ? err.message : "Unknown error";
     errors.push(errorMsg);
     console.error(`Fatal error: ${errorMsg}`);
+    await captureEdgeException(err, { function: "ingest-web-collector" });
   }
 
   // Calculate total duration

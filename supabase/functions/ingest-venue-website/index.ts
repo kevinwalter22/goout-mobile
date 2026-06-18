@@ -43,6 +43,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { logPipelineHealth } from "../_shared/health-log.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 import { isCivicContent } from "../_shared/civic-filter.ts";
 import {
@@ -740,6 +741,7 @@ Deno.serve(async (req) => {
     const durationMs = Date.now() - startTime;
     const msg = error instanceof Error ? error.message : "Unknown error";
     console.error("ingest-venue-website error:", msg);
+    await captureEdgeException(error, { function: "ingest-venue-website" });
 
     try {
       const supabase = createClient(

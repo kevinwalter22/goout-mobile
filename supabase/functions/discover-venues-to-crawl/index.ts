@@ -32,6 +32,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { logPipelineHealth } from "../_shared/health-log.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 
 const DEFAULT_MAX_PER_RUN = 50;
@@ -274,6 +275,7 @@ Deno.serve(async (req) => {
     const durationMs = Date.now() - startTime;
     const message = error instanceof Error ? error.message : "Unknown error";
     console.error("discover-venues-to-crawl error:", message);
+    await captureEdgeException(error, { function: "discover-venues-to-crawl" });
 
     try {
       const supabase = createClient(
