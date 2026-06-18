@@ -43,6 +43,9 @@ export const STAGING_ANON_KEY = pick(
   "EXPO_PUBLIC_SUPABASE_ANON_KEY",
 );
 
+/** DSN of the euda-edge Sentry project (the edge crash-reporting target). */
+export const SENTRY_DSN_EDGE = pick("SENTRY_DSN_EDGE");
+
 /**
  * Production project ref. If the configured staging URL ever points here we
  * abort immediately — integration tests create and delete data and must never
