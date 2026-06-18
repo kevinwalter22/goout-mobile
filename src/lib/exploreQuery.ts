@@ -553,7 +553,7 @@ export function mapTagsToCategories(tags: string[]): string[] {
  * - Filtering: Only applied when a distance radius is set (not "any")
  * - Sorting: Applied whenever sort is "distance" and we have user location
  */
-function applyDistanceFilter(
+export function applyDistanceFilter(
   data: any[],
   userLocation: { lat: number; lng: number } | null | undefined,
   filters: ExploreFilterState
