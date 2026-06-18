@@ -525,8 +525,15 @@ When multiple Claude Code sessions run in parallel, they need to reserve migrati
 - Current types: friend requests, RSVPs, comments, event reminders
 - No proactive feed-content pushes yet (audit pending)
 
+### Testing & CI safety net (Phase 4, 06/18/2026)
+- **Three tiers.** `npm test` = Jest unit (fast, no network, `jest-expo`). `npm run test:integration` = Jest against **staging** Supabase (`integration-tests/**/*.integration.test.ts`, Node env, `jest.integration.config.js`). `npm run test:all` = both. `npm run test:extractor` = LLM fixtures (real Anthropic API, opt-in, not in CI).
+- **Integration harness** lives in `integration-tests/_helpers/`: `env.ts` loads `.env.staging` (fallback `.env.local`) and **hard-refuses to run against the prod project ref** (seeding/deleting data); `client.ts` (admin + anon clients); `namespace.ts` (per-run namespace); `seed.ts` (`createTestUser` / `insertExploreItem` / `cleanupNamespace` with a per-namespace registry). Pattern: seed → operate → assert server state → clean up. Parallel-safe via namespacing.
+- **Docs:** `docs/chief_engineer/testing.md` (philosophy, how-to, gating policy) and `docs/chief_engineer/test_coverage_audit.md` (pre-Phase-4 coverage state).
+- **GATING POLICY:** unit tests must be green to merge anything. **New edge functions and any change to a data-plane DB trigger/RPC require an integration test before merge to `staging`** — no exceptions for "it's small" (silent data-plane failures cost us 3 months of ingestion once; see tech-debt #5). Touching a previously-broken area (e.g. `parseScheduleText`) carries a higher bar. Run `test:all` before a staging→main promotion.
+
 ### Patterns to maintain
 - "Diagnose first, implement second" — always have Claude Code propose changes before writing code
+- New edge functions / data-plane trigger+RPC changes need an integration test (`npm run test:integration`) before merge to `staging` — see Testing section above
 - Server-delivered config over compiled constants (for anything experimentable)
 - Feature flags for all V2 changes — no untested code paths in production by default
 - All sheets/modals should refresh on visible (lesson from Bug 1)
