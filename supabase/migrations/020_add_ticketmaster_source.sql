@@ -131,7 +131,7 @@ GRANT EXECUTE ON FUNCTION get_ingestion_stats() TO service_role;
 -- If not available, use Supabase Dashboard > Database > Extensions to enable it,
 -- or use external scheduling (GitHub Actions, Vercel Cron, etc.)
 
-DO $$
+DO $do$
 BEGIN
   -- Check if pg_cron is available
   IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
@@ -188,7 +188,7 @@ BEGIN
   ELSE
     RAISE NOTICE 'pg_cron extension not available. Set up external scheduling for Edge Functions.';
   END IF;
-END $$;
+END $do$;
 
 -- ============================================================================
 -- COMMENT: Scheduling alternatives
