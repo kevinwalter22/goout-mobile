@@ -1,0 +1,44 @@
+name: Scheduled Monitoring (backup)
+
+# Belt-and-suspenders for pg_cron outages (we lost 3 months of ingestion to a
+# silent cron failure). Independently invokes the frequent monitor functions
+# every 4h so alerting still fires even if pg_cron is dead. The monitors are
+# idempotent, so double-invocation (cron + this) is harmless.
+#
+# Excludes monitor-data-quality (daily by design; running it every 4h would spam
+# the daily summary). Inert until these repo secrets are set:
+#   SUPABASE_PROD_PROJECT_REF, SUPABASE_PROD_SERVICE_ROLE_KEY
+
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: scheduled-monitoring
+  cancel-in-progress: false
+
+jobs:
+  ping-monitors:
+    runs-on: ubuntu-latest
+    env:
+      REF: ${{ secrets.SUPABASE_PROD_PROJECT_REF }}
+      KEY: ${{ secrets.SUPABASE_PROD_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Invoke monitor functions
+        run: |
+          if [ -z "$REF" ] || [ -z "$KEY" ]; then
+            echo "::warning::SUPABASE_PROD_PROJECT_REF / SUPABASE_PROD_SERVICE_ROLE_KEY not set; skipping."
+            exit 0
+          fi
+          fail=0
+          for fn in monitor-pipeline-health monitor-api-budgets monitor-error-rates; do
+            code=$(curl -sS -X POST "https://$REF.supabase.co/functions/v1/$fn" \
+              -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+              -d '{}' -o /dev/null -w "%{http_code}" || echo "000")
+            echo "$fn -> HTTP $code"
+            case "$code" in 2*) ;; *) fail=1 ;; esac
+          done
+          if [ "$fail" = "1" ]; then
+            echo "::warning::One or more monitor functions did not return 2xx."
+          fi
