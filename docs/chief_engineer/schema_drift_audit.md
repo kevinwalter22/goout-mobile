@@ -96,6 +96,24 @@ though prod already has this exact state). On approval I'll run
 `supabase db push` against prod, which records 138 in prod's history and is a
 no-op for every object. The `REVOKE`s also run on prod (already absent → no-op).
 
+## 🔴 Critical find during the prod apply: migration history was untracked
+When applying 138, `db push` to prod tried to **replay from 001** and errored
+("profiles already exists"). Cause: prod's `supabase_migrations.schema_migrations`
+had **zero** recorded versions — every prod migration (001–137) had been applied
+**outside CLI tracking** (dashboard SQL / psql). Implication: `db push` to prod
+was broken, which means the **`deploy-production.yml` CI deploy would have failed**
+on its first migration step.
+
+**Fixed:** backfilled all 137 versions into prod's history (metadata only — the
+schema already matched, per this audit, so marking them "applied" is accurate),
+then `db push` applied **138** for real. Prod history now records 000–138 (139
+rows); future `db push` / CI deploys work correctly. No schema or data change
+from the backfill.
+
+This is logged as resolved, but note the lesson: prod was never CLI-tracked, so
+any future "apply migrations to prod" must go through `db push` now (which is now
+possible) rather than manual SQL, or the history drifts again.
+
 ## How to re-run this audit
 `node scripts/schema_audit.js` (requires `pg`; `npm install pg --no-save`).
 Re-run after any prod hotfix to catch new dashboard-era drift early.
