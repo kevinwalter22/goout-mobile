@@ -174,17 +174,31 @@ export function isWithinCheckInRadius(
 }
 
 /**
- * Verify user can check in at event location
+ * Verify user can check in at event location.
+ *
+ * When `allowed` is true, the return also carries the sampled coordinates
+ * and the wall-clock time the gate ran. The caller is expected to thread
+ * these through the check-in flow to the post insert so the geo+time
+ * invariant becomes auditable: posts.verified_lat / verified_lng /
+ * verified_at / verified_at_event are required by the BEFORE INSERT
+ * trigger added in migration 137.
  */
-export async function verifyCheckInLocation(
-  eventLat: number,
-  eventLon: number,
-): Promise<{
+export interface VerifyCheckInResult {
   allowed: boolean;
   distance?: number;
   denied?: boolean;
   error?: string;
-}> {
+  /** Sampled user coords. Present iff allowed === true. */
+  user_lat?: number;
+  user_lng?: number;
+  /** ISO timestamp marking when the gate ran. Present iff allowed === true. */
+  verified_at?: string;
+}
+
+export async function verifyCheckInLocation(
+  eventLat: number,
+  eventLon: number,
+): Promise<VerifyCheckInResult> {
   // Request permission
   const { granted, denied, error: permError } =
     await requestLocationPermission();
@@ -202,11 +216,19 @@ export async function verifyCheckInLocation(
   const distance = getDistanceInMeters(latitude, longitude, eventLat, eventLon);
   const allowed = distance <= CHECK_IN_RADIUS_METERS;
 
+  if (!allowed) {
+    return {
+      allowed: false,
+      distance: Math.round(distance),
+      error: `You need to be closer to check in (${Math.round(distance)}m away)`,
+    };
+  }
+
   return {
-    allowed,
+    allowed: true,
     distance: Math.round(distance),
-    error: allowed
-      ? undefined
-      : `You need to be closer to check in (${Math.round(distance)}m away)`,
+    user_lat: latitude,
+    user_lng: longitude,
+    verified_at: new Date().toISOString(),
   };
 }

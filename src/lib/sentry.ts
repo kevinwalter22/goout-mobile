@@ -9,6 +9,7 @@
 
 import * as Sentry from "@sentry/react-native";
 import { Env } from "../config/env";
+import { getSessionId } from "./sessionId";
 
 const ENABLED = !__DEV__ && !!Env.SENTRY_DSN;
 
@@ -29,21 +30,21 @@ export function initSentry(): void {
     // Do NOT send default PII (IP, cookies, etc.) — privacy safe
     sendDefaultPii: false,
 
-    // Performance tracing: 20% of transactions
-    tracesSampleRate: 0.2,
-
-    // Session Replay
-    replaysSessionSampleRate: 0.1,
-    replaysOnErrorSampleRate: 1,
-
-    // Logs
-    enableLogs: true,
-
-    // Integrations: replay + feedback widget
-    integrations: [
-      Sentry.mobileReplayIntegration({ maskAllText: true }),
-      Sentry.feedbackIntegration(),
-    ],
+    // --- DISABLED BY DEFAULT (Chief Engineer Phase 2, 06/15/2026) ---------
+    // Replay, performance tracing, the feedback widget, and Sentry Logs were
+    // turned on by the Sentry setup wizard. They cost money and add noise, so
+    // we ship plain crash/error reporting only. Re-enable DELIBERATELY when we
+    // have a measured reason — uncomment the lines below AND re-add the
+    // integrations array:
+    //   tracesSampleRate: 0.2,             // performance tracing
+    //   replaysSessionSampleRate: 0.1,     // session replay (sampled)
+    //   replaysOnErrorSampleRate: 1,       // session replay (on error)
+    //   enableLogs: true,                  // Sentry Logs product
+    //   integrations: [
+    //     Sentry.mobileReplayIntegration({ maskAllText: true }),
+    //     Sentry.feedbackIntegration(),
+    //   ],
+    // ---------------------------------------------------------------------
 
     // Strip PII from events before sending
     beforeSend(event) {
@@ -75,6 +76,9 @@ export function initSentry(): void {
       return breadcrumb;
     },
   });
+
+  // Tag events with the engagement session_id for cross-correlation.
+  attachSentrySession();
 }
 
 /** Scrub sensitive keys from an arbitrary data object. */
@@ -103,6 +107,20 @@ function scrubData(data: Record<string, unknown>): void {
 export function setSentryUser(userId: string | null): void {
   if (!ENABLED) return;
   Sentry.setUser(userId ? { id: userId } : null);
+}
+
+/**
+ * Attach the current engagement session_id (src/lib/sessionId) as a Sentry tag
+ * so crashes correlate with the engagement-log session. Fire-and-forget and
+ * safe to call repeatedly (e.g. on auth changes).
+ */
+export function attachSentrySession(): void {
+  if (!ENABLED) return;
+  getSessionId()
+    .then((id) => Sentry.setTag("session_id", id))
+    .catch(() => {
+      /* session id is best-effort context; telemetry must never throw */
+    });
 }
 
 /** Add a navigation breadcrumb. */

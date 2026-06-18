@@ -9,6 +9,7 @@
  */
 
 import type { NormalizedEvent } from "./ticketmaster.ts";
+import { isChainVenue } from "../chain-detection.ts";
 
 // ============================================================================
 // Type → Category mapping
@@ -476,6 +477,8 @@ export function normalizeGooglePlacesEvent(raw: any): NormalizedEvent {
   const rating = raw.rating as number | undefined;
   const userRatingCount = raw.userRatingCount as number | undefined;
 
+  const chainMatch = isChainVenue(title);
+
   return {
     kind: "activity",
     title,
@@ -513,5 +516,8 @@ export function normalizeGooglePlacesEvent(raw: any): NormalizedEvent {
     external_id: raw.id,
 
     tags,
+
+    is_chain: chainMatch.is_chain,
+    chain_brand: chainMatch.brand,
   };
 }

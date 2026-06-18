@@ -398,12 +398,13 @@ export async function queryExploreItems(
           : "review_status.is.null,review_status.in.(auto_approved,approved)"
       ); // Quarantine gate (include creator's own items)
 
-    // Hide past events: show activities (no starts_at), events still going
-    // (ends_at >= now), or events within 3h grace window (no ends_at)
+    // Past-event filter — trust starts_at only. Don't use ends_at because some
+    // sources (Potsdam Chamber JSON-LD, others) emit listing-expiry dates that
+    // masquerade as event-end dates. Multi-day festivals will drop out of the
+    // upcoming feed after their day-1 grace window. See migration 134.
     const pastCutoff = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
-    const nowIso = new Date().toISOString();
     query = query.or(
-      `starts_at.is.null,ends_at.gte.${nowIso},and(ends_at.is.null,starts_at.gte.${pastCutoff})`
+      `starts_at.is.null,starts_at.gte.${pastCutoff}`
     );
 
     // Apply time filter (simple version - includes all activities)
@@ -561,12 +562,26 @@ function applyDistanceFilter(
     return data;
   }
 
-  // Step 1: Apply distance filtering (only when a radius is set)
+  // Step 1: Distance gate (architectural floor, not an opt-in).
+  //
+  // When the user has a location, the default feed always applies a 50mi
+  // cap + a null-coord exclusion — even if filters.distance is "any". The
+  // earlier "any" → no-filter path let null-coord Potsdam events leak into
+  // the Warwick feed.
+  //
+  // Override semantics:
+  //   - Active search → no distance filter at all (user is asking to look
+  //     beyond their region; e.g., "find me a venue I visited in NYC").
+  //   - Explicit narrower radius (5mi, 25mi) → respected.
+  //   - filters.distance === "any" → silently treated as the 50mi default.
+  const DEFAULT_FLOOR_MILES = 50;
+  const searchActive = (filters.searchQuery?.trim().length ?? 0) > 0;
   let result = data;
-  if (filters.distance !== "any") {
-    const maxDistance = filters.distance;
+  if (!searchActive) {
+    const maxDistance =
+      filters.distance !== "any" ? (filters.distance as number) : DEFAULT_FLOOR_MILES;
     result = data.filter((item) => {
-      if (!item.lat || !item.lng) return true;
+      if (!item.lat || !item.lng) return false;
       const dist = getDistanceInMiles(
         userLocation.lat,
         userLocation.lng,

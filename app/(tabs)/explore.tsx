@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
   Platform,
   Pressable,
@@ -13,7 +14,7 @@ import {
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import * as Location from "expo-location";
-import { getCurrentLocation, requestLocationPermission } from "../../src/utils/location";
+import { getCurrentLocation, requestLocationPermission, verifyCheckInLocation } from "../../src/utils/location";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../src/lib/supabase";
@@ -31,6 +32,9 @@ import { processPostableNow } from "../../src/lib/postableNow";
 import { useGroupedExplore } from "../../src/hooks/useGroupedExplore";
 import { getEffectiveFilters } from "../../src/config/exploreFilters";
 import { logInteraction } from "../../src/lib/interactionLogger";
+import { getSessionId } from "../../src/lib/sessionId";
+import { flushEngagement, logEngagement, replayPersistedEvents } from "../../src/lib/engagementBuffer";
+import { useEngagementTracking } from "../../src/hooks/useEngagementTracking";
 import { addNavigationBreadcrumb } from "../../src/lib/sentry";
 import { getCategoryPlaceholder } from "../../src/utils/categoryPlaceholder";
 import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
@@ -403,6 +407,12 @@ export default function Explore() {
   // User location (for Postable Now feature)
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
+  // Engagement-log session id (lazy-minted via getSessionId on mount; survives
+  // app idle <30min; resets after). Threaded into every engagement event so
+  // funnel attribution can group impressions→tap→rsvp→post that came from
+  // the same browse.
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
   // Postable Now candidates (fetched independently of main sort/pagination)
   const [postableNowCandidates, setPostableNowCandidates] = useState<ExploreItem[]>([]);
   const [postableNowVersion, setPostableNowVersion] = useState(0);
@@ -476,6 +486,33 @@ export default function Explore() {
       scrollToTopEmitter.off("scrollToTop:explore", handleScrollToTop);
     };
   }, [refresh]);
+
+  // Engagement-log bootstrap — mint/restore session id, replay any events
+  // persisted on a prior failed flush. Runs once when the user is known.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const id = await getSessionId();
+      if (!cancelled) setSessionId(id);
+      await replayPersistedEvents();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  // Flush the engagement buffer when the app goes to background, so events
+  // captured during this session don't sit stale in memory if the user
+  // force-quits.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background" || state === "inactive") {
+        void flushEngagement();
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // Debounce search text → trigger backend search query
   useEffect(() => {
@@ -660,7 +697,7 @@ export default function Explore() {
       scoreBreakdown: {
         timeMatch: 1, distance: 1, openNow: 1, friendsGoing: 0,
         tagAffinity: 0, weather: 0.5, contextIntent: 0.5, typeAffinity: 0.5,
-        quality: 1, communityFeedback: 0.5, freshness: 0.5, friendCreated: 0, total: 1,
+        quality: 1, communityFeedback: 0.5, freshness: 0.5, friendCreated: 0, chainPenalty: 1.0, total: 1,
       },
     }));
   }, [postableNow]);
@@ -703,6 +740,53 @@ export default function Explore() {
     return [...postableNow, ...regularItems];
   }, [postableNow, regularItems]);
 
+  // Engagement viewport tracker. resolveItem captures the scoring breakdown
+  // + social/snapshot at impression time — don't re-fetch later, the data
+  // drifts (friendsGoingMap especially).
+  const resolveItemForEngagement = useCallback(
+    (itemId: string) => {
+      const scored = orderedItems.find((s) => s.id === itemId);
+      if (!scored) return null;
+      return {
+        ranking_signals: scored.scoreBreakdown
+          ? {
+              ...scored.scoreBreakdown,
+              recommend_score: scored.recommendScore,
+            }
+          : null,
+        social_context: {
+          friends_going_count: rsvpData[itemId]?.friendsGoing ?? 0,
+        },
+        item_snapshot: {
+          title: scored.title,
+          category: scored.category ?? undefined,
+          town: scored.town ?? undefined,
+          kind: scored.kind ?? undefined,
+        },
+      };
+    },
+    [orderedItems, rsvpData],
+  );
+
+  const engagement = useEngagementTracking({
+    userId: user?.id,
+    sessionId,
+    feedContext: "explore_list",
+    userLocation,
+    resolveItem: resolveItemForEngagement,
+  });
+
+  // When the user navigates away from the feed (unmount / blur), emit
+  // scroll_past for every item they saw but didn't engage with.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        engagement.flushScrollPasts();
+        void flushEngagement();
+      };
+    }, [engagement]),
+  );
+
   // Stable callback for item press (used by memoized ExploreCard)
   const handleItemPress = useCallback(
     (itemId: string) => {
@@ -716,20 +800,70 @@ export default function Explore() {
             eventType: "open_detail",
             itemKind: item.kind,
           });
+          if (sessionId) {
+            const rank = orderedItems.findIndex((i) => i.id === itemId);
+            const ctx = resolveItemForEngagement(itemId);
+            void logEngagement({
+              user_id: user.id,
+              explore_item_id: itemId,
+              event_type: "tap",
+              occurred_at: new Date().toISOString(),
+              session_id: sessionId,
+              feed_context: "explore_list",
+              rank_position: rank,
+              ranking_signals: ctx?.ranking_signals,
+              user_location: userLocation,
+              social_context: ctx?.social_context,
+              item_snapshot: ctx?.item_snapshot,
+            });
+            engagement.markEngaged(itemId);
+          }
         }
       }
       router.push(`/event/${itemId}` as any);
     },
-    [user, orderedItems],
+    [user, orderedItems, sessionId, userLocation, engagement, resolveItemForEngagement],
   );
 
-  // Double-tap shortcut on postable-now cards → skip event detail, go straight to camera
+  // Double-tap shortcut on postable-now cards → skip event detail, go straight
+  // to camera. Still must run the verifyCheckInLocation gate so the post
+  // insert can satisfy the geo+time invariant (migration 137). Adds a 2-3s
+  // GPS lock on tap — acceptable for the data integrity gain.
   const handleCameraShortcut = useCallback(
-    (itemId: string) => {
+    async (itemId: string) => {
       if (didSwipeNavigateRecently()) return;
       const item = orderedItems.find((i) => i.id === itemId);
-      if (!item) return;
-      router.push(`/checkin/${itemId}?itemKind=${item.kind}` as any);
+      if (!item || item.lat == null || item.lng == null) return;
+      try {
+        const result = await verifyCheckInLocation(item.lat, item.lng);
+        if (!result.allowed) {
+          // Match the messaging of the event detail check-in path.
+          if (result.denied) {
+            Alert.alert(
+              "Enable Location for Euda",
+              "Euda needs your location to verify you’re at the venue.",
+            );
+          } else {
+            Alert.alert("Cannot Check In", result.error || "You must be at the location");
+          }
+          return;
+        }
+        router.push({
+          pathname: "/checkin/[eventId]",
+          params: {
+            eventId: itemId,
+            itemKind: item.kind,
+            verified_lat: String(result.user_lat),
+            verified_lng: String(result.user_lng),
+            verified_at: result.verified_at!,
+          },
+        } as any);
+      } catch (err) {
+        Alert.alert(
+          "Error",
+          err instanceof Error ? err.message : "Failed to verify location",
+        );
+      }
     },
     [orderedItems],
   );
@@ -746,12 +880,31 @@ export default function Explore() {
           {
             text: "Hide",
             style: "destructive",
-            onPress: () => suppressItem(itemId),
+            onPress: () => {
+              suppressItem(itemId);
+              if (user && sessionId) {
+                const ctx = resolveItemForEngagement(itemId);
+                void logEngagement({
+                  user_id: user.id,
+                  explore_item_id: itemId,
+                  event_type: "dismiss",
+                  occurred_at: new Date().toISOString(),
+                  session_id: sessionId,
+                  feed_context: "explore_list",
+                  rank_position: orderedItems.findIndex((i) => i.id === itemId),
+                  ranking_signals: ctx?.ranking_signals,
+                  user_location: userLocation,
+                  social_context: ctx?.social_context,
+                  item_snapshot: ctx?.item_snapshot,
+                });
+                engagement.markEngaged(itemId);
+              }
+            },
           },
         ],
       );
     },
-    [suppressItem, orderedItems],
+    [suppressItem, orderedItems, user, sessionId, userLocation, engagement, resolveItemForEngagement],
   );
 
   return (
@@ -1114,6 +1267,8 @@ export default function Explore() {
             }
             windowSize={5}
             maxToRenderPerBatch={5}
+            onViewableItemsChanged={engagement.onViewableItemsChanged}
+            viewabilityConfig={engagement.viewabilityConfig}
             renderItem={({ item, index }) => (
               <ExploreCard
                 item={item}

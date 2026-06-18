@@ -3,11 +3,12 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Alert, Platform, Pressable, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthProvider } from "../src/contexts/AuthContext";
 import { useAuth } from "../src/hooks/useAuth";
 import { ToastProvider } from "../src/context/ToastContext";
 import { ThemeProvider, useTheme } from "../src/contexts/ThemeContext";
-import { validateEnv } from "../src/config/env";
+import { validateEnv, Env } from "../src/config/env";
 import { initSentry, SentryWrap } from "../src/lib/sentry";
 import { captureWarning } from "../src/lib/logger";
 import { SwipeableBackGesture } from "../src/components/SwipeableBackGesture";
@@ -125,6 +126,48 @@ function DevSimBanner() {
     >
       <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700", letterSpacing: 1 }}>
         {display.label}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * Persistent banner for non-production builds so testers can never confuse
+ * a staging build with the real App Store app (and vice versa). Renders
+ * nothing in prod. Distinct from DevSimBanner (which is __DEV__-only and
+ * reflects the network sim mode) — this one ships in real staging builds.
+ */
+function EnvBanner() {
+  const insets = useSafeAreaInsets();
+  if (Env.APP_ENV === "prod") return null;
+
+  const color = Env.APP_ENV === "staging" ? "#B45309" : "#6B7280";
+  // Absolute overlay covering the status-bar / notch area. Absolute (not a flex
+  // child) so it does NOT push screen content down — every screen already pads
+  // for the safe-area top inset, and a layout-flow banner would double that and
+  // shift the header. The label sits at the bottom of the inset, just under the
+  // notch, where it's actually readable instead of behind the clock/camera.
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        // Extend a few px past the safe-area inset so the label clears the
+        // bottom of the notch / Dynamic Island (which otherwise clips it).
+        height: Math.max(insets.top, 24) + 10,
+        backgroundColor: color,
+        justifyContent: "flex-end",
+        alignItems: "center",
+        paddingBottom: 3,
+        zIndex: 1000,
+        elevation: 1000,
+      }}
+    >
+      <Text style={{ color: "#fff", fontSize: 11, fontWeight: "700", letterSpacing: 1 }}>
+        {Env.APP_ENV.toUpperCase()}
       </Text>
     </View>
   );
@@ -276,6 +319,7 @@ function RootLayout() {
           <NotificationInitializer />
           {__DEV__ && <DevSimBanner />}
           <ThemedStack />
+          <EnvBanner />
         </ToastProvider>
       </AuthProvider>
     </ThemeProvider>
@@ -287,9 +331,11 @@ const WrappedRootLayout = SentryWrap(RootLayout);
 export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AppErrorBoundary>
-        <WrappedRootLayout />
-      </AppErrorBoundary>
+      <SafeAreaProvider>
+        <AppErrorBoundary>
+          <WrappedRootLayout />
+        </AppErrorBoundary>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

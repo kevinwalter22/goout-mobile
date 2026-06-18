@@ -1,0 +1,510 @@
+{
+  "timestamp": "2026-05-20T17:00:43.810Z",
+  "fixtures": [
+    {
+      "name": "albert-wisner-library",
+      "gt_total": 12,
+      "extracted_total": 63,
+      "matched": 12,
+      "unmatched_extracted": [
+        {
+          "title": "Preschool Music With Mr. Tepper",
+          "closest_gt": "Preschool Storytime",
+          "similarity": 0.5
+        },
+        {
+          "title": "The Funny Poetry Show For Families",
+          "closest_gt": "Tuesday Evening Book Group reads &quot;God of the Woods&quot; by Liz Moore",
+          "similarity": 0.25
+        },
+        {
+          "title": "Board Game Night",
+          "closest_gt": "Kombucha Paper Making Workshop",
+          "similarity": 0.2666666666666667
+        },
+        {
+          "title": "Sensory Playtime",
+          "closest_gt": "Preschool Storytime",
+          "similarity": 0.42105263157894735
+        },
+        {
+          "title": "MESSY! Sensory Playtime",
+          "closest_gt": "Preschool Storytime",
+          "similarity": 0.36363636363636365
+        },
+        {
+          "title": "Preschool Play",
+          "closest_gt": "Preschool Storytime",
+          "similarity": 0.5789473684210527
+        },
+        {
+          "title": "Read To The Dogs – Goose",
+          "closest_gt": "Read To The Dogs &#8211; Junior and Posey",
+          "similarity": 0.6571428571428571
+        },
+        {
+          "title": "Creativity Club – Banana Sushi Rolls",
+          "closest_gt": "Creativity Club &#8211; Candles For Mom",
+          "similarity": 0.6388888888888888
+        },
+        {
+          "title": "Millennial Book Group",
+          "closest_gt": "Dungeons &amp; Dragons",
+          "similarity": 0.23809523809523814
+        },
+        {
+          "title": "AWPL Board of Trustees Meeting",
+          "closest_gt": "Music on McFarland: Classical Guitarist Peter Fletcher",
+          "similarity": 0.28301886792452835
+        },
+        {
+          "title": "Mother Goose",
+          "closest_gt": "Toddler Time",
+          "similarity": 0.33333333333333337
+        },
+        {
+          "title": "Cooking Together",
+          "closest_gt": "Kombucha Paper Making Workshop",
+          "similarity": 0.2666666666666667
+        },
+        {
+          "title": "Playing Together, Being Together",
+          "closest_gt": "Kombucha Paper Making Workshop",
+          "similarity": 0.25806451612903225
+        },
+        {
+          "title": "Toddler Music With Mr. Jeff",
+          "closest_gt": "Toddler Time",
+          "similarity": 0.42307692307692313
+        },
+        {
+          "title": "Board Games and Bridge",
+          "closest_gt": "Kombucha Paper Making Workshop",
+          "similarity": 0.30000000000000004
+        },
+        {
+          "title": "Dice Potion Craft",
+          "closest_gt": "Drop-in Family Chess",
+          "similarity": 0.25
+        },
+        {
+          "title": "Read To The Dogs – Coalby",
+          "closest_gt": "Read To The Dogs &#8211; Junior and Posey",
+          "similarity": 0.6285714285714286
+        },
+        {
+          "title": "Crocheting Club for Beginners",
+          "closest_gt": "Creativity Club &#8211; Candles For Mom",
+          "similarity": 0.303030303030303
+        },
+        {
+          "title": "Scholarship Committee Meeting",
+          "closest_gt": "Music on McFarland: Classical Guitarist Peter Fletcher",
+          "similarity": 0.28301886792452835
+        },
+        {
+          "title": "Toddler Music With Mr. Jeff",
+          "closest_gt": "Toddler Time",
+          "similarity": 0.42307692307692313
+        },
+        {
+          "title": "Create & Connect: Joyful Arts for Seniors with Wickham Works",
+          "closest_gt": "Read To The Dogs &#8211; Junior and Posey",
+          "similarity": 0.29824561403508776
+        },
+        {
+          "title": "Unscripted: Improv @ the Library",
+          "closest_gt": "Tuesday Evening Book Group reads &quot;God of the Woods&quot; by Liz Moore",
+          "similarity": 0.25
+        },
+        {
+          "title": "Preschool Music With Mr. Tepper",
+          "closest_gt": "Preschool Storytime",
+          "similarity": 0.5
+        },
+        {
+          "title": "Monday Afternoon @ the Movies: Reagan (2024)",
+          "closest_gt": "Monday Afternoon @ the Movies: The Two Popes (2019)",
+          "similarity": 0.6956521739130435
+        },
+        {
+          "title": "Board Game Night",
+          "closest_gt": "Kombucha Paper Making Workshop",
+          "similarity": 0.2666666666666667
+        },
+        {
+          "title": "Sensory Playtime",
+          "closest_gt": "Preschool Storytime",
+          "similarity": 0.42105263157894735
+        },
+        {
+          "title": "MESSY! Sensory Playtime",
+          "closest_gt": "Preschool Storytime",
+          "similarity": 0.36363636363636365
+        },
+        {
+          "title": "Preschool Play",
+          "closest_gt": "Preschool Storytime",
+          "similarity": 0.5789473684210527
+        },
+        {
+          "title": "Read To The Dogs – Goose",
+          "closest_gt": "Read To The Dogs &#8211; Junior and Posey",
+          "similarity": 0.6571428571428571
+        },
+        {
+          "title": "Mother Goose",
+          "closest_gt": "Toddler Time",
+          "similarity": 0.33333333333333337
+        },
+        {
+          "title": "Cooking Together",
+          "closest_gt": "Kombucha Paper Making Workshop",
+          "similarity": 0.2666666666666667
+        },
+        {
+          "title": "Teen Advisory Board",
+          "closest_gt": "Read To The Dogs &#8211; Junior and Posey",
+          "similarity": 0.22857142857142854
+        },
+        {
+          "title": "Playing Together, Being Together",
+          "closest_gt": "Kombucha Paper Making Workshop",
+          "similarity": 0.25806451612903225
+        },
+        {
+          "title": "Toddler Music With Mr. Jeff",
+          "closest_gt": "Toddler Time",
+          "similarity": 0.42307692307692313
+        },
+        {
+          "title": "Board Games and Bridge",
+          "closest_gt": "Kombucha Paper Making Workshop",
+          "similarity": 0.30000000000000004
+        },
+        {
+          "title": "Read To The Dogs – Coalby",
+          "closest_gt": "Read To The Dogs &#8211; Junior and Posey",
+          "similarity": 0.6285714285714286
+        },
+        {
+          "title": "Crocheting Club for Beginners",
+          "closest_gt": "Creativity Club &#8211; Candles For Mom",
+          "similarity": 0.303030303030303
+        },
+        {
+          "title": "Toddler Music With Mr. Jeff",
+          "closest_gt": "Toddler Time",
+          "similarity": 0.42307692307692313
+        },
+        {
+          "title": "Create & Connect: Joyful Arts for Seniors with Wickham Works",
+          "closest_gt": "Read To The Dogs &#8211; Junior and Posey",
+          "similarity": 0.29824561403508776
+        },
+        {
+          "title": "Unscripted: Improv @ the Library",
+          "closest_gt": "Tuesday Evening Book Group reads &quot;God of the Woods&quot; by Liz Moore",
+          "similarity": 0.25
+        },
+        {
+          "title": "Handprint Butterflies Storytime",
+          "closest_gt": "Preschool Storytime",
+          "similarity": 0.4193548387096774
+        }
+      ],
+      "unmatched_gt": [],
+      "recall": 1,
+      "precision": 0.3492063492063492,
+      "expected_complete": false,
+      "usage": {
+        "extract_input_tokens": 17274,
+        "extract_output_tokens": 10161,
+        "critique_input_tokens": 26895,
+        "critique_output_tokens": 90,
+        "cost_cents": 8
+      },
+      "diagnostics": {
+        "raw_extracted": 63,
+        "rejected_schema": 0,
+        "rejected_evidence_check": 0,
+        "rejected_critique": 0,
+        "final": 63,
+        "truncated": true,
+        "errors": []
+      },
+      "hallucinations": []
+    },
+    {
+      "name": "bethel-woods",
+      "gt_total": 6,
+      "extracted_total": 3,
+      "matched": 3,
+      "unmatched_extracted": [],
+      "unmatched_gt": [
+        "Pre-Event Dinner for Ann Wilson: In My Voice",
+        "Ann Wilson: In My Voice",
+        "HARDY: THE COUNTRY! COUNTRY! TOUR!"
+      ],
+      "recall": 0.5,
+      "precision": 1,
+      "expected_complete": true,
+      "usage": {
+        "extract_input_tokens": 7500,
+        "extract_output_tokens": 905,
+        "critique_input_tokens": 7428,
+        "critique_output_tokens": 212,
+        "cost_cents": 2
+      },
+      "diagnostics": {
+        "raw_extracted": 6,
+        "rejected_schema": 0,
+        "rejected_evidence_check": 3,
+        "rejected_critique": 0,
+        "final": 3,
+        "truncated": false,
+        "errors": [
+          "evidence reject (date): Friday, May 29",
+          "evidence reject (date): Friday, May 29",
+          "evidence reject (date): Saturday, May 30"
+        ]
+      },
+      "hallucinations": []
+    },
+    {
+      "name": "cornerstone-theatre-arts",
+      "gt_total": 0,
+      "extracted_total": 0,
+      "matched": 0,
+      "unmatched_extracted": [],
+      "unmatched_gt": [],
+      "recall": 1,
+      "precision": 1,
+      "expected_complete": true,
+      "usage": {
+        "extract_input_tokens": 4896,
+        "extract_output_tokens": 17,
+        "critique_input_tokens": 0,
+        "critique_output_tokens": 0,
+        "cost_cents": 1
+      },
+      "diagnostics": {
+        "raw_extracted": 0,
+        "rejected_schema": 0,
+        "rejected_evidence_check": 0,
+        "rejected_critique": 0,
+        "final": 0,
+        "truncated": false,
+        "errors": []
+      },
+      "hallucinations": []
+    },
+    {
+      "name": "drowned-lands-brewery",
+      "gt_total": 3,
+      "extracted_total": 3,
+      "matched": 3,
+      "unmatched_extracted": [],
+      "unmatched_gt": [],
+      "recall": 1,
+      "precision": 1,
+      "expected_complete": false,
+      "usage": {
+        "extract_input_tokens": 16870,
+        "extract_output_tokens": 476,
+        "critique_input_tokens": 16805,
+        "critique_output_tokens": 174,
+        "cost_cents": 3
+      },
+      "diagnostics": {
+        "raw_extracted": 3,
+        "rejected_schema": 0,
+        "rejected_evidence_check": 0,
+        "rejected_critique": 0,
+        "final": 3,
+        "truncated": true,
+        "errors": []
+      },
+      "hallucinations": []
+    },
+    {
+      "name": "mountain-creek-resort",
+      "gt_total": 1,
+      "extracted_total": 1,
+      "matched": 1,
+      "unmatched_extracted": [],
+      "unmatched_gt": [],
+      "recall": 1,
+      "precision": 1,
+      "expected_complete": true,
+      "usage": {
+        "extract_input_tokens": 15284,
+        "extract_output_tokens": 213,
+        "critique_input_tokens": 14960,
+        "critique_output_tokens": 133,
+        "cost_cents": 3
+      },
+      "diagnostics": {
+        "raw_extracted": 1,
+        "rejected_schema": 0,
+        "rejected_evidence_check": 0,
+        "rejected_critique": 0,
+        "final": 1,
+        "truncated": false,
+        "errors": []
+      },
+      "hallucinations": []
+    },
+    {
+      "name": "pennings-farm-market",
+      "gt_total": 6,
+      "extracted_total": 3,
+      "matched": 2,
+      "unmatched_extracted": [
+        {
+          "title": "Barre3 Outdoor Workout Tickets…at the Cidery",
+          "closest_gt": "Barre3 Outdoor Workout at the Cidery",
+          "similarity": 0.8181818181818181
+        }
+      ],
+      "unmatched_gt": [
+        "Barre3 Outdoor Workout at the Cidery",
+        "Gingerbread Houses 2025",
+        "Uncle Shoehorn NYE Masquerade Party",
+        "Live Music at Pennings Beer Garden and Cidery"
+      ],
+      "recall": 0.3333333333333333,
+      "precision": 0.6666666666666666,
+      "expected_complete": true,
+      "usage": {
+        "extract_input_tokens": 8484,
+        "extract_output_tokens": 411,
+        "critique_input_tokens": 8356,
+        "critique_output_tokens": 141,
+        "cost_cents": 2
+      },
+      "diagnostics": {
+        "raw_extracted": 3,
+        "rejected_schema": 0,
+        "rejected_evidence_check": 0,
+        "rejected_critique": 0,
+        "final": 3,
+        "truncated": false,
+        "errors": []
+      },
+      "hallucinations": []
+    },
+    {
+      "name": "storm-king",
+      "gt_total": 3,
+      "extracted_total": 10,
+      "matched": 3,
+      "unmatched_extracted": [],
+      "unmatched_gt": [],
+      "recall": 1,
+      "precision": 1,
+      "expected_complete": true,
+      "usage": {
+        "extract_input_tokens": 3365,
+        "extract_output_tokens": 2292,
+        "critique_input_tokens": 5119,
+        "critique_output_tokens": 166,
+        "cost_cents": 2
+      },
+      "diagnostics": {
+        "raw_extracted": 10,
+        "rejected_schema": 0,
+        "rejected_evidence_check": 0,
+        "rejected_critique": 0,
+        "final": 10,
+        "truncated": false,
+        "errors": []
+      },
+      "hallucinations": []
+    },
+    {
+      "name": "sugar-loaf-guild",
+      "gt_total": 2,
+      "extracted_total": 2,
+      "matched": 2,
+      "unmatched_extracted": [],
+      "unmatched_gt": [],
+      "recall": 1,
+      "precision": 1,
+      "expected_complete": true,
+      "usage": {
+        "extract_input_tokens": 3848,
+        "extract_output_tokens": 387,
+        "critique_input_tokens": 3690,
+        "critique_output_tokens": 155,
+        "cost_cents": 1
+      },
+      "diagnostics": {
+        "raw_extracted": 2,
+        "rejected_schema": 0,
+        "rejected_evidence_check": 0,
+        "rejected_critique": 0,
+        "final": 2,
+        "truncated": false,
+        "errors": []
+      },
+      "hallucinations": []
+    },
+    {
+      "name": "sugar-loaf-pac",
+      "gt_total": 7,
+      "extracted_total": 7,
+      "matched": 7,
+      "unmatched_extracted": [],
+      "unmatched_gt": [],
+      "recall": 1,
+      "precision": 1,
+      "expected_complete": true,
+      "usage": {
+        "extract_input_tokens": 18430,
+        "extract_output_tokens": 1480,
+        "critique_input_tokens": 19368,
+        "critique_output_tokens": 104,
+        "cost_cents": 4
+      },
+      "diagnostics": {
+        "raw_extracted": 7,
+        "rejected_schema": 0,
+        "rejected_evidence_check": 0,
+        "rejected_critique": 0,
+        "final": 7,
+        "truncated": true,
+        "errors": []
+      },
+      "hallucinations": []
+    },
+    {
+      "name": "warwick-valley-winery",
+      "gt_total": 5,
+      "extracted_total": 5,
+      "matched": 5,
+      "unmatched_extracted": [],
+      "unmatched_gt": [],
+      "recall": 1,
+      "precision": 1,
+      "expected_complete": true,
+      "usage": {
+        "extract_input_tokens": 2526,
+        "extract_output_tokens": 836,
+        "critique_input_tokens": 2817,
+        "critique_output_tokens": 169,
+        "cost_cents": 1
+      },
+      "diagnostics": {
+        "raw_extracted": 5,
+        "rejected_schema": 0,
+        "rejected_evidence_check": 0,
+        "rejected_critique": 0,
+        "final": 5,
+        "truncated": false,
+        "errors": []
+      },
+      "hallucinations": []
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "venue_name": "Cornerstone Theatre Arts",
+  "source_url": "https://www.cornerstonetheatrearts.org/2026-season.html",
+  "expected_complete": true,
+  "notes": "ZERO-EVENTS FIXTURE — expected_complete=true with expected_events:[]. Original GT (Phase 5.1 fixture build) listed 5 show titles pulled from the active nav submenu (Songs & Stories Part 3, On Golden Pond, Macbeth, The Country House, Silent Sky), but during Phase 5.1 test analysis we determined those are NAVIGATION ELEMENTS, not event listings. The 2026-season.html page body contains only two season-poster images — no dates, descriptions, or scheduled performance times appear anywhere on the page. Performance dates live on per-show subpages (e.g., /on-golden-pond.html, /macbeth.html) which the collector would need to crawl separately. For this fixture's purpose (testing the extractor's discipline at NOT hallucinating events from nav-menu text), the correct extraction is the empty set: a model that returns 0 events is CORRECT here; a model that emits 5 show titles from data-title attributes in nav links is wrong because none are presented as events on this page. This fixture tests the 'reject non-events: navigation links' rule in the extraction prompt. To re-introduce Cornerstone as a positive-content fixture in the future, save a per-show subpage (e.g. macbeth.html with its performance dates) instead of the season-index.",
+  "expected_events": []
+}

@@ -28,11 +28,27 @@
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
-import { WebCollector, CollectorTarget, CollectionResult, EventCandidate } from "../_shared/web-collector.ts";
+import { WebCollector, CollectorTarget, CollectionResult, EventCandidate, ExtractionEvidence } from "../_shared/web-collector.ts";
 import { extractCandidates } from "../_shared/web-extractors.ts";
+import { extractEvents, type ExtractedEvent, type ExtractionHints } from "../_shared/llm-extractor.ts";
 import { logPipelineHealth } from "../_shared/health-log.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
+import { isCivicContent } from "../_shared/civic-filter.ts";
+
+// ============================================================================
+// Phase 5.2 — LLM fallback constants
+// ============================================================================
+// Threshold below which the LLM extractor is invoked when target.use_llm_fallback=TRUE.
+// 2 matches the design-doc default ("if total candidates < llm_fallback_threshold").
+const LLM_FALLBACK_THRESHOLD = 2;
+
+// LLM-derived candidates ride in via this synthetic confidence and the
+// 'html_dom' strategy enum value (closest existing match — LLM analyzed HTML
+// DOM content). Downstream code identifies them by raw_json._llm_extracted=true
+// rather than by extraction_strategy alone.
+const LLM_CANDIDATE_CONFIDENCE = 75;
 
 // ============================================================================
 // Hashing Utilities
@@ -59,6 +75,108 @@ async function hashJson(obj: unknown): Promise<string> {
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Convert an ExtractedEvent from the LLM extractor into the EventCandidate
+ * shape that the rest of the ingest pipeline expects.
+ *
+ * The resulting candidate carries:
+ *   - extraction_strategy="html_dom" — closest existing enum value (the LLM
+ *     reads HTML DOM content). Downstream identifies LLM-sourced rows via
+ *     raw_json._llm_extracted=true instead.
+ *   - evidence[].source="dom" — same reason; the existing enum has no "llm".
+ *   - is_valid set per the standard rule (requires title + source_url AND
+ *     either starts_at or recurrence_text). Title-only LLM extractions
+ *     (e.g., Pennings button events) get is_valid=false and are filtered
+ *     before event_ingest_raw upsert, matching the existing pipeline contract.
+ */
+function llmEventToCandidate(ev: ExtractedEvent, pageUrl: string): EventCandidate {
+  const evidence: ExtractionEvidence[] = [
+    {
+      field: "title",
+      source: "dom",
+      value: ev.title,
+      raw_snippet: ev.title_evidence,
+    },
+  ];
+  if (ev.starts_at) {
+    evidence.push({
+      field: "starts_at",
+      source: "dom",
+      value: ev.starts_at,
+      raw_snippet: ev.date_evidence ?? undefined,
+    });
+  }
+  if (ev.recurrence_text) {
+    evidence.push({
+      field: "recurrence_text",
+      source: "dom",
+      value: ev.recurrence_text,
+    });
+  }
+  if (ev.description) {
+    evidence.push({
+      field: "description",
+      source: "dom",
+      value: ev.description,
+    });
+  }
+
+  // Resolve source_url_path against the page URL if relative
+  let sourceUrl = pageUrl;
+  if (ev.source_url_path) {
+    try {
+      sourceUrl = new URL(ev.source_url_path, pageUrl).href;
+    } catch {
+      // Keep pageUrl if the path doesn't resolve
+    }
+  }
+
+  const hasTemporal = !!(ev.starts_at || ev.recurrence_text);
+
+  const candidate: EventCandidate & {
+    _llm_extracted?: boolean;
+    _llm_title_evidence?: string;
+    _llm_date_evidence?: string | null;
+    _llm_price_text?: string | null;
+  } = {
+    title: ev.title,
+    source_url: sourceUrl,
+    starts_at: ev.starts_at ?? undefined,
+    ends_at: ev.ends_at ?? undefined,
+    recurrence_text: ev.recurrence_text ?? undefined,
+    description_snippet: ev.description ?? undefined,
+    evidence,
+    extraction_strategy: "html_dom",
+    confidence: LLM_CANDIDATE_CONFIDENCE,
+    validation_errors: hasTemporal ? [] : ["Missing temporal signal (LLM extraction)"],
+    is_valid: hasTemporal,
+    // Marker for downstream — same underscore-prefix convention as _target_*
+    _llm_extracted: true,
+    _llm_title_evidence: ev.title_evidence,
+    _llm_date_evidence: ev.date_evidence,
+    _llm_price_text: ev.price_text,
+  };
+  return candidate;
+}
+
+/**
+ * Check the anthropic_haiku monthly budget. Returns true if there's cents
+ * remaining for an LLM call. For service='anthropic_haiku', api_usage_counters
+ * units are interpreted as CENTS (1 unit = 1¢) — set in migration 129.
+ */
+// deno-lint-ignore no-explicit-any
+async function hasAnthropicBudget(supabase: any): Promise<{ ok: boolean; remaining: number; error?: string }> {
+  try {
+    const { data, error } = await supabase.rpc("get_api_budget", { p_service: "anthropic_haiku" });
+    if (error) return { ok: false, remaining: 0, error: error.message };
+    const row = Array.isArray(data) ? data[0] : data;
+    const remaining = typeof row?.requests_remaining === "number" ? row.requests_remaining : 0;
+    return { ok: remaining > 0, remaining };
+  } catch (err) {
+    return { ok: false, remaining: 0, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 function generateExternalId(candidate: EventCandidate): string {
@@ -138,6 +256,11 @@ serve(async (req) => {
     valid_candidates: 0,
     candidates_queued: 0,  // Candidates inserted into event_ingest_raw
     candidates_blocklisted: 0,
+    candidates_civic_filtered: 0,
+    // Phase 5.2 — LLM fallback telemetry
+    llm_calls_made: 0,
+    llm_candidates_added: 0,
+    llm_cost_cents: 0,
     duration_ms: 0,
   };
 
@@ -171,7 +294,8 @@ serve(async (req) => {
           default_category,
           content_types,
           site_config,
-          source_type
+          source_type,
+          use_llm_fallback
         `)
         .eq("id", targetId)
         .single();
@@ -201,6 +325,7 @@ serve(async (req) => {
         content_types: data.content_types || ["events"],
         site_config: data.site_config || {},
         source_type: data.source_type || null,
+        use_llm_fallback: data.use_llm_fallback === true,
       }];
     } else {
       // Get all enabled targets that are due
@@ -261,6 +386,9 @@ serve(async (req) => {
         let extractedCount = 0;
         let validCount = 0;
         let queuedCount = 0;
+        let llmCallsMade = 0;
+        let llmCandidatesAdded = 0;
+        let llmCostCents = 0;
 
         if (cachedPages && cachedPages.length > 0) {
           console.log(`  Extracting from ${cachedPages.length} cached pages...`);
@@ -273,6 +401,62 @@ serve(async (req) => {
               page.url,
               target,
             );
+
+            // ──────────────────────────────────────────────────────────
+            // Phase 5.2 — LLM extractor fallback
+            // ──────────────────────────────────────────────────────────
+            // When the target opted-in via use_llm_fallback AND the
+            // deterministic pipeline yielded fewer than 2 candidates on this
+            // page, call the LLM extractor on the cached HTML.
+            //
+            // Budget guard: we check the anthropic_haiku monthly cap BEFORE
+            // calling. extractEvents() itself increments the counter AFTER a
+            // successful run (via opts.supabase). Both ends are protected.
+            if (target.use_llm_fallback && candidates.length < LLM_FALLBACK_THRESHOLD) {
+              const budget = await hasAnthropicBudget(supabase);
+              if (!budget.ok) {
+                const reason = budget.error
+                  ? `budget check failed: ${budget.error}`
+                  : `monthly cap reached (remaining=${budget.remaining}¢)`;
+                console.warn(`    LLM fallback skipped for ${page.url}: ${reason}`);
+                extractErrors.push(`llm_fallback_skipped: ${reason}`);
+              } else {
+                const hints: ExtractionHints = {
+                  venue_name: target.venue_name ?? target.name,
+                  town: target.town ?? undefined,
+                  timezone: (target.site_config as Record<string, unknown>)?.timezone as string | undefined,
+                  default_category: target.default_category ?? undefined,
+                };
+                try {
+                  const llmResult = await extractEvents(page.raw_html, hints, { supabase });
+                  llmCallsMade++;
+                  llmCostCents += llmResult.usage.cost_cents;
+                  console.log(
+                    `    LLM fallback: ${llmResult.events.length} events ` +
+                      `(cost=${llmResult.usage.cost_cents}¢, ` +
+                      `tokens=${llmResult.usage.total_input_tokens}in/${llmResult.usage.total_output_tokens}out, ` +
+                      `truncated=${llmResult.diagnostics.truncated}, ` +
+                      `dropped: schema=${llmResult.diagnostics.rejected_schema}, ` +
+                      `evidence=${llmResult.diagnostics.rejected_evidence_check}, ` +
+                      `critique=${llmResult.diagnostics.rejected_critique})`,
+                  );
+                  for (const ev of llmResult.events) {
+                    candidates.push(llmEventToCandidate(ev, page.url));
+                    llmCandidatesAdded++;
+                  }
+                  // Surface any diagnostic warnings from the extractor
+                  if (llmResult.diagnostics.errors.length > 0) {
+                    extractErrors.push(
+                      ...llmResult.diagnostics.errors.slice(0, 3).map((e) => `llm: ${e}`),
+                    );
+                  }
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  console.warn(`    LLM fallback failed for ${page.url}: ${msg}`);
+                  extractErrors.push(`llm_fallback_error: ${msg}`);
+                }
+              }
+            }
 
             extractedCount += candidates.length;
             validCount += candidates.filter((c) => c.is_valid).length;
@@ -311,6 +495,23 @@ serve(async (req) => {
                   });
                   if (blocked) {
                     summary.candidates_blocklisted++;
+                    continue;
+                  }
+
+                  // Civic-content filter — drop zoning boards, planning
+                  // commissions, town council meetings, public hearings, etc.
+                  // before they reach event_ingest_raw. Community-focused
+                  // civic events (parades, ceremonies, festivals) pass.
+                  // See _shared/civic-filter.ts for pattern rationale.
+                  const civic = isCivicContent(
+                    candidate.title,
+                    target.venue_name ?? candidate.location_name ?? null,
+                  );
+                  if (civic.isCivic) {
+                    summary.candidates_civic_filtered++;
+                    console.log(
+                      `    Civic-filtered: "${candidate.title}" (${civic.reason})`,
+                    );
                     continue;
                   }
 
@@ -372,6 +573,10 @@ serve(async (req) => {
           candidates_extracted: extractedCount,
           valid_candidates: validCount,
           candidates_queued: queuedCount,
+          // Phase 5.2 — LLM fallback per-target
+          llm_calls_made: llmCallsMade,
+          llm_candidates_added: llmCandidatesAdded,
+          llm_cost_cents: llmCostCents,
           circuit_tripped: collectionResult.circuit_tripped,
           errors: collectionResult.errors,
           duration_ms: collectionResult.duration_ms,
@@ -388,8 +593,17 @@ serve(async (req) => {
         summary.candidates_found += extractedCount;
         summary.valid_candidates += validCount;
         summary.candidates_queued += queuedCount;
+        summary.llm_calls_made += llmCallsMade;
+        summary.llm_candidates_added += llmCandidatesAdded;
+        summary.llm_cost_cents += llmCostCents;
 
-        console.log(`  Result: ${collectionResult.pages_fetched} fetched, ${collectionResult.pages_cached_hit} cached, ${extractedCount} candidates, ${queuedCount} queued`);
+        console.log(
+          `  Result: ${collectionResult.pages_fetched} fetched, ${collectionResult.pages_cached_hit} cached, ` +
+            `${extractedCount} candidates, ${queuedCount} queued` +
+            (llmCallsMade > 0
+              ? ` | LLM fallback: ${llmCallsMade} calls, ${llmCandidatesAdded} candidates added, ${llmCostCents}¢`
+              : ""),
+        );
 
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -419,6 +633,7 @@ serve(async (req) => {
     const errorMsg = err instanceof Error ? err.message : "Unknown error";
     errors.push(errorMsg);
     console.error(`Fatal error: ${errorMsg}`);
+    await captureEdgeException(err, { function: "ingest-web-collector" });
   }
 
   // Calculate total duration
@@ -441,6 +656,11 @@ serve(async (req) => {
       valid_candidates: summary.valid_candidates,
       candidates_queued: summary.candidates_queued,
       candidates_blocklisted: summary.candidates_blocklisted,
+      candidates_civic_filtered: summary.candidates_civic_filtered,
+      // Phase 5.2 — LLM fallback aggregate
+      llm_calls_made: summary.llm_calls_made,
+      llm_candidates_added: summary.llm_candidates_added,
+      llm_cost_cents: summary.llm_cost_cents,
       dry_run: dryRun,
       errors: errors.slice(0, 10),
     },
@@ -449,7 +669,12 @@ serve(async (req) => {
   console.log(`\n=== Web Collector Complete ===`);
   console.log(`  Targets: ${summary.targets_processed} processed, ${summary.targets_skipped} skipped`);
   console.log(`  Pages: ${summary.pages_fetched} fetched, ${summary.pages_cached_hit} cached`);
-  console.log(`  Candidates: ${summary.candidates_found} found, ${summary.valid_candidates} valid, ${summary.candidates_queued} queued, ${summary.candidates_blocklisted} blocklisted`);
+  console.log(`  Candidates: ${summary.candidates_found} found, ${summary.valid_candidates} valid, ${summary.candidates_queued} queued, ${summary.candidates_blocklisted} blocklisted, ${summary.candidates_civic_filtered} civic-filtered`);
+  if (summary.llm_calls_made > 0) {
+    console.log(
+      `  LLM fallback: ${summary.llm_calls_made} calls, ${summary.llm_candidates_added} candidates added, ${summary.llm_cost_cents}¢ ($${(summary.llm_cost_cents / 100).toFixed(4)})`,
+    );
+  }
   console.log(`  Duration: ${summary.duration_ms}ms`);
 
   return new Response(

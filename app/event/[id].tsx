@@ -22,6 +22,8 @@ import { verifyCheckInLocation, getLocationPermissionStatus } from "../../src/ut
 import { openDirections, hasLocationData } from "../../src/utils/maps";
 import { shareItem } from "../../src/utils/share";
 import { logInteraction } from "../../src/lib/interactionLogger";
+import { logEngagement } from "../../src/lib/engagementBuffer";
+import { getSessionId } from "../../src/lib/sessionId";
 import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
 import { useItemFeedback, type FeedbackType } from "../../src/hooks/useItemFeedback";
 import { FriendsGoingSheet } from "../../src/components/FriendsGoingSheet";
@@ -34,6 +36,7 @@ import type { ExploreItem } from "../../src/types/database";
 import { captureError } from "../../src/lib/logger";
 import { friendlyMessage } from "../../src/lib/errorMessages";
 import { getFallbackImage } from "../../src/lib/categoryFallbackImages";
+import { formatOpeningHours } from "../../src/utils/formatOpeningHours";
 
 /** Returns true for any Google Maps URL — these should not appear as "MORE INFO" links
  *  because the detail screen already has a dedicated "Open in Google Maps" CTA. */
@@ -164,10 +167,11 @@ export default function EventDetail() {
     setCheckingIn(true);
 
     try {
-      const { allowed, denied, error } = await verifyCheckInLocation(
+      const verifyResult = await verifyCheckInLocation(
         item.lat,
         item.lng,
       );
+      const { allowed, denied, error } = verifyResult;
 
       if (!allowed) {
         if (denied) {
@@ -199,8 +203,20 @@ export default function EventDetail() {
         logAnalyticsEvent(user.id, "post_started", { itemKind: item.kind });
       }
 
-      // Navigate to camera mode selector (pass itemKind for interaction logging)
-      router.push(`/checkin/${item.id}?itemKind=${item.kind}` as any);
+      // Navigate to camera mode selector. Thread the verified coords +
+      // timestamp through so they reach the post insert (migration 137's
+      // BEFORE INSERT trigger requires them for any explore_item-linked
+      // post). Query params are strings; the camera will parse them back.
+      router.push({
+        pathname: "/checkin/[eventId]",
+        params: {
+          eventId: item.id,
+          itemKind: item.kind,
+          verified_lat: String(verifyResult.user_lat),
+          verified_lng: String(verifyResult.user_lng),
+          verified_at: verifyResult.verified_at!,
+        },
+      } as any);
     } catch (err) {
       Alert.alert(
         "Error",
@@ -296,6 +312,12 @@ export default function EventDetail() {
       return item.time_text;
     }
     if (item.schedule_text) {
+      // Prefer the compact summary ("Open · Closes at 8 PM") over the raw
+      // Google Places weekday string ("Monday: Closed; Tuesday: ..."). The
+      // raw form was leaking through to the WHEN slot on venues like Sugar
+      // Loaf PAC where no enrichment-generated time_text exists.
+      const { summaryLine } = formatOpeningHours(item.schedule_text);
+      if (summaryLine) return summaryLine;
       return item.schedule_text;
     }
     return "Ongoing";
@@ -423,6 +445,18 @@ export default function EventDetail() {
         eventType: "share",
         itemKind: item.kind,
       });
+      try {
+        const sid = await getSessionId();
+        void logEngagement({
+          user_id: user.id,
+          explore_item_id: item.id,
+          event_type: "share",
+          occurred_at: new Date().toISOString(),
+          session_id: sid,
+          feed_context: "event_detail",
+          item_snapshot: { title: item.title, category: item.category ?? undefined, town: item.town ?? undefined, kind: item.kind ?? undefined },
+        });
+      } catch {}
     }
   };
 

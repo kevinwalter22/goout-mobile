@@ -24,6 +24,7 @@ import {
 import { normalizeFields } from "../_shared/normalize-fields.ts";
 import { logPipelineHealth } from "../_shared/health-log.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 
 interface WorkerConfig {
@@ -295,6 +296,13 @@ Deno.serve(async (req) => {
 
         // Strip null image fields to avoid overwriting existing cached images
         // during re-normalization (e.g., Google Places items already have images)
+        //
+        // Chain fields (is_chain, chain_brand) flow through the ...normalized
+        // spread when an adapter populates them (currently: google_places via
+        // _shared/chain-detection.ts; see migration 130). Other adapters omit
+        // them, so the DB default FALSE / NULL is used on first insert and the
+        // existing value is preserved on subsequent upserts. is_chain_override
+        // is deliberately never written here — it's manual-only.
         const upsertPayload: Record<string, any> = {
           source_id: rawData.source_id,
           external_id: rawData.external_id,
@@ -445,6 +453,7 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error("Normalizer error:", error);
+    await captureEdgeException(error, { function: "normalize-raw-events" });
     return new Response(
       JSON.stringify({
         error: error instanceof Error ? error.message : "Unknown error",

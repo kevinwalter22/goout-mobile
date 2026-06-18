@@ -1,0 +1,29 @@
+{
+  "venue_name": "Drowned Lands Brewery",
+  "source_url": "https://drownedlands.beer/events-1",
+  "expected_complete": false,
+  "notes": "TRUNCATED FIXTURE — expected_complete=false. Original GT was 18 events (1 JSON-LD + 15 Squarespace HTML + 2 weekly recurring). During Phase 5.1 testing we confirmed via preflight (scripts/_tmp_drowned_lands_truncation.ts) that only the FIRST 3 of those events fall within the extractor's 40K-char prompt window after preprocessing. The remaining 15 are outside the truncation cliff. We trimmed GT to the 3 in-window events so this fixture measures EXTRACTION SKILL (does the model find what's visible to it?) rather than TRUNCATION (which we already know costs recall). The 15 removed events span Comedy Nights, Memorial Day - Pig Roast, Whiskey & Cigar Night, Summer Car & Motorcycles Show, Pints & Pilates, Summer Concert, Field Day, Red White & Brews, Focaccia Workshop, Summer Harvest Celebration, Sunday Picnic, Hot Sauce Workshop, Wild Acres 2026, Spring Fling Dance Party. ONE additional event ('Live Music: Sunday Sessions') was also dropped — its only source is the page's single JSON-LD <script type=\"application/ld+json\"> block, which the extractor's preprocessor strips along with other <script> tags (token-bloat avoidance). That's a deliberate design trade-off documented separately; it costs us this fixture's one structured-data event but saves ~5K tokens per crawl across the full catalog where JSON-LD is rare (preflight showed only 1 of 10 fixtures has Event JSON-LD). RECALL is computed against the 3 in-window events. PRECISION is NOT computed for this fixture (expected_complete=false) because the extractor will find additional real in-window events outside our curated 3, and we can't distinguish those from hallucinations without expanding GT. Structural notes: Squarespace fluid-engine page. 'Weekly at The Drowned Lands' recurring section header introduces Trivia Nights (Thu 6PM) and Karaoke Nights (Fri 7PM); each has an <h3> with the recurrence pattern. Tie Dye Night appears as the first dated single-occurrence event in source order.",
+  "expected_events": [
+    {
+      "title": "Trivia Nights",
+      "starts_at": null,
+      "recurrence_text": "Thursday Nights • 6PM",
+      "title_evidence": "<h2 style=\"text-align:center;white-space:pre-wrap;\">Trivia Nights</h2>",
+      "date_evidence": "<h3 style=\"text-align:center;white-space:pre-wrap;\">Thursday Nights • 6PM</h3>"
+    },
+    {
+      "title": "Karaoke Nights",
+      "starts_at": null,
+      "recurrence_text": "Friday Nights • 7PM",
+      "title_evidence": "<h2 style=\"text-align:center;white-space:pre-wrap;\">Karaoke Nights</h2>",
+      "date_evidence": "<h3 style=\"text-align:center;white-space:pre-wrap;\">Friday Nights • 7PM</h3>"
+    },
+    {
+      "title": "Tie Dye Night",
+      "starts_at": "2026-05-22T18:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<h2 style=\"white-space:pre-wrap;\" data-rte-preserve-empty=\"true\">Tie Dye Night</h2>",
+      "date_evidence": "Friday, May 22nd • 6:00PM"
+    }
+  ]
+}

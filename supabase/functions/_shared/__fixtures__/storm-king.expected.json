@@ -1,0 +1,28 @@
+{
+  "venue_name": "Storm King Art Center",
+  "source_url": "https://stormking.org/events",
+  "notes": "No JSON-LD present. Events extracted from WordPress archive markup: <article class=\"post-item\"> with <h2 class=\"entry-title\"> for title and a following <p> containing the date range. Page 1 lists 10 articles; 8 of them are 'Daily Walking Tour' repeats for sequential dates (Apr 8-13, 15, 16, 2026), consolidated here into a single recurring entry per instructions. Older posts paginated under /events/page/2/.",
+  "expected_events": [
+    {
+      "title": "Member Preview Weekend",
+      "starts_at": "2026-03-28T10:00:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<h2 class=\"entry-title has-blue-color\">Member Preview Weekend</h2>",
+      "date_evidence": "Saturday, March 28, 2026 &#8211; Sunday, March 29, 2026 @ 10:00 am &#8211; 3:00 pm"
+    },
+    {
+      "title": "Moonlit Walk",
+      "starts_at": "2026-04-01T18:30:00-04:00",
+      "recurrence_text": null,
+      "title_evidence": "<h2 class=\"entry-title has-blue-color\">Moonlit Walk</h2>",
+      "date_evidence": "Wednesday, April 1, 2026 @ 6:30 pm &#8211; 8:30 pm"
+    },
+    {
+      "title": "Daily Walking Tour",
+      "starts_at": "2026-04-08T13:15:00-04:00",
+      "recurrence_text": "Daily; instances on April 8, 9, 10, 11, 12, 13, 15, 16, 2026 @ 1:15 pm – 2:15 pm",
+      "title_evidence": "<h2 class=\"entry-title has-blue-color\">Daily Walking Tour</h2>",
+      "date_evidence": "Wednesday, April 8, 2026 @ 1:15 pm &#8211; 2:15 pm"
+    }
+  ]
+}

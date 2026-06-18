@@ -148,6 +148,29 @@ export function normalizeWebCollectorCandidate(raw: WebCollectorCandidate): Norm
     else if (raw._target_content_types[0] === "activities") kind = "activity";
   }
 
+  // Guardrail: demote operating-hours / season-range / "always-open" facility
+  // listings that the LLM occasionally extracts as events.
+  //
+  // Trigger from the Bethel Woods Museum case: the LLM extracted "April 1 -
+  // December 31" (the museum's annual operating season) as an event with
+  // starts_at=April 1, 00:00. The page didn't list a real scheduled event;
+  // it listed when the museum is open. Symptoms to filter on:
+  //   - starts_at is midnight (00:00) AND there's no recurrence_text, AND
+  //   - title or description suggests a facility/exhibit/visit rather than
+  //     a discrete scheduled program.
+  if (kind === "event" && raw.starts_at) {
+    const startsAt = new Date(raw.starts_at);
+    const isMidnight =
+      startsAt.getUTCHours() === 0 && startsAt.getUTCMinutes() === 0;
+    const facilityPattern =
+      /\b(?:museum|gallery|library hours|visit the|visit us|hours of operation|open year[\s-]?round|open daily|permanent exhibit|on (?:view|display))\b/i;
+    const looksLikeFacility =
+      facilityPattern.test(title) || facilityPattern.test(raw.description_snippet ?? "");
+    if (isMidnight && looksLikeFacility) {
+      kind = "activity";
+    }
+  }
+
   // Price bucket (basic inference from text)
   const priceBucket = inferPriceBucket(searchText);
 

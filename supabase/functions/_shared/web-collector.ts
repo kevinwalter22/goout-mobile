@@ -59,6 +59,10 @@ export interface CollectorTarget {
   content_types: string[];
   site_config: Record<string, any>;
   source_type: string | null;
+  // Phase 5.2: when true, ingest-web-collector falls back to the LLM
+  // extractor if deterministic strategies yield < 2 candidates. Optional —
+  // older rows without the column default to FALSE on the DB side.
+  use_llm_fallback?: boolean;
 }
 
 export interface PageCacheEntry {

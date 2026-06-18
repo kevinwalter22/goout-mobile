@@ -20,6 +20,7 @@ import {
   ENRICHMENT_SYSTEM_PROMPT,
 } from "../_shared/enrichment-schema.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
+import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 
 interface WorkerConfig {
@@ -368,6 +369,7 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error("Worker error:", error);
+    await captureEdgeException(error, { function: "run-enrichment-queue" });
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

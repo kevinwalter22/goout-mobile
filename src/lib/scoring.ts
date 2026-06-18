@@ -28,6 +28,12 @@ export interface ScoringContext {
   friendCreatedItemIds?: Set<string>;
   /** Current explore toggle: "all" | "event" | "activity". Context intent + type affinity only apply to "all". */
   kindFilter?: string;
+  /**
+   * Whether the user is actively searching (non-empty searchQuery in the
+   * explore filter state). Disables the chain-venue suppression — if the
+   * user typed "Starbucks", chains are exactly what they want to see.
+   */
+  searchActive?: boolean;
 }
 
 export interface WeatherCondition {
@@ -49,6 +55,14 @@ export interface ScoreBreakdown {
   communityFeedback: number;
   freshness: number;
   friendCreated: number;
+  /**
+   * Multiplier applied AFTER the weighted sum when the item is a chain
+   * venue (per migration 130) and neither searchActive nor a friends
+   * signal overrides the suppression. 1.0 = no penalty, 0.5 = full
+   * chain suppression. The penalty is NOT a weight slot — it shifts
+   * `total` after weights are summed, leaving WEIGHTS sum=1.0 intact.
+   */
+  chainPenalty: number;
   total: number;
   /** Dev-only: which intent bucket matched */
   _intentBucket?: string;
@@ -102,6 +116,7 @@ export function scoreItem(
     friendCreated: context.featureFlags.get(FLAGS.FRIEND_CREATED_BOOST)
       ? computeFriendCreatedScore(item, context)
       : 0,
+    chainPenalty: 1.0,
     total: 0,
     _intentBucket: intentResult.bucketName,
   };
@@ -120,6 +135,23 @@ export function scoreItem(
     breakdown.communityFeedback * WEIGHTS.COMMUNITY_FEEDBACK +
     breakdown.freshness * WEIGHTS.FRESHNESS +
     breakdown.friendCreated * WEIGHTS.FRIEND_CREATED;
+
+  // Chain venue suppression (migration 130). Applied after the weighted sum
+  // so we don't have to give up a WEIGHTS slot. Two overrides bypass the
+  // penalty entirely:
+  //   1. searchActive — the user typed something; if they asked for a chain,
+  //      they want the chain.
+  //   2. friendsGoing — a friend RSVPed at this chain; that signal beats the
+  //      "chains are boring" default.
+  // is_chain_override (tri-state) takes precedence over the base is_chain
+  // value, so manual upgrades/downgrades work.
+  const effectiveIsChain =
+    (item as any).is_chain_override ?? (item as any).is_chain ?? false;
+  const hasFriendSignal = (context.friendsGoingMap.get(item.id) ?? 0) > 0;
+  if (effectiveIsChain && !context.searchActive && !hasFriendSignal) {
+    breakdown.chainPenalty = 0.5;
+    breakdown.total *= breakdown.chainPenalty;
+  }
 
   return {
     ...item,
@@ -154,7 +186,8 @@ export function scoreAndRankItems(
           `CI=${b.contextIntent.toFixed(2)}${b._intentBucket ? ` (${b._intentBucket})` : ""} ` +
           `TyA=${b.typeAffinity.toFixed(2)} CF=${b.communityFeedback.toFixed(2)} ` +
           `FN=${b.freshness.toFixed(2)} ` +
-          `ON=${b.openNow.toFixed(2)} FR=${b.friendsGoing.toFixed(2)} TA=${b.tagAffinity.toFixed(2)}`
+          `ON=${b.openNow.toFixed(2)} FR=${b.friendsGoing.toFixed(2)} TA=${b.tagAffinity.toFixed(2)}` +
+          (b.chainPenalty < 1 ? ` [CHAIN×${b.chainPenalty}]` : "")
       );
     });
   }

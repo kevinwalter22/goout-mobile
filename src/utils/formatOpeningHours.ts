@@ -56,14 +56,25 @@ export function parseScheduleText(scheduleText: string): DaySchedule[] {
 
 /**
  * Parse a time string like "7:00 PM" into total minutes since midnight.
+ * If `assumePeriod` is supplied, the AM/PM may be omitted from the input —
+ * used to handle compact range formats like "7:00 – 11:30 PM" where the
+ * convention is that the missing-period side inherits from the explicit side.
  */
-export function parseTime(timeStr: string): number | null {
-  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (!match) return null;
+export function parseTime(
+  timeStr: string,
+  assumePeriod?: "AM" | "PM",
+): number | null {
+  const strict = timeStr.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  const loose = strict
+    ? null
+    : timeStr.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!strict && !loose) return null;
 
+  const match = strict ?? loose!;
   let hours = parseInt(match[1], 10);
   const minutes = parseInt(match[2], 10);
-  const period = match[3].toUpperCase();
+  const period = strict ? strict[3].toUpperCase() : assumePeriod;
+  if (!period) return null;
 
   if (period === "AM" && hours === 12) hours = 0;
   if (period === "PM" && hours !== 12) hours += 12;
@@ -75,6 +86,11 @@ export function parseTime(timeStr: string): number | null {
  * Parse an hours range like "7:00 AM – 7:00 PM" into open/close minutes.
  * Returns null for "Closed" or unparseable formats.
  * Returns { open: 0, close: 1440 } for "Open 24 hours".
+ *
+ * Handles compact formats where the AM/PM is only specified on one side
+ * (e.g. "7:00 – 11:30 PM" — Warwick Drive-In's Google Places hours string).
+ * Convention: the missing-period side inherits from the explicit side. If
+ * neither side has a period, the range is unparseable.
  */
 function parseHoursRange(
   hours: string,
@@ -86,8 +102,17 @@ function parseHoursRange(
   const parts = hours.split(/\s*[–—-]\s*/);
   if (parts.length !== 2) return null;
 
-  const open = parseTime(parts[0]);
-  const close = parseTime(parts[1]);
+  // Determine which side(s) carry an explicit AM/PM, then inherit if needed.
+  const openHasPeriod = /\b(AM|PM)\b/i.test(parts[0]);
+  const closeHasPeriod = /\b(AM|PM)\b/i.test(parts[1]);
+  const inheritedPeriod: "AM" | "PM" | undefined = openHasPeriod
+    ? (parts[0].match(/\b(AM|PM)\b/i)![1].toUpperCase() as "AM" | "PM")
+    : closeHasPeriod
+      ? (parts[1].match(/\b(AM|PM)\b/i)![1].toUpperCase() as "AM" | "PM")
+      : undefined;
+
+  const open = parseTime(parts[0], inheritedPeriod);
+  const close = parseTime(parts[1], inheritedPeriod);
   if (open === null || close === null) return null;
 
   return { open, close };

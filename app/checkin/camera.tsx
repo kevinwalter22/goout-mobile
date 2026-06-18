@@ -31,11 +31,25 @@ import { normalizePostImage } from "../../src/utils/imageTransform";
 import { useEnforcement } from "../../src/hooks/useEnforcement";
 
 export default function CameraCapture() {
-  const { eventId, exploreItemId, mode, itemKind } = useLocalSearchParams<{
+  const {
+    eventId,
+    exploreItemId,
+    mode,
+    itemKind,
+    verified_lat,
+    verified_lng,
+    verified_at,
+  } = useLocalSearchParams<{
     eventId?: string;
     exploreItemId?: string;
     mode: string;
     itemKind?: string;
+    /** Verified user coords from verifyCheckInLocation (passed via query
+     *  params as strings; parsed on insert). All three present together
+     *  for any explore_item-linked check-in. */
+    verified_lat?: string;
+    verified_lng?: string;
+    verified_at?: string;
   }>();
   const { user, refreshProfile } = useAuth();
   const { showToast } = useToast();
@@ -196,6 +210,20 @@ export default function CameraCapture() {
 
       // Step 3: Insert post record
       // Determine which ID to use: exploreItemId (new flow) or eventId (legacy)
+      //
+      // Parse the verified coords + timestamp threaded from the event detail
+      // screen through the mode selector. These are required by the
+      // enforce_post_verification trigger (migration 137) for any
+      // explore_item-linked post — the trigger rejects the insert if any
+      // are missing.
+      const parsedVerifiedLat = verified_lat != null ? parseFloat(verified_lat) : NaN;
+      const parsedVerifiedLng = verified_lng != null ? parseFloat(verified_lng) : NaN;
+      const haveVerifiedCoords =
+        !Number.isNaN(parsedVerifiedLat) &&
+        !Number.isNaN(parsedVerifiedLng) &&
+        typeof verified_at === "string" &&
+        verified_at.length > 0;
+
       const postData: any = {
         id: postId,
         user_id: user.id,
@@ -203,6 +231,8 @@ export default function CameraCapture() {
         photo_path: backPath,
         front_photo_path: frontPath,
         camera_mode: mode as "front" | "back" | "dual",
+        // Preserved for backward compatibility with the legacy schema; the
+        // authoritative coords for verification live in verified_lat/lng.
         latitude: null,
         longitude: null,
       };
@@ -211,7 +241,21 @@ export default function CameraCapture() {
       if (exploreItemId) {
         postData.explore_item_id = exploreItemId;
         postData.event_id = null;
-        console.log("[Post] Creating post for explore_item_id:", exploreItemId);
+        // Verification proof — required by enforce_post_verification.
+        if (!haveVerifiedCoords) {
+          // Defensive: the verification gate should have run upstream. If
+          // we somehow arrived here without coords, fail loudly client-side
+          // rather than letting the DB trigger reject the insert with a
+          // less-useful error.
+          throw new Error(
+            "Missing check-in verification. Please go back to the event and tap Check In.",
+          );
+        }
+        postData.verified_lat = parsedVerifiedLat;
+        postData.verified_lng = parsedVerifiedLng;
+        postData.verified_at = verified_at;
+        postData.verified_at_event = true;
+        console.log("[Post] Creating verified post for explore_item_id:", exploreItemId);
       } else if (eventId) {
         postData.event_id = eventId;
         postData.explore_item_id = null;

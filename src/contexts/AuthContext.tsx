@@ -3,7 +3,7 @@ import { AppState, type AppStateStatus } from "react-native";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { clearExpiredUrlCache } from "../utils/storage";
-import { setSentryUser } from "../lib/sentry";
+import { setSentryUser, attachSentrySession } from "../lib/sentry";
 import { logAnalyticsEvent } from "../lib/analyticsLogger";
 import { captureError } from "../lib/logger";
 import { setLocationOverride } from "../utils/location";
@@ -66,6 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       setSentryUser(session?.user?.id ?? null);
+      if (session?.user) attachSentrySession();
       setLocationOverride(session?.user?.email ?? null);
 
       if (event === "SIGNED_OUT") {

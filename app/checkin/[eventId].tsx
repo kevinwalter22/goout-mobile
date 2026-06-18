@@ -8,15 +8,37 @@ import { Colors } from "../../src/config/theme";
 export default function CheckInModeSelector() {
   // Note: Route param is named eventId for URL compatibility, but this is actually
   // an explore_item_id when coming from the Explore flow
-  const { eventId, itemKind } = useLocalSearchParams<{ eventId: string; itemKind?: string }>();
+  const {
+    eventId,
+    itemKind,
+    verified_lat,
+    verified_lng,
+    verified_at,
+  } = useLocalSearchParams<{
+    eventId: string;
+    itemKind?: string;
+    verified_lat?: string;
+    verified_lng?: string;
+    verified_at?: string;
+  }>();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
 
   function selectMode(mode: string) {
-    // Pass as exploreItemId since this flow is from Explore items
+    // Pass as exploreItemId since this flow is from Explore items.
+    // Thread the verifyCheckInLocation result through to the camera —
+    // migration 137's enforce_post_verification trigger rejects inserts
+    // missing these for any explore_item-linked post.
     router.push({
       pathname: "/checkin/camera",
-      params: { exploreItemId: eventId, mode, itemKind },
+      params: {
+        exploreItemId: eventId,
+        mode,
+        itemKind,
+        verified_lat,
+        verified_lng,
+        verified_at,
+      },
     } as any);
   }
 

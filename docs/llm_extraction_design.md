@@ -200,9 +200,14 @@ control (see Section E).
   `post_office`, `hospital`, `dentist`, `lawyer`, `accounting`,
   `insurance_agency`, `real_estate_agency`, `car_repair`, `car_dealer`,
   `lodging` (covered by auto-suppress in migration 095)
+- **`is_chain` = TRUE** (per migration 130). Chain venues stay in the
+  catalog so users can search/locate them, but the Phase 5.3 bridge
+  never crawls their websites — extremely low event probability per
+  location and high LLM-budget cost relative to yield. Use
+  `is_chain_override = FALSE` to opt a specific chain location back in
+  (e.g., a Whole Foods location with regular cooking-class programming).
 
-**Include if `website_url IS NOT NULL` AND `venue_score >= 3`**
-(venue scoring from migration 118):
+**Include if `website_url IS NOT NULL` AND `relevance_tier >= 2`**:
 - `bar`, `night_club`, `brewery`, `winery` — frequent events
 - `restaurant`, `cafe` — occasional (live music, trivia)
 - `gym`, `yoga_studio`, `dance_studio` — recurring classes
@@ -211,13 +216,42 @@ control (see Section E).
 - `movie_theater`, `bowling_alley` — special events
 - `book_store`, `tourist_attraction` — occasional readings/festivals
 
-Estimated count in Warwick 50km radius: **~500 venues** post-filter.
+Estimated count in Warwick 50km radius: **~500 venues** post-filter
+(the chain filter typically drops another 5-12% on top of the
+sub_category exclusions).
 
-### Why `venue_score >= 3`
+### Why `relevance_tier >= 2`
 
-Migration 118 scores Google Places venues 0–5 on quality signals
-(rating, review count, has-hours, etc.). Score 0–2 venues are mostly
-sparse data / closed / spam. Crawling them wastes LLM tokens.
+`explore_items.relevance_tier` (migration 094) classifies items as
+3=premium / 2=standard / 1=marginal / 0=suppressed based on source
+type, confidence, and content completeness. Tier 0–1 rows are too
+sparse or low-quality to justify LLM-budget spend; tier 2+ rows have
+passed the basic quality gate and are worth crawling.
+
+(The original design proposed a `venue_score >= 3` filter referencing
+"migration 118". That column was never built — migration 118 added the
+venue-discovery scaffolding, not a per-row score column. `relevance_tier`
+is the correct existing anchor.)
+
+### Enqueue query
+
+```sql
+SELECT ei.id, ei.website_url, ei.title, ei.town
+FROM explore_items ei
+LEFT JOIN venue_crawl_state vcs ON vcs.explore_item_id = ei.id
+WHERE ei.website_url IS NOT NULL
+  AND ei.deleted_at IS NULL
+  AND ei.relevance_tier >= 2
+  AND COALESCE(ei.is_chain_override, ei.is_chain) = FALSE
+  AND ei.sub_category NOT IN (
+    'gas_station','pharmacy','atm','bank','post_office',
+    'hospital','dentist','lawyer','accounting','insurance_agency',
+    'real_estate_agency','car_repair','car_dealer','lodging'
+  )
+  AND vcs.id IS NULL
+ORDER BY ei.normalized_confidence DESC NULLS LAST
+LIMIT $1;
+```
 
 ---
 
