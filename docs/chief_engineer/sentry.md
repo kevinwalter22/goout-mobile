@@ -76,7 +76,7 @@ Always set `function`. Pass `session_id` when the request carries one.
 3. After creation: **Settings → Client Keys (DSN)** → copy the **DSN**.
 4. Paste it as `SENTRY_DSN_EDGE`:
    - **Supabase (prod)** → project `lkmntknpaiaiqvupzjbz` → Edge Functions →
-     **Secrets** → add `SENTRY_DSN_EDGE` = `<dsn>` and `SENTRY_ENV` = `production`.
+     **Secrets** → add `SENTRY_DSN_EDGE` = `<dsn>` and `SENTRY_ENV` = `prod`.
    - **Supabase (staging)** → project `baulipaydofqtkihkghj` → add
      `SENTRY_DSN_EDGE` = `<same dsn>` and `SENTRY_ENV` = `staging`.
    - **`.env.local`** (for local `supabase functions serve`): add `SENTRY_DSN_EDGE`.
