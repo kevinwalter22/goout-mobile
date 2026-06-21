@@ -57,6 +57,10 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Install deps (EAS needs node_modules to resolve config plugins)
+        if: ${{ env.EXPO_TOKEN != '' }}
+        run: npm ci
+
       - name: Trigger EAS staging build
         if: ${{ env.EXPO_TOKEN != '' }}
         run: npx eas-cli@latest build --platform ios --profile staging --non-interactive --no-wait
