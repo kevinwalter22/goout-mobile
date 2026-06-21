@@ -31,3 +31,20 @@ export function anonClient(): SupabaseClient {
 export function stagingUrl(): string {
   return assertStagingEnv().url;
 }
+
+/**
+ * An anon client signed in as the given user — exercises the same RLS-gated
+ * surface a real app session hits. Returns the client and the session's access
+ * token (useful for calling edge functions with the user's JWT).
+ */
+export async function authedClient(
+  email: string,
+  password: string,
+): Promise<{ client: SupabaseClient; accessToken: string }> {
+  const client = anonClient();
+  const { data, error } = await client.auth.signInWithPassword({ email, password });
+  if (error || !data.session) {
+    throw new Error(`authedClient sign-in failed: ${error?.message ?? "no session"}`);
+  }
+  return { client, accessToken: data.session.access_token };
+}
