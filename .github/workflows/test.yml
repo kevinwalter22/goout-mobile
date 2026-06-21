@@ -1,0 +1,75 @@
+name: Test
+
+# The single quality gate. Runs on every PR (branch-protection required check)
+# AND is called by the deploy workflows via workflow_call, so a deploy can never
+# ship code that didn't pass tests. Replaces the old ci.yml (lint/typecheck were
+# folded in here).
+#
+# Jobs:
+#   checks       — lint, TypeScript compile, unit tests, pre-submission scan
+#   integration  — integration tests against the STAGING Supabase project
+#                  (needs `checks` first so we don't hit staging on broken code)
+#
+# Integration tests require these repo secrets (see docs/chief_engineer/deployment.md):
+#   SUPABASE_STAGING_PROJECT_REF, SUPABASE_STAGING_SERVICE_ROLE_KEY,
+#   SUPABASE_STAGING_ANON_KEY, SENTRY_DSN_EDGE
+
+on:
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, typecheck & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: TypeScript compile
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Pre-submission scan
+        run: npm run scan:preflight
+
+  integration:
+    name: Integration tests (staging)
+    needs: [checks]
+    runs-on: ubuntu-latest
+    env:
+      # URL is derived from the staging ref so there's one fewer secret to manage.
+      STAGING_SUPABASE_URL: https://${{ secrets.SUPABASE_STAGING_PROJECT_REF }}.supabase.co
+      STAGING_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_STAGING_SERVICE_ROLE_KEY }}
+      STAGING_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_STAGING_ANON_KEY }}
+      SENTRY_DSN_EDGE: ${{ secrets.SENTRY_DSN_EDGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Guard — staging secrets present
+        # `secrets` can't be read in an `if:`, so check the mapped env vars.
+        run: |
+          missing=""
+          [ -z "${STAGING_SERVICE_ROLE_KEY}" ] && missing="$missing SUPABASE_STAGING_SERVICE_ROLE_KEY"
+          [ -z "${STAGING_SUPABASE_ANON_KEY}" ] && missing="$missing SUPABASE_STAGING_ANON_KEY"
+          [ -z "${SENTRY_DSN_EDGE}" ] && missing="$missing SENTRY_DSN_EDGE"
+          case "$STAGING_SUPABASE_URL" in https://.supabase.co) missing="$missing SUPABASE_STAGING_PROJECT_REF";; esac
+          if [ -n "$missing" ]; then
+            echo "::error::Integration tests need these repo secrets:$missing — add them in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+      - name: Integration tests
+        run: npm run test:integration
