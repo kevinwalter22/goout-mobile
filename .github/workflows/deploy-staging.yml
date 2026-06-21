@@ -1,13 +1,12 @@
 name: Deploy to Staging
 
-# Auto-deploys DB migrations + edge functions to the staging Supabase project
-# on every push to the `staging` branch. Staging is fully isolated from prod,
-# so this needs no approval gate.
+# On push to `staging`: run the full test gate, then (only if green) apply
+# migrations + deploy edge functions + kick off an EAS staging build, and post a
+# summary to Slack. On any failure, Slack gets an alert with a link to the run.
 #
-# Inert until these repo secrets are set:
-#   SUPABASE_ACCESS_TOKEN          - Supabase personal access token (CI)
-#   SUPABASE_STAGING_PROJECT_REF   - staging project ref (e.g. abcdwxyz...)
-#   SUPABASE_STAGING_DB_PASSWORD   - staging database password
+# Staging is fully isolated from prod, so there is no approval gate.
+# Steps degrade gracefully: EAS / Slack steps no-op until EXPO_TOKEN /
+# SLACK_WEBHOOK_URL are set, so the DB+functions deploy works incrementally.
 
 on:
   push:
@@ -19,48 +18,95 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  guard:
-    name: Check secrets configured
-    runs-on: ubuntu-latest
-    outputs:
-      configured: ${{ steps.check.outputs.configured }}
-    steps:
-      - id: check
-        env:
-          REF: ${{ secrets.SUPABASE_STAGING_PROJECT_REF }}
-          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: |
-          if [ -n "$REF" ] && [ -n "$TOKEN" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Staging deploy skipped — set SUPABASE_ACCESS_TOKEN and SUPABASE_STAGING_PROJECT_REF (and SUPABASE_STAGING_DB_PASSWORD)."
-          fi
+  # Gate: reuse the PR test workflow. secrets: inherit passes the staging secrets
+  # through to its integration job.
+  test:
+    uses: ./.github/workflows/test.yml
+    secrets: inherit
 
   deploy:
-    name: Deploy migrations + edge functions
-    needs: [guard]
-    if: needs.guard.outputs.configured == 'true'
+    name: Migrations + edge functions + EAS (staging)
+    needs: [test]
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_STAGING_DB_PASSWORD }}
       STAGING_REF: ${{ secrets.SUPABASE_STAGING_PROJECT_REF }}
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned (not "latest") — resolving "latest" hits the GitHub API and
+          # gets rate-limited on shared runners. Bump deliberately.
+          version: 2.76.9
 
       - name: Link staging project
         run: supabase link --project-ref "$STAGING_REF"
-        env:
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_STAGING_DB_PASSWORD }}
 
-      - name: Push migrations
+      - name: Apply pending migrations
         run: supabase db push
-        env:
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_STAGING_DB_PASSWORD }}
 
       - name: Deploy edge functions
         run: supabase functions deploy --project-ref "$STAGING_REF"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps (EAS needs node_modules to resolve config plugins)
+        if: ${{ env.EXPO_TOKEN != '' }}
+        run: npm ci
+
+      - name: Trigger EAS staging build
+        if: ${{ env.EXPO_TOKEN != '' }}
+        run: npx eas-cli@latest build --platform ios --profile staging --non-interactive --no-wait
+
+      - name: Skip EAS (no token)
+        if: ${{ env.EXPO_TOKEN == '' }}
+        run: echo "::warning::EXPO_TOKEN not set — skipped EAS staging build."
+
+      - name: Slack — deploy succeeded
+        if: ${{ success() && env.SLACK_WEBHOOK_URL != '' }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -sf -X POST -H 'Content-Type: application/json' "$SLACK_WEBHOOK_URL" -d @- <<JSON
+          {"text":":rocket: *Staging deploy succeeded*","attachments":[{"color":"#36a64f","blocks":[
+            {"type":"section","fields":[
+              {"type":"mrkdwn","text":"*Env:*\nstaging"},
+              {"type":"mrkdwn","text":"*Commit:*\n\`${{ github.sha }}\`"},
+              {"type":"mrkdwn","text":"*By:*\n${{ github.actor }}"},
+              {"type":"mrkdwn","text":"*Shipped:*\nmigrations + edge functions + EAS"}
+            ]},
+            {"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"View run"},"url":"$RUN_URL"}]}
+          ]}]}
+          JSON
+
+  notify-failure:
+    name: Slack on failure
+    needs: [test, deploy]
+    if: ${{ always() && (needs.test.result == 'failure' || needs.deploy.result == 'failure') }}
+    runs-on: ubuntu-latest
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      SLACK_ALERT_MENTION: ${{ secrets.SLACK_ALERT_MENTION }}
+    steps:
+      - name: Slack — deploy failed
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          STAGE="${{ needs.test.result == 'failure' && 'tests' || 'deploy' }}"
+          curl -sf -X POST -H 'Content-Type: application/json' "$SLACK_WEBHOOK_URL" -d @- <<JSON
+          {"text":":x: *Staging deploy FAILED* at ${STAGE} ${SLACK_ALERT_MENTION}","attachments":[{"color":"#cc0000","blocks":[
+            {"type":"section","fields":[
+              {"type":"mrkdwn","text":"*Env:*\nstaging"},
+              {"type":"mrkdwn","text":"*Failed at:*\n${STAGE}"},
+              {"type":"mrkdwn","text":"*Commit:*\n\`${{ github.sha }}\`"}
+            ]},
+            {"type":"section","text":{"type":"mrkdwn","text":"Migrations are not auto-rolled-back (forward-fix policy). See the rollback runbook in docs/chief_engineer/deployment.md."}},
+            {"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"View logs"},"url":"$RUN_URL"}]}
+          ]}]}
+          JSON

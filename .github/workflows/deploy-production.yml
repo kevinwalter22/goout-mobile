@@ -1,14 +1,13 @@
 name: Deploy to Production
 
-# Deploys DB migrations + edge functions to the production Supabase project.
-# Triggered on push to `main`; the deploy job runs in the `Production` GitHub
-# Environment, which has Kevin as a required reviewer — so prod deploys pause
-# for human approval. Also runnable manually via workflow_dispatch.
+# On push to `main`: run the full test gate, then deploy to PRODUCTION behind a
+# manual approval gate (the `Production` GitHub Environment with Kevin as a
+# required reviewer — this is the "ask before first prod deploy" control).
+# Deploy = migrations + edge functions + EAS production build, then a release tag
+# and a Slack summary. Failures alert Slack with a link to the run.
 #
-# Inert until these repo secrets are set:
-#   SUPABASE_ACCESS_TOKEN       - Supabase personal access token (CI)
-#   SUPABASE_PROD_PROJECT_REF   - production project ref (lkmntknpaiaiqvupzjbz)
-#   SUPABASE_PROD_DB_PASSWORD   - production database password
+# Required reviewer setup (one-time): Settings → Environments → Production →
+# "Required reviewers" → add yourself. Until then the deploy job auto-proceeds.
 
 on:
   push:
@@ -20,50 +19,110 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  guard:
-    name: Check secrets configured
-    runs-on: ubuntu-latest
-    outputs:
-      configured: ${{ steps.check.outputs.configured }}
-    steps:
-      - id: check
-        env:
-          REF: ${{ secrets.SUPABASE_PROD_PROJECT_REF }}
-          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: |
-          if [ -n "$REF" ] && [ -n "$TOKEN" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Production deploy skipped — set SUPABASE_ACCESS_TOKEN and SUPABASE_PROD_PROJECT_REF (and SUPABASE_PROD_DB_PASSWORD)."
-          fi
+  test:
+    uses: ./.github/workflows/test.yml
+    secrets: inherit
 
   deploy:
-    name: Deploy migrations + edge functions
-    needs: [guard]
-    if: needs.guard.outputs.configured == 'true'
+    name: Migrations + edge functions + EAS (production)
+    needs: [test]
     runs-on: ubuntu-latest
-    # Approval gate: the `Production` environment requires Kevin as reviewer.
+    # Approval gate — pauses for the Production environment's required reviewer.
     environment: Production
+    permissions:
+      contents: write   # needed to push the release tag
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_PROD_DB_PASSWORD }}
       PROD_REF: ${{ secrets.SUPABASE_PROD_PROJECT_REF }}
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so the release tag is unambiguous
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned (not "latest") — resolving "latest" hits the GitHub API and
+          # gets rate-limited on shared runners. Bump deliberately.
+          version: 2.76.9
 
       - name: Link production project
         run: supabase link --project-ref "$PROD_REF"
-        env:
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_PROD_DB_PASSWORD }}
 
-      - name: Push migrations
+      - name: Apply pending migrations
         run: supabase db push
-        env:
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_PROD_DB_PASSWORD }}
 
       - name: Deploy edge functions
         run: supabase functions deploy --project-ref "$PROD_REF"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps (EAS needs node_modules to resolve config plugins)
+        if: ${{ env.EXPO_TOKEN != '' }}
+        run: npm ci
+
+      - name: Trigger EAS production build
+        if: ${{ env.EXPO_TOKEN != '' }}
+        run: npx eas-cli@latest build --platform ios --profile production --non-interactive --no-wait
+
+      - name: Skip EAS (no token)
+        if: ${{ env.EXPO_TOKEN == '' }}
+        run: echo "::warning::EXPO_TOKEN not set — skipped EAS production build."
+
+      - name: Tag release
+        id: tag
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")-prod.${{ github.run_number }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Production deploy $VERSION (${{ github.sha }})"
+          git push origin "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Slack — deploy succeeded
+        if: ${{ success() && env.SLACK_WEBHOOK_URL != '' }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -sf -X POST -H 'Content-Type: application/json' "$SLACK_WEBHOOK_URL" -d @- <<JSON
+          {"text":":white_check_mark: *Production deploy succeeded* — \`${{ steps.tag.outputs.version }}\`","attachments":[{"color":"#2eb886","blocks":[
+            {"type":"section","fields":[
+              {"type":"mrkdwn","text":"*Env:*\nproduction"},
+              {"type":"mrkdwn","text":"*Release:*\n\`${{ steps.tag.outputs.version }}\`"},
+              {"type":"mrkdwn","text":"*Commit:*\n\`${{ github.sha }}\`"},
+              {"type":"mrkdwn","text":"*By:*\n${{ github.actor }}"},
+              {"type":"mrkdwn","text":"*Shipped:*\nmigrations + edge functions + EAS"}
+            ]},
+            {"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"View run"},"url":"$RUN_URL"}]}
+          ]}]}
+          JSON
+
+  notify-failure:
+    name: Slack on failure
+    needs: [test, deploy]
+    if: ${{ always() && (needs.test.result == 'failure' || needs.deploy.result == 'failure') }}
+    runs-on: ubuntu-latest
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      SLACK_ALERT_MENTION: ${{ secrets.SLACK_ALERT_MENTION }}
+    steps:
+      - name: Slack — deploy failed
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          STAGE="${{ needs.test.result == 'failure' && 'tests' || 'deploy' }}"
+          curl -sf -X POST -H 'Content-Type: application/json' "$SLACK_WEBHOOK_URL" -d @- <<JSON
+          {"text":":rotating_light: *PRODUCTION deploy FAILED* at ${STAGE} ${SLACK_ALERT_MENTION}","attachments":[{"color":"#cc0000","blocks":[
+            {"type":"section","fields":[
+              {"type":"mrkdwn","text":"*Env:*\nproduction"},
+              {"type":"mrkdwn","text":"*Failed at:*\n${STAGE}"},
+              {"type":"mrkdwn","text":"*Commit:*\n\`${{ github.sha }}\`"}
+            ]},
+            {"type":"section","text":{"type":"mrkdwn","text":"Migrations are not auto-rolled-back. Follow the rollback runbook in docs/chief_engineer/deployment.md immediately."}},
+            {"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"View logs"},"url":"$RUN_URL"}]}
+          ]}]}
+          JSON

@@ -20,6 +20,9 @@ dotenv.config({ path: path.join(root, ".env.local") });
 
 function pick(...names: string[]): string | undefined {
   for (const n of names) {
+    // Node-only test helper (not bundled into the app) — dynamic env lookup is
+    // intentional so we can fall back across alternate secret names.
+    // eslint-disable-next-line expo/no-dynamic-env-var
     const v = process.env[n];
     if (v && v.trim()) return v.trim();
   }

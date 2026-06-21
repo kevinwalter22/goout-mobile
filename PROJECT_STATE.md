@@ -456,8 +456,15 @@ Per-crawl cost is **$0.027** (above design doc's $0.005 estimate). Monthly proje
 - All Warwick partitions and collector targets: is_enabled=FALSE pending Phase 5 LLM extractor
 
 ### Environments
-- **Production:** Supabase Pro tier project, live
-- **Staging:** Does not exist yet. Building this is a Phase 2 prerequisite.
+- **Production:** Supabase project `lkmntknpaiaiqvupzjbz` (Pro tier), live. Mobile `production` EAS channel, `com.euda.app`. Anon key is `sb_publishable_*` (new format).
+- **Staging:** Supabase project `baulipaydofqtkihkghj`, fully isolated. Mobile `staging` EAS channel, `com.euda.app.staging`. Built in Phase 1.
+- **Branch ↔ env mapping:** `staging` branch → staging project (auto-deploy); `main` branch → production project (deploy behind manual approval). Feature branches → PR test gate only.
+
+### Deployment automation (Phase 5, 06/21/2026)
+- **Workflows:** `test.yml` (PR gate + reusable via `workflow_call`: lint → typecheck → unit → pre-submission scan, then integration tests vs staging), `deploy-staging.yml` (push to `staging`: test → migrations + edge functions + EAS staging build → Slack), `deploy-production.yml` (push to `main`: test → **manual approval** via `Production` environment → migrations + functions + EAS prod build → release tag `vX.Y.Z-prod.<run>` → Slack). `ci.yml` removed (folded into `test.yml`).
+- **Gating:** branch protection requires the `test.yml` checks + 1 PR review on `main` (and `staging`); `main` is PR-only. Prod deploy pauses on the `Production` environment's required reviewer. See `docs/chief_engineer/deployment.md`.
+- **CI secrets:** Supabase access token + per-env project refs / DB passwords / service-role keys; `EXPO_TOKEN` (EAS); `SLACK_WEBHOOK_URL` (+ `SLACK_ALERT_MENTION`); staging anon + `SENTRY_DSN_EDGE` for integration tests. Staging URL derived from the ref. EAS/Slack steps no-op until their secrets exist; integration tests hard-require the staging secrets.
+- **Rollback:** forward-fix migrations (no auto down-migrations) + Supabase PITR as the safety net; edge functions re-deploy a prior sha; mobile via `eas update` channel rollback. Runbook in `docs/chief_engineer/deployment.md`. Migration 137 is sacred — never auto-rolled-back.
 
 ### Costs (current state, approximate)
 - Supabase Pro: $25/mo
