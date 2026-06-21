@@ -44,7 +44,9 @@ jobs:
 
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          # Pinned (not "latest") — resolving "latest" hits the GitHub API and
+          # gets rate-limited on shared runners. Bump deliberately.
+          version: 2.76.9
 
       - name: Link production project
         run: supabase link --project-ref "$PROD_REF"
