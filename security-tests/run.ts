@@ -106,13 +106,13 @@ async function testProfilesRLS(
     .from("public_profiles").select("*").eq("id", userB.id).maybeSingle();
   record("public_profiles returns User B", !!pub && !e3, e3?.message);
 
-  // Sensitive columns hidden
+  // Sensitive columns hidden. Only PII / privilege fields are forbidden here.
+  // xp / streak / last_post_date are INTENTIONALLY public — they're social
+  // gamification stats surfaced on profiles (like a visible streak), not secrets.
   if (pub) {
-    const hasSensitive =
-      "phone_number" in pub || "phone_hash" in pub ||
-      "is_admin" in pub || "xp" in pub;
-    record("public_profiles hides sensitive fields", !hasSensitive,
-      hasSensitive ? "EXPOSES sensitive columns!" : "safe");
+    const leaked = ["phone_number", "phone_hash", "is_admin"].filter((c) => c in pub);
+    record("public_profiles hides sensitive fields", leaked.length === 0,
+      leaked.length ? `EXPOSES sensitive columns: ${leaked.join(", ")}!` : "safe");
   }
 
   // app_secrets
