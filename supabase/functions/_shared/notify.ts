@@ -12,6 +12,9 @@
  *   SENTRY_ENV           - reused as the environment tag in messages (prod/staging)
  */
 
+// [phase-7-validation] Synthetic end-to-end pipeline check (2026-06-22). This
+// comment is intentionally trivial and reversible — it exercises CI → staging
+// deploy → prod gate, then gets reverted to prove rollback. Safe to remove.
 export type Severity = "info" | "warning" | "error" | "critical";
 
 const WEBHOOK = Deno.env.get("SLACK_WEBHOOK_URL") ?? "";
