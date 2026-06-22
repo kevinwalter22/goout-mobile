@@ -67,25 +67,32 @@ Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
 
   try {
-    const { explore_item_id } = await req.json();
-
-    if (!explore_item_id) {
-      return new Response(
-        JSON.stringify({ error: "Missing explore_item_id" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    // Authenticate user
+    // Authenticate FIRST — before touching the (untrusted) request body. Parsing
+    // an empty/invalid body before auth caused unauthenticated calls to 500
+    // instead of returning a clean 401 (caught by the security regression suite).
     const { user, error: authError } = await requireUser(req);
     if (authError || !user) {
       return new Response(
         JSON.stringify({ error: authError ?? "Unauthorized" }),
         {
           status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    let explore_item_id: string | undefined;
+    try {
+      ({ explore_item_id } = await req.json());
+    } catch {
+      explore_item_id = undefined;
+    }
+
+    if (!explore_item_id) {
+      return new Response(
+        JSON.stringify({ error: "Missing explore_item_id" }),
+        {
+          status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
