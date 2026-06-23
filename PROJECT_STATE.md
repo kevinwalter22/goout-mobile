@@ -286,10 +286,15 @@ the system before turning it loose.
   (env=staging); independently confirmed by the green CI sentry-smoke test.
 
 **What's flaky / needs tuning (known issues):**
-- **`supabase functions deploy` vs esm.sh (FIXED).** The deploy fetches remote
-  esm.sh imports while bundling; esm.sh (Cloudflare) intermittently returns
-  522/timeout, failing the non-atomic deploy mid-flight. Hardened with a 3×
-  retry (15s backoff) in both deploy workflows. Re-runs are idempotent.
+- **`supabase functions deploy` vs esm.sh (ROOT-CAUSED & FIXED).** The deploy
+  fetches remote imports while bundling; every function imported `supabase-js`
+  from `https://esm.sh/...`. esm.sh (Cloudflare) had two sustained 522 outages
+  in one session — the second lasted long enough to exhaust a first-pass 3×
+  retry guard. Real fix: migrated all 28 functions to the
+  `npm:@supabase/supabase-js` specifier (Supabase-recommended), which resolves
+  via the npm registry and removes esm.sh as a deploy-time single point of
+  failure. Proven by a green staging deploy that bundled *during* the esm.sh
+  outage. The 3× retry stays as belt-and-suspenders for npm-registry hiccups.
 - **`monitor-error-rates` needed `SENTRY_ORG_AUTH_TOKEN` (FIXED on staging).**
   It was no-opping without the org token. Set on staging during validation.
   **TODO: confirm/set the same secret on the prod Supabase project** so prod
