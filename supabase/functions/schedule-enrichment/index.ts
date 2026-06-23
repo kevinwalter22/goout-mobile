@@ -15,7 +15,7 @@
  * Respects rate limits by batching and not re-enqueuing already-queued items.
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 

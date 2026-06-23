@@ -13,7 +13,7 @@
  * - Wave 3 (W3-0): Disabled — endpoint removed by Eventbrite
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { logPipelineHealth } from "../_shared/health-log.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";

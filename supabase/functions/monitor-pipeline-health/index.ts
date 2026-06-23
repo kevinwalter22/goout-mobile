@@ -9,7 +9,7 @@
  * `source_name` (75+ individual venues, many low-frequency) — that granularity
  * made the check pure noise (40+ false warnings on the first run).
  */
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 import { captureEdgeException } from "../_shared/sentry.ts";

@@ -16,7 +16,7 @@
  * API Reference: https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 

@@ -16,7 +16,7 @@
  * Cost: ~$0.032 (Text Search) + ~$0.007 (Photo) = ~$0.039/item
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 
