@@ -15,7 +15,7 @@
  * DB writes: Uses service_role client to update moderation_status and insert flags.
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   getCorsHeaders,
   handleCorsPreflightIfNeeded,

@@ -4,7 +4,7 @@
  * and posts a daily summary to Slack. Warns on anomalies (null-coord events,
  * missing start times, quarantine backlog).
  */
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 import { captureEdgeException } from "../_shared/sentry.ts";

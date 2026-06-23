@@ -12,7 +12,7 @@
  * Cache TTL: 30 days (configured in migration 043).
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireUser } from "../_shared/auth-guard.ts";
 

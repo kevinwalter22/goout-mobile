@@ -4,7 +4,7 @@
  *   >= 50% → info, >= 80% → warning, >= 95% → critical.
  * Catches runaway LLM / API spend before it hits the hard cap.
  */
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 import { captureEdgeException } from "../_shared/sentry.ts";

@@ -27,7 +27,7 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
+import { createClient } from "npm:@supabase/supabase-js@2.39.0";
 import { WebCollector, CollectorTarget, CollectionResult, EventCandidate, ExtractionEvidence } from "../_shared/web-collector.ts";
 import { extractCandidates } from "../_shared/web-extractors.ts";
 import { extractEvents, type ExtractedEvent, type ExtractionHints } from "../_shared/llm-extractor.ts";
