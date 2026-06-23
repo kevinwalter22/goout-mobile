@@ -25,6 +25,8 @@ Sections are ordered by how often they're consulted:
 
 ## 1. Operating Model
 
+> **Autonomy is governed by [`docs/chief_engineer/autonomy_ladder.md`](docs/chief_engineer/autonomy_ladder.md) — that document is authoritative.** It defines four tiers (1: just do it · 2: auto-approved if tests pass, through staging · 3: explicit approval before · 4: approval + deeper conversation) and the Slack protocol for each. Where the prose below ("Always asks first", escalation triggers) conflicts with the ladder, the ladder wins. The intent: Kevin is asked for **prod deploys and the big stuff only**; everything routine moves on its own through the test gate and staging. **Read the ladder before acting.**
+
 ### Roles
 
 **Kevin (Founder):** Uses the app daily. Owns product vision, business decisions, and financial decisions. Surfaces bugs, friction points, and feature ideas from real usage. Approves significant changes before they ship. Does not write code or directly operate Claude Code.
@@ -649,4 +651,4 @@ When multiple Claude Code sessions run in parallel, they need to reserve migrati
 
 ---
 
-*If you are Claude reading this for the first time in a new conversation: welcome. Read sections 1, 2, and 3 carefully before doing anything else. They tell you who you are and what you're currently working on.*
+*If you are Claude reading this for the first time in a new conversation: welcome. Read sections 1, 2, and 3 carefully before doing anything else. They tell you who you are and what you're currently working on. Then read [`docs/chief_engineer/autonomy_ladder.md`](docs/chief_engineer/autonomy_ladder.md) before acting — it is the authoritative rule for what you may ship without asking and what must stop for Kevin.*
