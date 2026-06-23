@@ -1,6 +1,6 @@
 # Euda — Project State
 
-**Last updated:** 05/20/2026 (Phase 5.1 LLM extractor shipped; 5.2 collector integration in flight)
+**Last updated:** 06/22/2026 (Chief Engineer Setup COMPLETE — Phases 1–7 validated end-to-end; V1.1 data-quality sprint resumes on the new infra)
 **Owner:** Kevin Walter
 **Operating layer:** Claude (via this document) coordinating Claude Code
 
@@ -24,6 +24,8 @@ Sections are ordered by how often they're consulted:
 ---
 
 ## 1. Operating Model
+
+> **Autonomy is governed by [`docs/chief_engineer/autonomy_ladder.md`](docs/chief_engineer/autonomy_ladder.md) — that document is authoritative.** It defines four tiers (1: just do it · 2: auto-approved if tests pass, through staging · 3: explicit approval before · 4: approval + deeper conversation) and the Slack protocol for each. Where the prose below ("Always asks first", escalation triggers) conflicts with the ladder, the ladder wins. The intent: Kevin is asked for **prod deploys and the big stuff only**; everything routine moves on its own through the test gate and staging. **Read the ladder before acting.**
 
 ### Roles
 
@@ -89,6 +91,8 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 ---
 
 ## 2. Current Priorities
+
+> **🎯 Now (week of 06/22/2026): V1.1 data-quality sprint — resuming on top of the now-complete Chief Engineer infrastructure.** Phases 1–7 are done and validated end-to-end (CI gate → staging auto-deploy → gated prod deploy → monitors → Sentry → rollback). Day-to-day engineering now runs through the [autonomy ladder](docs/chief_engineer/autonomy_ladder.md): Tier 1–2 work ships through staging on its own, Kevin is pinged only for Tier 3–4 and the production approval gate. **Phase A of the V1.1 sprint is queued and starts next.**
 
 **This week (Warwick, week of [05/18/2026]):**
 - ✅ Migrations 126, 127, 128 applied (Warwick partitions, collector targets, URL fixes)
@@ -209,11 +213,20 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 
 ---
 
-## Chief Engineer Infrastructure (Phase 1: Staging Environment)
+## Chief Engineer Infrastructure (Phases 1–7) — ✅ COMPLETE
 
-**Status:** ✅ **LIVE.** Schema (baseline + 137 migrations) applied to staging,
-seeded, grants/RLS verified. CI secrets set. Only the EAS staging build +
-TestFlight install remain (account/device-bound).
+**Status:** ✅ **COMPLETE & VALIDATED END-TO-END (06/22/2026).** All seven phases
+shipped: (1) staging environment, (2) error monitoring/Sentry, (3) Slack
+monitors, (4) integration test net, (5) CI/CD deployment automation, (6) the
+[autonomy ladder](docs/chief_engineer/autonomy_ladder.md), (7) end-to-end
+validation. The full path — PR → test gate → staging auto-deploy → gated prod
+deploy → monitors → Sentry → rollback — was exercised with a synthetic change
+and proven. See **"Phase 7 validation results"** below for what works, what's
+flaky, and the open follow-ups.
+
+_(Historical note: this section began as "Phase 1: Staging Environment." The
+original Phase-1 content is preserved below for provenance; the live state is the
+COMPLETE status above.)_
 
 **Design docs:**
 - [docs/chief_engineer/staging.md](docs/chief_engineer/staging.md) — Architecture/strategy (with implementation-correction notes at top)
@@ -243,6 +256,66 @@ seeded; replayability tech-debt fixed (`000_legacy_baseline.sql` + `020` fix).
 1. `eas build --profile staging` → install via TestFlight internal → confirm the
    STAGING banner shows and (after login) the 3 seeded items load.
 2. Create the `staging` git branch so the staging deploy workflow has a trigger.
+
+---
+
+### Phase 7 validation results (06/22/2026)
+
+A synthetic, reversible change was driven through the entire pipeline to prove
+the system before turning it loose.
+
+**What works (verified):**
+- **CI gate auto-runs on PRs** — `test.yml` fired on the synthetic PR; lint,
+  typecheck, unit, integration-against-staging, dependency audit, and the
+  security regression suite all green without intervention.
+- **Staging auto-deploy** — merge to `staging` triggered `deploy-staging`:
+  migrations applied, edge functions deployed, EAS staging build triggered,
+  and the Slack "deploy succeeded" message posted.
+- **Failure alerting** — the first staging attempt hit a transient esm.sh 522
+  (see flaky list); the `notify-failure` job posted the Slack "deploy FAILED"
+  alert correctly. The failure path is proven, not just the happy path.
+- **Gated prod deploy** — promotion `staging → main` triggers `deploy-production`
+  and **pauses at the `Production` environment approval gate** (Kevin is the
+  required reviewer). Nothing reaches prod without his click. ✅
+- **Monitors** — all six (`health-summary`, `monitor-data-quality`,
+  `monitor-api-budgets`, `monitor-pipeline-health`, `monitor-error-rates`,
+  `diagnose-cron`) return 200 with service-role auth. `monitor-data-quality`
+  (always posts) and `monitor-pipeline-health` reached the Slack webhook.
+- **Sentry capture** — a forced throw in `normalize-raw-events` (HTTP 500) ran
+  its `captureEdgeException` path → event delivered to Sentry `euda-edge`
+  (env=staging); independently confirmed by the green CI sentry-smoke test.
+
+**What's flaky / needs tuning (known issues):**
+- **`supabase functions deploy` vs esm.sh (ROOT-CAUSED & FIXED).** The deploy
+  fetches remote imports while bundling; every function imported `supabase-js`
+  from `https://esm.sh/...`. esm.sh (Cloudflare) had two sustained 522 outages
+  in one session — the second lasted long enough to exhaust a first-pass 3×
+  retry guard. Real fix: migrated all 28 functions to the
+  `npm:@supabase/supabase-js` specifier (Supabase-recommended), which resolves
+  via the npm registry and removes esm.sh as a deploy-time single point of
+  failure. Proven by a green staging deploy that bundled *during* the esm.sh
+  outage. The 3× retry stays as belt-and-suspenders for npm-registry hiccups.
+- **`monitor-error-rates` needed `SENTRY_ORG_AUTH_TOKEN` (FIXED on staging).**
+  It was no-opping without the org token. Set on staging during validation.
+  **TODO: confirm/set the same secret on the prod Supabase project** so prod
+  error-rate alerting is live.
+- **Error → Slack is spike-based, not per-event (by design).** A single thrown
+  error goes to Sentry only; Slack fires when `monitor-error-rates` sees the
+  hourly rate exceed 3× the 7-day median (and ≥10 abs). Don't expect a Slack
+  ping for one-off errors — that's intentional noise control.
+- **`monitor-pipeline-health` cries "stages silent" on idle staging.** Staging
+  has no live ingestion, so it reports criticals every run. Harmless on staging,
+  but it means staging Slack will be noisy; on prod it's a real signal.
+- **Staging pg_cron not wired.** `diagnose-cron` shows no scheduled jobs / null
+  session settings on staging (the embed-URL workaround from 05/21 was applied
+  to prod only). Monitors were validated via manual invocation. If we want
+  staging to self-run monitors, port the cron setup. Low priority.
+
+**Follow-ups for Kevin (non-blocking):**
+- Glance at the monitoring Slack channel to eyeball message formatting (the
+  "pipeline silent" critical from staging is a false alarm — expected).
+- Confirm the Sentry test event landed in `euda-edge` / environment=staging.
+- One-time: set `SENTRY_ORG_AUTH_TOKEN` on the prod Supabase project.
 
 ---
 
@@ -649,4 +722,4 @@ When multiple Claude Code sessions run in parallel, they need to reserve migrati
 
 ---
 
-*If you are Claude reading this for the first time in a new conversation: welcome. Read sections 1, 2, and 3 carefully before doing anything else. They tell you who you are and what you're currently working on.*
+*If you are Claude reading this for the first time in a new conversation: welcome. Read sections 1, 2, and 3 carefully before doing anything else. They tell you who you are and what you're currently working on. Then read [`docs/chief_engineer/autonomy_ladder.md`](docs/chief_engineer/autonomy_ladder.md) before acting — it is the authoritative rule for what you may ship without asking and what must stop for Kevin.*

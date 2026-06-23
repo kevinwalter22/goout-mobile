@@ -40,7 +40,7 @@
  * enables when comfortable with the validation cohort yield).
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { logPipelineHealth } from "../_shared/health-log.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { captureEdgeException } from "../_shared/sentry.ts";

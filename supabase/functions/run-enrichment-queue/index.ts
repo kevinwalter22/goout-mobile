@@ -11,7 +11,7 @@
  * - Cost-conscious: skips items that don't need enrichment
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { createLLMProvider } from "../_shared/llm-provider.ts";
 import {
   buildEnrichmentPrompt,

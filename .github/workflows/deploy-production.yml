@@ -55,7 +55,22 @@ jobs:
         run: supabase db push
 
       - name: Deploy edge functions
-        run: supabase functions deploy --project-ref "$PROD_REF"
+        # Retry up to 3× — `supabase functions deploy` fetches remote esm.sh
+        # imports while bundling and esm.sh (Cloudflare) intermittently returns
+        # 522/timeout, failing the non-atomic deploy mid-flight. Re-runs are
+        # idempotent ("No change found" skips unchanged functions). See the
+        # staging workflow for the same guard and docs/chief_engineer/deployment.md.
+        run: |
+          for attempt in 1 2 3; do
+            echo "::group::functions deploy attempt $attempt"
+            if supabase functions deploy --project-ref "$PROD_REF"; then
+              echo "::endgroup::"; exit 0
+            fi
+            echo "::endgroup::"
+            echo "::warning::functions deploy attempt $attempt failed (likely transient esm.sh); retrying…"
+            sleep 15
+          done
+          echo "::error::functions deploy failed after 3 attempts"; exit 1
 
       - uses: actions/setup-node@v4
         with:

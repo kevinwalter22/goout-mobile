@@ -14,7 +14,7 @@
  * or triggered after ingestion completes.
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   getAdapter,
   hasAdapter,
