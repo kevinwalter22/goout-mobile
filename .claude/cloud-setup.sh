@@ -5,7 +5,21 @@
 # Idempotent: safe to re-run.
 set -euo pipefail
 
-echo "==> Euda cloud setup"
+# Make this script CWD-independent: cd to the repo root (the parent of .claude/)
+# no matter where it's invoked from. The Console setup step does not guarantee
+# CWD == repo root, which caused a "No such file or directory" failure.
+SELF="${BASH_SOURCE[0]:-$0}"
+if cd "$(CDPATH= cd -- "$(dirname -- "$SELF")/.." 2>/dev/null && pwd)" 2>/dev/null && [ -f package.json ]; then
+  :
+else
+  # Fallback: locate the cloned repo by its package.json.
+  ROOT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -z "${ROOT:-}" ] || [ ! -f "$ROOT/package.json" ]; then
+    ROOT="$(find /home /workspace /root "$PWD" -maxdepth 4 -name package.json 2>/dev/null | grep -i goout | head -1 | xargs -r dirname || true)"
+  fi
+  [ -n "${ROOT:-}" ] && cd "$ROOT"
+fi
+echo "==> Euda cloud setup (repo root: $(pwd))"
 
 # 1. Dependencies (tsx, jest, eslint, dotenv, etc. all come from package.json).
 if [ -f package-lock.json ]; then
