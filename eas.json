@@ -38,6 +38,7 @@
   "submit": {
     "staging": {
       "ios": {
+        "ascAppId": "6784056659",
         "ascApiKeyPath": "./secrets/asc-api-key.p8",
         "ascApiKeyIssuerId": "8bdffc54-114f-448f-b6a6-1f1cff51f5f1",
         "ascApiKeyId": "BN5UY895H4"
@@ -45,6 +46,7 @@
     },
     "production": {
       "ios": {
+        "ascAppId": "6759115921",
         "ascApiKeyPath": "./secrets/asc-api-key.p8",
         "ascApiKeyIssuerId": "8bdffc54-114f-448f-b6a6-1f1cff51f5f1",
         "ascApiKeyId": "BN5UY895H4"
