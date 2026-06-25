@@ -34,6 +34,10 @@ jobs:
       STAGING_REF: ${{ secrets.SUPABASE_STAGING_PROJECT_REF }}
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      # App Store Connect API key (.p8, base64) used to auto-submit the staging
+      # build to TestFlight. The .p8 is gitignored, so CI reconstructs it from
+      # this secret. When unset, the build still runs but submit is skipped.
+      ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -76,8 +80,25 @@ jobs:
         if: ${{ env.EXPO_TOKEN != '' }}
         run: npm ci
 
-      - name: Trigger EAS staging build
-        if: ${{ env.EXPO_TOKEN != '' }}
+      # Reconstruct the App Store Connect API key (.p8) from the base64 secret so
+      # `eas build --auto-submit` can hand it to EAS for the server-side TestFlight
+      # submission. eas.json's submit.staging.ios.ascApiKeyPath points here.
+      - name: Materialize App Store Connect API key
+        if: ${{ env.EXPO_TOKEN != '' && env.ASC_API_KEY_P8_BASE64 != '' }}
+        run: |
+          mkdir -p secrets
+          printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 -d > secrets/asc-api-key.p8
+          echo "wrote secrets/asc-api-key.p8 ($(wc -c < secrets/asc-api-key.p8) bytes)"
+
+      # With the ASC key present: build + auto-submit to TestFlight (server-side,
+      # so --no-wait is fine — EAS runs the submit after the build completes).
+      - name: Trigger EAS staging build + TestFlight submit
+        if: ${{ env.EXPO_TOKEN != '' && env.ASC_API_KEY_P8_BASE64 != '' }}
+        run: npx eas-cli@latest build --platform ios --profile staging --auto-submit --non-interactive --no-wait
+
+      # Fallback: ASC key not configured — build only (old behavior).
+      - name: Trigger EAS staging build (build only — no ASC key)
+        if: ${{ env.EXPO_TOKEN != '' && env.ASC_API_KEY_P8_BASE64 == '' }}
         run: npx eas-cli@latest build --platform ios --profile staging --non-interactive --no-wait
 
       - name: Skip EAS (no token)
