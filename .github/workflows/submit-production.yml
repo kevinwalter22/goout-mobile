@@ -1,0 +1,84 @@
+name: Submit Production to TestFlight
+
+# Manual, approval-gated submission of the latest PRODUCTION build to TestFlight.
+#
+# Why separate from deploy-production.yml: production builds happen automatically
+# on every merge to `main`, but sending a binary to the App Store is a deliberate
+# act. This workflow only runs when Kevin triggers it (workflow_dispatch) AND
+# approves the `Production` environment gate — two explicit actions before any
+# binary reaches App Store Connect. Nothing here ever runs automatically.
+#
+# It submits the latest *finished production* build (selected by build profile so
+# a more-recent staging build is never picked, since both share one EAS project).
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: submit-production
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    name: eas submit (production → TestFlight)
+    runs-on: ubuntu-latest
+    # Approval gate — pauses for the Production environment's required reviewer.
+    environment: Production
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight — required secrets present
+        run: |
+          [ -n "$EXPO_TOKEN" ] || { echo "::error::EXPO_TOKEN not set"; exit 1; }
+          [ -n "$ASC_API_KEY_P8_BASE64" ] || { echo "::error::ASC_API_KEY_P8_BASE64 not set"; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # The .p8 is gitignored, so reconstruct it from the secret for eas submit.
+      - name: Materialize App Store Connect API key
+        run: |
+          mkdir -p secrets
+          printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 -d > secrets/asc-api-key.p8
+
+      # Select the latest FINISHED *production* build explicitly. `--latest` alone
+      # would grab the newest iOS build of any profile (staging builds are
+      # frequent and share this EAS project), which would submit the wrong binary.
+      - name: Resolve latest finished production build
+        id: build
+        run: |
+          BID=$(npx eas-cli@latest build:list --platform ios --status finished --limit 15 --non-interactive --json 2>/dev/null \
+            | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",function(){const a=JSON.parse(d);const b=a.find(x=>x.buildProfile==="production");process.stdout.write(b?b.id:"");});')
+          if [ -z "$BID" ]; then echo "::error::No finished production build found to submit."; exit 1; fi
+          echo "Resolved production build: $BID"
+          echo "id=$BID" >> "$GITHUB_OUTPUT"
+
+      - name: Submit to TestFlight
+        run: npx eas-cli@latest submit --platform ios --profile production --id "${{ steps.build.outputs.id }}" --non-interactive
+
+      - name: Slack — submitted
+        if: ${{ success() && env.SLACK_WEBHOOK_URL != '' }}
+        run: |
+          curl -sf -X POST -H 'Content-Type: application/json' "$SLACK_WEBHOOK_URL" -d @- <<JSON
+          {"text":":apple: *Production build submitted to TestFlight*","attachments":[{"color":"#2eb886","blocks":[
+            {"type":"section","fields":[
+              {"type":"mrkdwn","text":"*Env:*\nproduction"},
+              {"type":"mrkdwn","text":"*Build:*\n\`${{ steps.build.outputs.id }}\`"},
+              {"type":"mrkdwn","text":"*By:*\n${{ github.actor }}"}
+            ]}
+          ]}]}
+          JSON
+
+      - name: Slack — submit failed
+        if: ${{ failure() && env.SLACK_WEBHOOK_URL != '' }}
+        run: |
+          curl -sf -X POST -H 'Content-Type: application/json' "$SLACK_WEBHOOK_URL" \
+            -d '{"text":":x: *Production TestFlight submit FAILED* — see the run logs."}'
