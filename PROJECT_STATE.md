@@ -4,6 +4,11 @@
 **Owner:** Kevin Walter
 **Operating layer:** Claude (via this document) coordinating Claude Code
 
+<!-- 06/25/2026: Pre-launch comprehensive sweep ran (5 layers: interface parity,
+deploy pipeline, monitoring/alerting, autonomy ladder, docs/bootstrap) to verify
+the chief-engineer setup end-to-end before Kevin begins phone-driven feature work.
+This line is the Layer-2 pipeline marker. See the sweep report in Slack. -->
+
 ---
 
 ## How to read this document
