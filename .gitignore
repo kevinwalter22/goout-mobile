@@ -60,3 +60,8 @@ nul
 
 # Build artifacts
 dist-check/
+
+# Claude Code — machine-local settings (may hold ad-hoc approvals / secrets).
+# Canonical, shareable permissions live in checked-in .claude/settings.json.
+.claude/settings.local.json
+.claude/*.lock
