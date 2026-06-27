@@ -9,7 +9,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { getDistanceInMeters, getDistanceInMiles, isLocationOverridden } from "../utils/location";
 import { formatOpeningHours } from "../utils/formatOpeningHours";
 import { sanitizeTimeText } from "../utils/formatTimeText";
-import { CHECK_IN_RADIUS_METERS } from "../config/constants";
+import { regionToBbox, bboxContains, type MapRegion } from "../utils/mapViewport";
 import { getFallbackImage } from "../lib/categoryFallbackImages";
 import type { ExploreItem } from "../types/database";
 import type {
@@ -36,9 +36,12 @@ interface ExploreMapViewProps {
 // 7-day window for events
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
-// Activities mode: radius-based instead of viewport to prevent marker overload
-const MAP_ACTIVITIES_RADIUS_METERS = 1000;
-const MAP_ACTIVITIES_MAX_MARKERS = 150;
+// Viewport-aware map: markers follow the visible region. Cap total markers so a
+// dense city view stays performant; beyond the county-scale ceiling we stop
+// querying and prompt the user to zoom in (no state-wide scans).
+const MAP_MAX_MARKERS = 250;
+const MAP_MAX_VIEWPORT_DELTA = 0.6; // latitude degrees (~40 mi) — zoom-out ceiling
+const MAP_REGION_DEBOUNCE_MS = 400;
 
 function computeBoundingRegion(items: ExploreItem[]) {
   let minLat = 90;
@@ -177,11 +180,25 @@ export function ExploreMapView({
   // Animation for preview card
   const previewAnim = useRef(new Animated.Value(0)).current;
 
-  // Cache to prevent duplicate fetches
+  // Cache to prevent duplicate fetches. Tracks the fetched bbox so we can skip
+  // refetching when the user zooms in / nudges within an already-covered area —
+  // but only when that fetch wasn't marker-capped (a capped fetch may be missing
+  // markers that a tighter view should reveal).
   const lastFetchRef = useRef<{
     filterKey: string;
     timestamp: number;
+    bbox: { latMin: number; latMax: number; lngMin: number; lngMax: number };
+    wasCapped: boolean;
   } | null>(null);
+
+  // Latest map viewport (updated by onRegionChangeComplete). The map shows what
+  // you're looking at, so the data query is driven by this region. Initialized
+  // lazily against initialRegion (declared below) to avoid a TDZ reference.
+  const regionRef = useRef<MapRegion | null>(null);
+  const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True when the viewport is zoomed out past the county-scale ceiling — we stop
+  // querying and prompt the user to zoom in rather than scan a whole state.
+  const [zoomedOut, setZoomedOut] = useState(false);
 
   // Generate a cache key from all filter values
   const filterCacheKey = useMemo(
@@ -271,17 +288,8 @@ export function ExploreMapView({
 
   // Fetch map items with all filters applied
   const fetchMapItems = useCallback(
-    async () => {
-      // Check cache (skip if same filters within 2 seconds)
+    async (regionArg?: MapRegion) => {
       const now = Date.now();
-      if (
-        lastFetchRef.current &&
-        lastFetchRef.current.filterKey === filterCacheKey &&
-        now - lastFetchRef.current.timestamp < 2000
-      ) {
-        return;
-      }
-
       setLoading(true);
 
       try {
@@ -296,8 +304,42 @@ export function ExploreMapView({
         // Category filter
         const categoryValues = getCategoryFilter();
 
-        // Distance in meters for filtering
-        const distanceMeters = distance === "any" ? null : distance * 1609.344;
+        // The map shows "what I'm looking at": the query is bounded by the
+        // visible viewport, which wins over the distance filter.
+        const region = regionArg || regionRef.current || initialRegion;
+
+        // Zoom-out ceiling — above county scale we stop querying (no state-wide
+        // scans) and prompt the user to zoom in.
+        if (region.latitudeDelta > MAP_MAX_VIEWPORT_DELTA) {
+          setZoomedOut(true);
+          setMapItems([]);
+          lastFetchRef.current = null;
+          setLoading(false);
+          return;
+        }
+        setZoomedOut(false);
+
+        const bbox = regionToBbox(region);
+
+        // Containment skip: if the same filters already fetched a superset bbox
+        // that wasn't marker-capped, this (tighter) view is already covered.
+        if (
+          lastFetchRef.current &&
+          lastFetchRef.current.filterKey === filterCacheKey &&
+          !lastFetchRef.current.wasCapped &&
+          bboxContains(lastFetchRef.current.bbox, bbox)
+        ) {
+          setLoading(false);
+          return;
+        }
+
+        // Bound any query to the visible viewport.
+        const applyBbox = (q: any) =>
+          q
+            .gte("lat", bbox.latMin)
+            .lte("lat", bbox.latMax)
+            .gte("lng", bbox.lngMin)
+            .lte("lng", bbox.lngMax);
 
         let events: ExploreItem[] = [];
         let activities: ExploreItem[] = [];
@@ -348,8 +390,8 @@ export function ExploreMapView({
             .eq("is_duplicate", false)
             .or(reviewStatusFilter);
 
-          eventQuery = applyFilters(eventQuery);
-          const { data: eventData } = await eventQuery.limit(300);
+          eventQuery = applyFilters(applyBbox(eventQuery));
+          const { data: eventData } = await eventQuery.limit(MAP_MAX_MARKERS);
 
           // 2. Recurring items without starts_at (e.g., weekly wing night, trivia)
           //    These have schedule_text or recurrence but no concrete date,
@@ -372,118 +414,67 @@ export function ExploreMapView({
             recurringQuery = recurringQuery.eq("kind", "event");
           }
 
-          recurringQuery = applyFilters(recurringQuery);
-          const { data: recurringData } = await recurringQuery.limit(200);
+          recurringQuery = applyFilters(applyBbox(recurringQuery));
+          const { data: recurringData } = await recurringQuery.limit(MAP_MAX_MARKERS);
 
-          // Merge and apply distance filter client-side
-          const allEventCandidates = [...(eventData || []), ...(recurringData || [])];
-          events = allEventCandidates.filter((item) => {
-            if (!userLocation || !distanceMeters) return true;
-            if (!item.lat || !item.lng) return false;
-            const dist = getDistanceInMeters(
-              userLocation.lat,
-              userLocation.lng,
-              item.lat,
-              item.lng
-            );
-            return dist <= distanceMeters;
-          });
+          // Viewport already bounds these; no client-side distance filter.
+          events = [...(eventData || []), ...(recurringData || [])];
         }
 
-        // Fetch activities based on mode
-        if (kindFilter === "all") {
-          // "All" mode: activities within postable range (200m of user)
-          if (userLocation) {
-            const degreeRadius = (CHECK_IN_RADIUS_METERS / 111000) * 2;
-            let activityQuery = supabase
-              .from("explore_items")
-              .select("*")
-              .eq("kind", "activity")
-              .is("deleted_at", null)
-              .gte("lat", userLocation.lat - degreeRadius)
-              .lte("lat", userLocation.lat + degreeRadius)
-              .gte("lng", userLocation.lng - degreeRadius)
-              .lte("lng", userLocation.lng + degreeRadius)
-              .not("lat", "is", null)
-              .not("lng", "is", null)
-              .gte("priority", 0)
-              .eq("is_duplicate", false)
-              .or("review_status.is.null,review_status.in.(auto_approved,approved)");
+        // Fetch activities within the viewport ("all" and "activity" modes).
+        if (kindFilter === "all" || kindFilter === "activity") {
+          let activityQuery = supabase
+            .from("explore_items")
+            .select("*")
+            .eq("kind", "activity")
+            .is("deleted_at", null)
+            .not("lat", "is", null)
+            .not("lng", "is", null)
+            .gte("priority", 0)
+            .eq("is_duplicate", false)
+            .or("review_status.is.null,review_status.in.(auto_approved,approved)");
 
-            activityQuery = applyFilters(activityQuery);
-            const { data: activityData } = await activityQuery.limit(100);
-
-            activities = (activityData || []).filter((item) => {
-              if (!item.lat || !item.lng) return false;
-              const dist = getDistanceInMeters(
-                userLocation.lat,
-                userLocation.lng,
-                item.lat,
-                item.lng
-              );
-              return dist <= CHECK_IN_RADIUS_METERS;
-            });
-          }
-        } else if (kindFilter === "activity") {
-          // "Activities" mode: radius-based (1km or user distance setting)
-          if (userLocation) {
-            const activityRadius = Math.min(
-              distanceMeters || MAP_ACTIVITIES_RADIUS_METERS,
-              MAP_ACTIVITIES_RADIUS_METERS
-            );
-            const degreeRadius = (activityRadius / 111000) * 1.2;
-
-            let activityQuery = supabase
-              .from("explore_items")
-              .select("*")
-              .eq("kind", "activity")
-              .is("deleted_at", null)
-              .gte("lat", userLocation.lat - degreeRadius)
-              .lte("lat", userLocation.lat + degreeRadius)
-              .gte("lng", userLocation.lng - degreeRadius)
-              .lte("lng", userLocation.lng + degreeRadius)
-              .not("lat", "is", null)
-              .not("lng", "is", null)
-              .gte("priority", 0)
-              .eq("is_duplicate", false)
-              .or("review_status.is.null,review_status.in.(auto_approved,approved)");
-
-            activityQuery = applyFilters(activityQuery);
-            const { data: activityData } = await activityQuery.limit(500);
-
-            const withDistance = (activityData || [])
-              .map((item) => {
-                const dist = getDistanceInMeters(
-                  userLocation.lat,
-                  userLocation.lng,
-                  item.lat!,
-                  item.lng!
-                );
-                return { item, dist };
-              })
-              .filter(({ dist }) => dist <= activityRadius)
-              .sort((a, b) => a.dist - b.dist)
-              .slice(0, MAP_ACTIVITIES_MAX_MARKERS);
-
-            activities = withDistance.map(({ item }) => item);
-          }
+          activityQuery = applyFilters(applyBbox(activityQuery));
+          // Over-fetch beyond the marker cap so the proximity sort below has room
+          // to pick the best markers across the viewport.
+          const { data: activityData } = await activityQuery.limit(MAP_MAX_MARKERS * 3);
+          activities = activityData || [];
         }
 
-        const combined = [...events, ...activities];
-        // Deduplicate — recurring items can match both dated-event and recurring queries,
-        // and "all" mode recurring query can overlap with the activities query.
+        // Deduplicate — recurring items can match both the dated-event and
+        // recurring queries, and the activities query can overlap the recurring one.
         const seen = new Set<string>();
-        const deduped = combined.filter((item) => {
+        const deduped = [...events, ...activities].filter((item) => {
           if (seen.has(item.id)) return false;
           seen.add(item.id);
           return true;
         });
-        setMapItems(deduped);
 
-        // Update cache
+        // Cap total markers. Events first (time-bounded and fewer, so they're
+        // never crowded out), then activities by priority, then proximity to the
+        // viewport center.
+        const centerLat = region.latitude;
+        const centerLng = region.longitude;
+        deduped.sort((a, b) => {
+          const ae = a.kind === "event" ? 0 : 1;
+          const be = b.kind === "event" ? 0 : 1;
+          if (ae !== be) return ae - be;
+          const ap = a.priority ?? 0;
+          const bp = b.priority ?? 0;
+          if (ap !== bp) return bp - ap;
+          const ad = getDistanceInMeters(centerLat, centerLng, a.lat!, a.lng!);
+          const bd = getDistanceInMeters(centerLat, centerLng, b.lat!, b.lng!);
+          return ad - bd;
+        });
+        const wasCapped = deduped.length > MAP_MAX_MARKERS;
+        setMapItems(wasCapped ? deduped.slice(0, MAP_MAX_MARKERS) : deduped);
+
+        // Update cache (bbox + cap state drive the containment-skip above).
         lastFetchRef.current = {
           filterKey: filterCacheKey,
           timestamp: now,
+          bbox,
+          wasCapped,
         };
       } catch (err) {
         console.error("[ExploreMapView] Fetch error:", err);
@@ -497,20 +488,41 @@ export function ExploreMapView({
     [
       filterCacheKey,
       kindFilter,
-      userLocation,
+      userId,
       fallbackItems,
       getTimeWindowRange,
       getCategoryFilter,
       priceBucket,
-      distance,
       tags,
+      initialRegion,
     ]
   );
 
-  // Fetch when any filter changes
+  // Refetch the current viewport when any filter changes.
   useEffect(() => {
-    fetchMapItems();
+    fetchMapItems(regionRef.current ?? undefined);
   }, [filterCacheKey]);
+
+  // Debounced refetch as the user pans/zooms the map. The map is "what I'm
+  // looking at", so the visible region drives the query.
+  const handleRegionChangeComplete = useCallback(
+    (newRegion: MapRegion) => {
+      regionRef.current = newRegion;
+      if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
+      regionDebounceRef.current = setTimeout(() => {
+        fetchMapItems(newRegion);
+      }, MAP_REGION_DEBOUNCE_MS);
+    },
+    [fetchMapItems]
+  );
+
+  // Clear any pending debounce on unmount.
+  useEffect(
+    () => () => {
+      if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
+    },
+    []
+  );
 
   // Filter to mappable items
   const mappableItems = useMemo(
@@ -593,6 +605,7 @@ export function ExploreMapView({
         style={{ flex: 1 }}
         provider={PROVIDER_DEFAULT}
         initialRegion={initialRegion}
+        onRegionChangeComplete={handleRegionChangeComplete}
         showsUserLocation={!isLocationOverridden()}
         showsMyLocationButton={!isLocationOverridden()}
         onPress={() => selectItem(null)}
@@ -636,6 +649,37 @@ export function ExploreMapView({
           </Marker>
         )}
       </MapView>
+
+      {/* Zoom-out ceiling: prompt to zoom in rather than scan a whole state */}
+      {zoomedOut && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: "45%",
+            alignSelf: "center",
+            paddingHorizontal: 16,
+            paddingVertical: 10,
+            borderRadius: 20,
+            backgroundColor: colors.cardBg,
+            borderWidth: 1,
+            borderColor: colors.border,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.15,
+            shadowRadius: 4,
+            elevation: 3,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <Ionicons name="search" size={14} color={colors.textSecondary} />
+          <Text style={{ fontSize: 13, fontWeight: "600", color: colors.textSecondary }}>
+            Zoom in to load events
+          </Text>
+        </View>
+      )}
 
       {/* Item count badge */}
       <View
