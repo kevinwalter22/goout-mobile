@@ -164,7 +164,10 @@ Deno.serve(async (req) => {
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: "claude-3-haiku-20240307",
+          // Was the deprecated claude-3-haiku-20240307 (token-audit #7). This
+          // function is feature-flagged OFF; updated so that if it's ever
+          // enabled it runs on a current, supported model rather than failing.
+          model: "claude-haiku-4-5-20251001",
           max_tokens: maxTokens,
           temperature: 0.3,
           messages: [
