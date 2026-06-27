@@ -41,6 +41,10 @@ No approval. No announcement-first. Do the work, then summarize.
 
 - Bug fixes **under ~50 lines** that touch no schema, no auth, no RLS.
 - Adding new `collector_targets` rows that follow an existing, proven pattern.
+  (Tier 1 to add — but it feeds the user-facing catalog and spends a little LLM
+  budget, so **verify the crawl yields good events and watch the Anthropic budget,
+  then include the yield in your summary.** A *new* source type or vendor is not
+  this — that's a new external API integration, Tier 3.)
 - Tuning constants **within an already-established range** (e.g. a scoring
   weight inside its documented bounds, a cache TTL, a batch size).
 - Adding tests for code that already exists.
@@ -133,6 +137,16 @@ actually Tier-1 is a few seconds of Kevin's time. The cost of shipping a Tier-3
 change as if it were Tier-1 is an auth hole, a dropped column, or a poisoned
 training signal in production. Uncertainty itself is an escalation trigger —
 PROJECT_STATE §1 already says so, and that still holds.
+
+**A few cases that aren't obvious from the tier lists:**
+- **Major-version dependency bumps** are Tier 3 (breaking-change risk), even though
+  patch/minor bumps are Tier 2.
+- **No auto-hotfix.** Even an urgent production incident goes through the gated
+  pipeline — there is no path that ships to prod without Kevin's approval at the
+  `Production` gate. Move fast *to the gate*; the gate itself is never skipped.
+- **Secret rotation / ops chores** (rotating a test-account password, setting a
+  function secret on staging) are Tier 1–2 on **staging**; anything touching a
+  **prod** secret or the auth-guard's accepted-key logic is Tier 3.
 
 ---
 
