@@ -4,13 +4,11 @@
  * Finds explore_items that need (re-)enrichment and enqueues them.
  * Designed for scheduled execution (daily via pg_cron or manual invoke).
  *
- * Targets items where:
- * - normalized_confidence IS NULL
- * - tags empty or NULL
- * - hook_line missing or too short
- * - availability_json missing for events
- * - llm_enriched_at older than 30 days for active items
- * - price_bucket = 'unknown'
+ * Targets items NOT yet enriched to CURRENT_ENRICHMENT_VERSION (via the
+ * find_items_needing_enrichment RPC, migration 142). It does NOT re-enrich
+ * already-current items on a rolling-time basis — that bug re-swept the whole
+ * catalog every run and caused enrichment cost storms (token-audit #1). To
+ * deliberately re-enrich everything, bump the version in the RPC + the worker.
  *
  * Respects rate limits by batching and not re-enqueuing already-queued items.
  */
@@ -75,19 +73,14 @@ Deno.serve(async (req) => {
       });
 
     if (queryError) {
-      // RPC might not exist yet — fall back to direct query
+      // RPC missing — fall back to a direct query with the SAME version gate
+      // (NOT the old rolling-30-day re-sweep that caused cost storms).
       console.warn("RPC find_items_needing_enrichment not found, using direct query");
 
       const { data: directCandidates, error: directError } = await supabase
         .from("explore_items")
-        .select("id, title, normalized_confidence, llm_enriched_at")
-        .or(
-          "normalized_confidence.is.null," +
-          "tags.is.null," +
-          "hook_line.is.null," +
-          "availability_json.is.null," +
-          `llm_enriched_at.lt.${staleCutoffIso}`
-        )
+        .select("id, title, normalized_confidence")
+        .or("enrichment_version.is.null,enrichment_version.lt.2")
         .gte("priority", 0)
         .eq("is_duplicate", false)
         .order("normalized_confidence", { ascending: true, nullsFirst: true })

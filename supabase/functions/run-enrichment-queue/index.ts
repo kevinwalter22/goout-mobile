@@ -65,9 +65,18 @@ Deno.serve(async (req) => {
     }
 
     const batchSize = config.batch_size || 5;
-    const maxItems = config.max_items || 50;
+    const maxItems = config.max_items || 25;
     const dryRun = config.dry_run || false;
     const forceEnrich = config.force_enrich || false;
+
+    // Wall-clock guard. Supabase kills an edge function at ~150s; if we're still
+    // looping when that happens, the job we last claimed is left stuck in
+    // 'running' forever (this is exactly how thousands of jobs silently piled up
+    // — see migration 141 / reset_stale_enrichment_jobs). Stop well before the
+    // hard limit so every claimed job reaches complete_enrichment_job and the
+    // function returns a real response.
+    const RUN_DEADLINE_MS = 110_000;
+    const runStartedAt = Date.now();
 
     // Create Supabase client with service role
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -116,7 +125,16 @@ Deno.serve(async (req) => {
     console.log(`Starting enrichment worker: batch_size=${batchSize}, max_items=${maxItems}, dry_run=${dryRun}`);
 
     // Process in batches
+    let deadlineReached = false;
     while (processedCount < maxItems) {
+      // Stop before the edge-function wall-clock limit so we never orphan a
+      // claimed job in 'running'.
+      if (Date.now() - runStartedAt > RUN_DEADLINE_MS) {
+        deadlineReached = true;
+        console.log(`Run deadline (${RUN_DEADLINE_MS}ms) reached after ${processedCount} items; stopping cleanly.`);
+        break;
+      }
+
       // Claim next job
       const { data: jobs, error: claimError } = await supabase.rpc("claim_enrichment_job");
 
@@ -361,6 +379,7 @@ Deno.serve(async (req) => {
           enriched: successful,
           skipped,
           failed,
+          deadline_reached: deadlineReached,
         },
         tokens_used: totalTokensUsed,
         results,

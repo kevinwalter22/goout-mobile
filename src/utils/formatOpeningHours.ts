@@ -112,8 +112,15 @@ function parseHoursRange(
       : undefined;
 
   const open = parseTime(parts[0], inheritedPeriod);
-  const close = parseTime(parts[1], inheritedPeriod);
+  let close = parseTime(parts[1], inheritedPeriod);
   if (open === null || close === null) return null;
+
+  // Past-midnight close (e.g. "11:00 AM – 1:00 AM", common for Old Port bars):
+  // the close time falls on the next calendar day. Represent it as minutes past
+  // *this* day's midnight (close += 24h) so the open-now check `open <= now <
+  // close` works without a wrap special-case. A close of "12:00 AM" parses to 0
+  // and becomes 1440 (midnight tonight), which is the intended "until midnight".
+  if (close <= open) close += 24 * 60;
 
   return { open, close };
 }
@@ -153,6 +160,31 @@ export function formatOpeningHours(
   const fullSchedule = parseScheduleText(scheduleText);
   if (fullSchedule.length === 0) {
     return { summaryLine: null, fullSchedule: [] };
+  }
+
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+  // Spillover from the previous day: a venue that closes past midnight (its range
+  // wrapped to close > 24h) is still open in the small hours of today. e.g. a bar
+  // open "5:00 PM – 2:00 AM" is open at 1:00 AM today. Check this before today's
+  // own entry so a venue that's "Closed" today still reads as open during the
+  // tail of last night's session.
+  const prevName = DAY_ORDER[(now.getDay() + 6) % 7];
+  const prevEntry = fullSchedule.find(
+    (d) => d.day.toLowerCase() === prevName.toLowerCase(),
+  );
+  if (
+    prevEntry &&
+    !/closed/i.test(prevEntry.hours) &&
+    !/open\s*24\s*hours/i.test(prevEntry.hours)
+  ) {
+    const prevRange = parseHoursRange(prevEntry.hours);
+    if (prevRange && prevRange.close > 24 * 60 && nowMinutes < prevRange.close - 24 * 60) {
+      return {
+        summaryLine: `Open · Closes at ${formatMinutes(prevRange.close)}`,
+        fullSchedule,
+      };
+    }
   }
 
   const todayName = getDayName(now);

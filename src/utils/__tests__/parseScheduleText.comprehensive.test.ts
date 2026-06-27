@@ -75,14 +75,16 @@ describe("inherited AM/PM range — the Warwick Drive-In regression", () => {
     );
   });
 
-  it("handles the inverse — period only on the open side", () => {
-    const sched = allDays("9:00 AM – 5:30"); // close inherits AM? no — inherits from open = AM
+  it("handles the inverse — period only on the open side (close inherits, then wraps past midnight)", () => {
+    const sched = allDays("9:00 AM – 5:30"); // close inherits from open = AM
     const now = makeDate(1, 10); // Mon 10 AM
-    // open=9:00 AM=540, close inherits AM → 5:30 AM=330 < open. 10AM is after the
-    // (degenerate) close window, so it reports closed. This documents the
-    // inheritance direction precisely.
+    // open=9:00 AM=540; close inherits AM → 5:30 AM=330 < open, so the past-midnight
+    // wrap treats it as 5:30 AM the *next* day (close=1770). At 10 AM the venue is
+    // therefore open. This documents both the inheritance direction (open side wins)
+    // and the past-midnight wrap. NB: this exact string is synthetic — real Google
+    // Places data always carries an explicit AM/PM on the close side.
     const { summaryLine } = formatOpeningHours(sched, now);
-    expect(summaryLine).toMatch(/Closed/);
+    expect(summaryLine).toBe("Open · Closes at 5:30 AM");
   });
 });
 
