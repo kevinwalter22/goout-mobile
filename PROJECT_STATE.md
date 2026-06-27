@@ -551,6 +551,12 @@ Per-crawl cost is **$0.027** (above design doc's $0.005 estimate). Monthly proje
 
 ## 7. Architecture & Patterns Notes
 
+### Release cadence — prod promotion vs App Store release (06/27/2026)
+Two distinct release paths with different blast radii. **Do not conflate them when classifying Tier 3+ work** — server/migration risk and client-delivery risk are separate axes.
+- **Prod promotion (`staging → main`)** is routine. A merge to `main` runs `deploy-production.yml`, reaching prod **only through the `Production` approval gate** (Kevin = required reviewer). It ships **migrations + edge functions + a prod EAS *build* artifact** — i.e. backend/database state, live on approval. It does **not** `eas update`/OTA-publish and does **not** auto-submit, so it carries **no client-code change to users**.
+- **App Store release (V1.1 onward)** is the only path that delivers **bundled mobile JS** to users — a new binary via `submit-production.yml` (manual, gated), and thereafter OTA via `eas update` to builds that *have* OTA capability. The current live build (16, pre-OTA) receives nothing until a V1.1 binary ships.
+- **Consequence:** a `staging→main` promotion can carry client-JS commits with **zero user-facing client impact** — they sit dormant in the build artifact until an App Store release. **Exception:** catalog *content* (e.g. enabling `collector_targets`, ingesting events) reaches any live app hitting prod immediately, independent of client-code delivery. So a promotion's user-facing surface = server behavior + catalog data, never bundled JS.
+
 ### Database
 - PostgreSQL via Supabase, 128+ migrations applied to production
 - Row-level security throughout
