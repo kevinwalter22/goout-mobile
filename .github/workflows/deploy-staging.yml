@@ -40,6 +40,35 @@ jobs:
       ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so we can diff the merged push range and decide whether
+          # the mobile client changed (gates the EAS build below).
+          fetch-depth: 0
+
+      # Only build a new staging app when the merged changes touch the mobile
+      # client (UI / client code that has to be visible in the app to test).
+      # Server-only or doc-only merges (edge functions, migrations, scripts,
+      # docs, CI) skip the EAS build entirely. constants/ and hooks/ are included
+      # because they are bundled client code — a missed build is worse than an
+      # extra one.
+      - name: Detect mobile client changes
+        id: client
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "No reliable base ref (dispatch / first push) — building to be safe."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FILES=$(git diff --name-only "$BEFORE" "${{ github.sha }}")
+          echo "::group::Changed files"; echo "$FILES"; echo "::endgroup::"
+          if echo "$FILES" | grep -qE '^(app/|src/|components/|constants/|hooks/|assets/|app\.json$|app\.config\.(js|ts)$|eas\.json$|package\.json$)'; then
+            echo "Mobile client changed → EAS build will run."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No mobile client changes → EAS build will be skipped."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: supabase/setup-cli@v1
         with:
@@ -92,30 +121,56 @@ jobs:
 
       # With the ASC key present: build + auto-submit to TestFlight (server-side,
       # so --no-wait is fine — EAS runs the submit after the build completes).
+      # Only when the mobile client actually changed.
       - name: Trigger EAS staging build + TestFlight submit
-        if: ${{ env.EXPO_TOKEN != '' && env.ASC_API_KEY_P8_BASE64 != '' }}
+        if: ${{ env.EXPO_TOKEN != '' && env.ASC_API_KEY_P8_BASE64 != '' && steps.client.outputs.changed == 'true' }}
         run: npx eas-cli@latest build --platform ios --profile staging --auto-submit --non-interactive --no-wait
 
       # Fallback: ASC key not configured — build only (old behavior).
       - name: Trigger EAS staging build (build only — no ASC key)
-        if: ${{ env.EXPO_TOKEN != '' && env.ASC_API_KEY_P8_BASE64 == '' }}
+        if: ${{ env.EXPO_TOKEN != '' && env.ASC_API_KEY_P8_BASE64 == '' && steps.client.outputs.changed == 'true' }}
         run: npx eas-cli@latest build --platform ios --profile staging --non-interactive --no-wait
 
       - name: Skip EAS (no token)
         if: ${{ env.EXPO_TOKEN == '' }}
         run: echo "::warning::EXPO_TOKEN not set — skipped EAS staging build."
 
+      # Server-only / doc-only merge: skip the build and tell Kevin in Slack so a
+      # missing build never reads as "something went wrong."
+      - name: Skip EAS (no client changes) + Slack note
+        if: ${{ env.EXPO_TOKEN != '' && steps.client.outputs.changed != 'true' }}
+        run: |
+          echo "::notice::No mobile client changes — EAS staging build skipped (server/docs-only merge)."
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            curl -sf -X POST -H 'Content-Type: application/json' "$SLACK_WEBHOOK_URL" -d @- <<JSON
+          {"text":":information_source: *Staging: EAS build skipped*","attachments":[{"color":"#999999","blocks":[
+            {"type":"section","text":{"type":"mrkdwn","text":"Server/docs-only merge — no mobile client change, so no new staging build. Migrations + edge functions deployed normally. Nothing went wrong."}},
+            {"type":"section","fields":[
+              {"type":"mrkdwn","text":"*Commit:*\n\`${{ github.sha }}\`"},
+              {"type":"mrkdwn","text":"*By:*\n${{ github.actor }}"}
+            ]},
+            {"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"View run"},"url":"$RUN_URL"}]}
+          ]}]}
+          JSON
+          fi
+
       - name: Slack — deploy succeeded
         if: ${{ success() && env.SLACK_WEBHOOK_URL != '' }}
         run: |
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ "${{ steps.client.outputs.changed }}" = "true" ]; then
+            SHIPPED="migrations + edge functions + EAS build"
+          else
+            SHIPPED="migrations + edge functions (EAS skipped — no client change)"
+          fi
           curl -sf -X POST -H 'Content-Type: application/json' "$SLACK_WEBHOOK_URL" -d @- <<JSON
           {"text":":rocket: *Staging deploy succeeded*","attachments":[{"color":"#36a64f","blocks":[
             {"type":"section","fields":[
               {"type":"mrkdwn","text":"*Env:*\nstaging"},
               {"type":"mrkdwn","text":"*Commit:*\n\`${{ github.sha }}\`"},
               {"type":"mrkdwn","text":"*By:*\n${{ github.actor }}"},
-              {"type":"mrkdwn","text":"*Shipped:*\nmigrations + edge functions + EAS"}
+              {"type":"mrkdwn","text":"*Shipped:*\n$SHIPPED"}
             ]},
             {"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"View run"},"url":"$RUN_URL"}]}
           ]}]}
