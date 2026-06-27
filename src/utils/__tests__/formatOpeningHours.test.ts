@@ -252,3 +252,40 @@ describe("Jernabi Coffeehouse scenario", () => {
     );
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// Past-midnight close (Old Port bars) — regression for the Portland sweep
+// ═══════════════════════════════════════════════════════════════════
+describe("formatOpeningHours — past-midnight close", () => {
+  // A bar open every day 11:00 AM – 1:00 AM (closes 1 AM the next day).
+  const bar =
+    "Monday: 11:00 AM – 1:00 AM; Tuesday: 11:00 AM – 1:00 AM; Wednesday: 11:00 AM – 1:00 AM; Thursday: 11:00 AM – 1:00 AM; Friday: 11:00 AM – 1:00 AM; Saturday: 11:00 AM – 1:00 AM; Sunday: 11:00 AM – 1:00 AM";
+
+  it("Monday 11 PM → Open · Closes at 1:00 AM (same-day evening)", () => {
+    expect(formatOpeningHours(bar, makeDate(1, 23)).summaryLine).toBe(
+      "Open · Closes at 1:00 AM",
+    );
+  });
+
+  it("Tuesday 12:30 AM → Open · Closes at 1:00 AM (spillover from Monday)", () => {
+    expect(formatOpeningHours(bar, makeDate(2, 0, 30)).summaryLine).toBe(
+      "Open · Closes at 1:00 AM",
+    );
+  });
+
+  it("Tuesday 2:00 AM → Closed · Opens at 11:00 AM (after the wrap)", () => {
+    expect(formatOpeningHours(bar, makeDate(2, 2)).summaryLine).toBe(
+      "Closed · Opens at 11:00 AM",
+    );
+  });
+
+  it("spillover applies even when today is Closed", () => {
+    // Open late Saturday into Sunday, closed all day Sunday.
+    const sched =
+      "Monday: Closed; Tuesday: Closed; Wednesday: Closed; Thursday: Closed; Friday: Closed; Saturday: 5:00 PM – 2:00 AM; Sunday: Closed";
+    // Sunday 1:00 AM — still open from Saturday night.
+    expect(formatOpeningHours(sched, makeDate(0, 1)).summaryLine).toBe(
+      "Open · Closes at 2:00 AM",
+    );
+  });
+});
