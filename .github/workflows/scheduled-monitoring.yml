@@ -42,3 +42,27 @@ jobs:
           if [ "$fail" = "1" ]; then
             echo "::warning::One or more monitor functions did not return 2xx."
           fi
+
+  # Closes the --no-wait blind spot: EAS builds + TestFlight submits run on EAS
+  # servers AFTER the deploy job exits, so a server-side failure (e.g. pod-install
+  # or fastlane source-map upload) never surfaces in CI. This checks recent iOS
+  # builds for ERRORED status and alerts Slack. Inert until EXPO_TOKEN is set.
+  eas-build-health:
+    name: EAS build/submit failure check
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      EAS_PROJECT_ID: 4c8f3119-7056-4a82-a35a-c0f05b161d8a
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check recent EAS builds for failures
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::warning::EXPO_TOKEN not set; skipping EAS build health check."
+            exit 0
+          fi
+          node scripts/check_eas_health.mjs

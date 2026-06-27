@@ -4,6 +4,11 @@
 **Owner:** Kevin Walter
 **Operating layer:** Claude (via this document) coordinating Claude Code
 
+<!-- 06/25/2026: Pre-launch comprehensive sweep ran (5 layers: interface parity,
+deploy pipeline, monitoring/alerting, autonomy ladder, docs/bootstrap) to verify
+the chief-engineer setup end-to-end before Kevin begins phone-driven feature work.
+This line is the Layer-2 pipeline marker. See the sweep report in Slack. -->
+
 ---
 
 ## How to read this document
@@ -47,14 +52,9 @@ Sections are ordered by how often they're consulted:
 
 ### Trust ladder
 
-The autonomous infrastructure is being built in phases. We don't skip ahead.
+**The autonomous infrastructure is BUILT (Chief Engineer Phases 1–7 complete, validated end-to-end 06/22/2026; pre-launch sweep 06/25/2026).** Day-to-day autonomy is now governed entirely by [`docs/chief_engineer/autonomy_ladder.md`](docs/chief_engineer/autonomy_ladder.md) — the four-tier model above replaces the old phased rollout. In practice: Tier 1–2 work ships through the test gate + staging on its own; Tier 3–4 stops for Kevin; every production deploy stops at the `Production` approval gate regardless of tier. Kevin operates from VS Code, Slack, or the Claude mobile app interchangeably (all three are credential-equivalent — see [`docs/chief_engineer/multi_interface.md`](docs/chief_engineer/multi_interface.md)).
 
-- **Phase 1 (current):** Process change only. Claude takes the lead engineer role. Kevin steps out of the technical loop except for explicit escalations. No new infrastructure yet.
-- **Phase 2 (late Warwick / early Portland):** Task queue + background agent for smallest, safest work. Documentation, test writing, tiny bug fixes. Everything still PR-reviewed.
-- **Phase 3 (Portland):** Autonomous handles real bug fixes, new collector targets, test coverage, UI tweaks. Daily digest reports begin. Kevin reviews PRs from phone.
-- **Phase 4 (pre-Boston):** Auto-merge for low-risk PRs. Most day-to-day work happens out of Kevin's attention. Kevin focused on app and business.
-
-We advance phases only when the previous phase has demonstrated reliability for ~2 weeks.
+_(Historical: this was originally a 4-phase rollout — process change → task queue → autonomous fixes → auto-merge. We compressed straight through to the full setup during the Warwick build; the autonomy ladder is the live successor.)_
 
 ### What Claude will and won't do
 
@@ -472,7 +472,7 @@ Per-crawl cost is **$0.027** (above design doc's $0.005 estimate). Monthly proje
 - **Migration 126** (Warwick fetch partitions): applied; 3 partitions staged is_enabled=FALSE
 - **Migration 127** (Warwick collector targets): applied; 30 targets staged is_enabled=FALSE (32 originally, 2 deleted in 128)
 - **Migration 128** (URL fixes + 2 deletions): applied
-- **Sentry (Chief Engineer Phase 2):** mobile `euda-mobile` live (`@sentry/react-native`, replay/perf disabled; staging now also reports, env-tagged). Edge integration **LIVE in production (06/17/2026):** `SENTRY_DSN_EDGE`/`SENTRY_ENV=prod` set as function secrets and all 7 wrapped functions redeployed to `lkmntknpaiaiqvupzjbz` (health-probed 401, DSN verified receiving). Env tag is `prod` (not "production") to match mobile `Env.APP_ENV` + the Sentry alert rule's `environment:prod` filter. Edge project `euda-edge`. Staging-project edge functions not deployed yet (no edge runtime there). See `docs/chief_engineer/sentry.md`.
+- **Sentry (Chief Engineer Phase 2):** mobile `euda-mobile` live (`@sentry/react-native`, replay/perf disabled; staging now also reports, env-tagged). Edge integration **LIVE in production (06/17/2026):** `SENTRY_DSN_EDGE`/`SENTRY_ENV=prod` set as function secrets and all 7 wrapped functions redeployed to `lkmntknpaiaiqvupzjbz` (health-probed 401, DSN verified receiving). Env tag is `prod` (not "production") to match mobile `Env.APP_ENV` + the Sentry alert rule's `environment:prod` filter. Edge project `euda-edge`. **Staging edge functions ARE deployed (via `deploy-staging.yml`) and report to `euda-edge` with `SENTRY_ENV=staging`** (updated 06/25/2026 — the earlier "not deployed" note is obsolete). See `docs/chief_engineer/sentry.md`.
 
 ### Phase 5.1 — new files (05/19-20/2026, deployed via 5.2 redeploy)
 - `supabase/functions/_shared/llm-extractor.ts` — extractEvents() + preprocessHtmlForPrompt() + evidenceAppearsInSource() + Haiku 4.5 prompts. Standalone module; no DB or network side effects beyond the LLM call (optional cost logging via opts.supabase).
@@ -533,9 +533,10 @@ Per-crawl cost is **$0.027** (above design doc's $0.005 estimate). Monthly proje
 - **Staging:** Supabase project `baulipaydofqtkihkghj`, fully isolated. Mobile `staging` EAS channel, `com.euda.app.staging`. Built in Phase 1.
 - **Branch ↔ env mapping:** `staging` branch → staging project (auto-deploy); `main` branch → production project (deploy behind manual approval). Feature branches → PR test gate only.
 
-### Deployment automation (Phase 5, 06/21/2026)
-- **Workflows:** `test.yml` (PR gate + reusable via `workflow_call`: lint → typecheck → unit → pre-submission scan, then integration tests vs staging), `deploy-staging.yml` (push to `staging`: test → migrations + edge functions + EAS staging build → Slack), `deploy-production.yml` (push to `main`: test → **manual approval** via `Production` environment → migrations + functions + EAS prod build → release tag `vX.Y.Z-prod.<run>` → Slack). `ci.yml` removed (folded into `test.yml`).
-- **Gating:** branch protection requires the `test.yml` checks + 1 PR review on `main` (and `staging`); `main` is PR-only. Prod deploy pauses on the `Production` environment's required reviewer. See `docs/chief_engineer/deployment.md`.
+### Deployment automation (Phase 5, updated 06/25/2026)
+- **Workflows (6):** `test.yml` (PR gate + reusable via `workflow_call`: lint → typecheck → unit → pre-submission scan, then integration tests vs staging); `deploy-staging.yml` (push to `staging`: test → migrations + edge functions [3× retry] + EAS staging build **+ auto-submit to TestFlight** → Slack); `deploy-production.yml` (push to `main`: test → **manual approval** via `Production` environment → migrations + functions + EAS prod **build only** → release tag `vX.Y.Z-prod.<run>` → Slack); `submit-production.yml` (**manual, gated** — `workflow_dispatch` + Production approval → `eas submit` the latest finished prod build to TestFlight); `security.yml` (audit report-only + gitleaks + RLS regression suite vs staging); `scheduled-monitoring.yml` (every 4h: pings the 3 frequent prod monitors **+ EAS build/submit failure check** — pg_cron + `--no-wait` backup). `ci.yml` removed (folded into `test.yml`).
+- **Edge-fn imports use `npm:@supabase/supabase-js`** (NOT esm.sh — esm.sh outages were a deploy SPOF; migrated 06/23). 3× retry on the functions-deploy step as belt-and-suspenders.
+- **Gating:** branch protection requires the `test.yml` checks + 1 PR review on `main` (and `staging`); `main` is PR-only; `enforce_admins:false` is the intentional escape hatch (the `Production` environment approval gate — required reviewer `kevinwalter22` — is the real prod safety, separate from branch protection). Prod **build** is automatic on merge; prod **TestFlight submit** is never automatic (manual `submit-production.yml` + approval). See `docs/chief_engineer/deployment.md`.
 - **CI secrets:** Supabase access token + per-env project refs / DB passwords / service-role keys; `EXPO_TOKEN` (EAS); `SLACK_WEBHOOK_URL` (+ `SLACK_ALERT_MENTION`); staging anon + `SENTRY_DSN_EDGE` for integration tests. Staging URL derived from the ref. EAS/Slack steps no-op until their secrets exist; integration tests hard-require the staging secrets.
 - **Rollback:** forward-fix migrations (no auto down-migrations) + Supabase PITR as the safety net; edge functions re-deploy a prior sha; mobile via `eas update` channel rollback. Runbook in `docs/chief_engineer/deployment.md`. Migration 137 is sacred — never auto-rolled-back.
 
