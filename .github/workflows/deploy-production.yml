@@ -42,7 +42,7 @@ jobs:
         with:
           fetch-depth: 0   # full history so the release tag is unambiguous
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v2
         with:
           # Pinned (not "latest") — resolving "latest" hits the GitHub API and
           # gets rate-limited on shared runners. Bump deliberately.
