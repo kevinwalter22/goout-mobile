@@ -153,9 +153,11 @@ export const RECOMMENDER_CONFIG = {
     NULL_NEUTRAL: 0.4, // activity not yet scored → slightly below neutral (don't reward unknowns)
     // Floor gate: activities scored below this are hidden from the ranked feed
     // (the "hide the inventory tail" mechanism), UNLESS the user is searching.
-    // Unscored activities (null) are never gated. Bumped to 2.5 to also drop the
-    // weak service-business tier; 2.0 = only the clear chain/garbage floor.
-    FLOOR: 2.0,
+    // Unscored activities (null) are never gated. 2.5 (Kevin's call): the 2.0–2.5
+    // band is genuine junk that isn't an obvious national chain (strip-mall nail
+    // salons, the paper mill, generic canoe launches) — nothing recognizably
+    // notable scored between 2.0 and 2.5. Chains <2.0 are already is_admin_suppressed.
+    FLOOR: 2.5,
   },
 
   // Community feedback scoring
