@@ -333,6 +333,7 @@ export function useRecommender(
           contextIntent: 0,
           typeAffinity: 0,
           quality: 0,
+          notability: 0.5,
           communityFeedback: 0,
           freshness: 0,
           friendCreated: 0,

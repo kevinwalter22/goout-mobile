@@ -83,6 +83,7 @@ describe("scoreItem — structure & invariants", () => {
       b.contextIntent * WEIGHTS.CONTEXT_INTENT +
       b.typeAffinity * WEIGHTS.TYPE_AFFINITY +
       b.quality * WEIGHTS.QUALITY +
+      b.notability * WEIGHTS.NOTABILITY +
       b.communityFeedback * WEIGHTS.COMMUNITY_FEEDBACK +
       b.freshness * WEIGHTS.FRESHNESS +
       b.friendCreated * WEIGHTS.FRIEND_CREATED;

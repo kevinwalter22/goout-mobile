@@ -16,6 +16,7 @@ const DEFAULT_BREAKDOWN: ScoreBreakdown = {
   contextIntent: 0.5,
   typeAffinity: 0.5,
   quality: 0.7,
+  notability: 0.5,
   communityFeedback: 0.5,
   freshness: 0.5,
   friendCreated: 0,

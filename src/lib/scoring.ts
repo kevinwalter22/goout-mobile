@@ -52,6 +52,8 @@ export interface ScoreBreakdown {
   contextIntent: number;
   typeAffinity: number;
   quality: number;
+  /** Place-notability (migration 144): activity-only, neutral 0.5 for events / when flag off. */
+  notability: number;
   communityFeedback: number;
   freshness: number;
   friendCreated: number;
@@ -107,6 +109,11 @@ export function scoreItem(
       ? computeTypeAffinityScore(item, context)
       : 0,
     quality: computeQualityScore(item),
+    // Notability: activity-only "would a local recommend this?". When the flag is
+    // off it returns a constant 0.5 (ranking-neutral) so ranking ≈ pre-notability.
+    notability: context.featureFlags.get(FLAGS.NOTABILITY)
+      ? computeNotabilityScore(item)
+      : 0.5,
     communityFeedback: context.featureFlags.get(FLAGS.COMMUNITY_FEEDBACK)
       ? computeCommunityFeedbackScore(item, context)
       : 0,
@@ -132,6 +139,7 @@ export function scoreItem(
     breakdown.contextIntent * WEIGHTS.CONTEXT_INTENT +
     breakdown.typeAffinity * WEIGHTS.TYPE_AFFINITY +
     breakdown.quality * WEIGHTS.QUALITY +
+    breakdown.notability * WEIGHTS.NOTABILITY +
     breakdown.communityFeedback * WEIGHTS.COMMUNITY_FEEDBACK +
     breakdown.freshness * WEIGHTS.FRESHNESS +
     breakdown.friendCreated * WEIGHTS.FRIEND_CREATED;
@@ -171,28 +179,43 @@ export function scoreAndRankItems(
     .map((item) => scoreItem(item, context))
     .sort((a, b) => b.recommendScore - a.recommendScore);
 
+  // Notability floor gate (migration 144). Hides the low-notability inventory
+  // tail from the ranked feed once the flag is on — the "curation, not inventory"
+  // lever. Overrides: unscored activities (null) are never hidden, events are
+  // never gated, and an active search shows everything the user asked for.
+  const { NOTABILITY, FLAGS } = RECOMMENDER_CONFIG;
+  const gateActive =
+    context.featureFlags.get(FLAGS.NOTABILITY) && !context.searchActive;
+  const ranked = gateActive
+    ? scored.filter((it) => {
+        if (it.kind === "event") return true;
+        const ns = (it as any).notability_score as number | null | undefined;
+        return ns == null || ns >= NOTABILITY.FLOOR;
+      })
+    : scored;
+
   // Dev-only debug logging for top 10 items
-  if (__DEV__ && RECOMMENDER_CONFIG.CONTEXT_INTENT.DEBUG && scored.length > 0) {
+  if (__DEV__ && RECOMMENDER_CONFIG.CONTEXT_INTENT.DEBUG && ranked.length > 0) {
     const now = context.currentTime;
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     console.log(
       `\n[Scorer] ${dayNames[now.getDay()]} ${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")} | kind=${context.kindFilter || "all"} | Top 10:`
     );
-    scored.slice(0, 10).forEach((item, i) => {
+    ranked.slice(0, 10).forEach((item, i) => {
       const b = item.scoreBreakdown;
       console.log(
         `  ${i + 1}. [${b.total.toFixed(3)}] "${item.title}" ` +
           `D=${b.distance.toFixed(2)} T=${b.timeMatch.toFixed(2)} W=${b.weather.toFixed(2)} ` +
           `CI=${b.contextIntent.toFixed(2)}${b._intentBucket ? ` (${b._intentBucket})` : ""} ` +
           `TyA=${b.typeAffinity.toFixed(2)} CF=${b.communityFeedback.toFixed(2)} ` +
-          `FN=${b.freshness.toFixed(2)} ` +
+          `FN=${b.freshness.toFixed(2)} NB=${b.notability.toFixed(2)} ` +
           `ON=${b.openNow.toFixed(2)} FR=${b.friendsGoing.toFixed(2)} TA=${b.tagAffinity.toFixed(2)}` +
           (b.chainPenalty < 1 ? ` [CHAIN×${b.chainPenalty}]` : "")
       );
     });
   }
 
-  return scored;
+  return ranked;
 }
 
 /**
@@ -706,6 +729,28 @@ function computeQualityScore(item: ExploreItem): number {
   }
 
   return Math.min(baseScore * audienceMultiplier, 1.0);
+}
+
+// ============================================================================
+// Notability Scoring ("Would a knowledgeable local recommend this?")
+// ============================================================================
+
+/**
+ * Compute notability score (0-1) from the persisted composite notability_score
+ * (migration 144, range 1.00–5.00), mapped linearly as (score-1)/4.
+ * Activities only: events and not-yet-scored activities return a neutral value.
+ * The raw score is a transformed, non-reversible blend — never a raw Google rating.
+ */
+export function computeNotabilityScore(item: ExploreItem): number {
+  const { NOTABILITY } = RECOMMENDER_CONFIG;
+
+  // Events carry no place-notability — timeMatch/openNow already rank them.
+  if (item.kind === "event") return NOTABILITY.EVENT_NEUTRAL;
+
+  const raw = (item as any).notability_score as number | null | undefined;
+  if (raw == null) return NOTABILITY.NULL_NEUTRAL; // not yet scored
+
+  return Math.max(0, Math.min(1, (raw - 1) / 4));
 }
 
 // ============================================================================
