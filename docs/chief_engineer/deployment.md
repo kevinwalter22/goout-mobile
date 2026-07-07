@@ -106,7 +106,7 @@ Or revert the offending commit on the branch and let CI redeploy.
 
 **Full revert of a bad release:**
 1. `git revert -m 1 <merge-commit>` on `main` → open PR → merge → prod redeploys the prior code.
-2. Separately handle any DB migration with a forward-fix migration or PITR (code revert alone does **not** undo an applied migration).
+2. Separately undo any DB state — **migrations are forward-only and a code revert does NOT touch the database.** Schema changes need a forward-fix migration (or PITR). **Non-schema runtime state a migration ships is also not reverted by code:** a `cron.schedule(...)` persists (undo with `cron.unschedule('<job>')`); enabled `collector_targets` / seeded rows persist (undo with the migration's documented rollback SQL, e.g. `UPDATE collector_targets SET is_enabled=FALSE WHERE name IN (...)`). **Every such migration carries its own rollback SQL in its header — that per-change path is the reference**, not a blanket `git revert`.
 3. Confirm recovery in #euda-monitoring + Sentry.
 
 ## After every deploy — verify
