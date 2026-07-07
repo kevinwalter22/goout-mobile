@@ -20,22 +20,31 @@ export const RECOMMENDER_CONFIG = {
     COMMUNITY_FEEDBACK: "community_feedback",
     FRESHNESS: "freshness_signal",
     FRIEND_CREATED_BOOST: "friend_created_boost",
+    NOTABILITY: "notability_signal",
   },
 
   // Scoring weights (sum to 1.0 for normalized score)
+  //
+  // NOTABILITY (migration 144) added 2026-07: an activity-only "would a local
+  // recommend this?" signal. Its 0.10 was funded by trimming TIME_MATCH (0.15→0.12),
+  // DISTANCE (0.20→0.17), and QUALITY (0.10→0.06) — QUALITY overlaps notability
+  // (both quality-ish), so it gives up the most. When the notability_signal flag is
+  // OFF the signal returns a constant 0.5 (ranking-neutral), so this rebalance is a
+  // near-no-op until the flag is flipped on. Sum stays 1.0.
   WEIGHTS: {
-    TIME_MATCH: 0.15, // Time of day / event timing match
-    DISTANCE: 0.20, // Closer = higher score
+    TIME_MATCH: 0.12, // Time of day / event timing match
+    DISTANCE: 0.17, // Closer = higher score
     OPEN_NOW: 0.08, // Currently available/happening
     FRIENDS_GOING: 0.13, // Friends RSVP boost
     TAG_AFFINITY: 0.06, // User preference match
     WEATHER: 0.06, // Weather/season-appropriate
     CONTEXT_INTENT: 0.03, // Day/time context bias
     TYPE_AFFINITY: 0.06, // Learned event-vs-activity preference (All toggle only)
-    QUALITY: 0.10, // Item confidence / data quality
+    QUALITY: 0.06, // Item confidence / data completeness
     COMMUNITY_FEEDBACK: 0.05, // Community upvote/confirm/downvote/closed signal
     FRESHNESS: 0.00, // Recency boost (disabled — absorbed by FRIEND_CREATED)
     FRIEND_CREATED: 0.08, // Event created by a friend
+    NOTABILITY: 0.10, // "Would a knowledgeable local recommend this?" (activities)
   },
 
   // Distance scoring thresholds
@@ -135,6 +144,20 @@ export const RECOMMENDER_CONFIG = {
     EVENT_SCORE: 0.5,
     // Fallback when created_at is null
     NULL_SCORE: 0.5,
+  },
+
+  // Notability scoring (migration 144). Composite 1.00–5.00 place-notability,
+  // mapped to [0,1] as (score-1)/4. Activities only; events + unscored are neutral.
+  NOTABILITY: {
+    EVENT_NEUTRAL: 0.5, // events carry no place-notability
+    NULL_NEUTRAL: 0.4, // activity not yet scored → slightly below neutral (don't reward unknowns)
+    // Floor gate: activities scored below this are hidden from the ranked feed
+    // (the "hide the inventory tail" mechanism), UNLESS the user is searching.
+    // Unscored activities (null) are never gated. 2.5 (Kevin's call): the 2.0–2.5
+    // band is genuine junk that isn't an obvious national chain (strip-mall nail
+    // salons, the paper mill, generic canoe launches) — nothing recognizably
+    // notable scored between 2.0 and 2.5. Chains <2.0 are already is_admin_suppressed.
+    FLOOR: 2.5,
   },
 
   // Community feedback scoring
