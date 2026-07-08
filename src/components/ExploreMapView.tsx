@@ -24,6 +24,8 @@ interface ExploreMapViewProps {
   items: ExploreItem[]; // Fallback items from parent
   userLocation: { lat: number; lng: number } | null;
   userId?: string;
+  /** Active region — hard-scopes map markers to the current metro. */
+  regionId?: string | null;
   // Filter props
   kindFilter: KindFilter;
   categories?: CategoryId[];
@@ -162,6 +164,7 @@ export function ExploreMapView({
   items: fallbackItems,
   userLocation,
   userId,
+  regionId,
   kindFilter,
   categories = [],
   priceBucket = "all",
@@ -203,8 +206,8 @@ export function ExploreMapView({
   // Generate a cache key from all filter values
   const filterCacheKey = useMemo(
     () =>
-      `${kindFilter}-${categories.join("+")}-${priceBucket}-${timeWindow}-${distance}-${tags.join(",")}-${userLocation ? "loc" : "noloc"}`,
-    [kindFilter, categories, priceBucket, timeWindow, distance, tags, userLocation]
+      `${kindFilter}-${categories.join("+")}-${priceBucket}-${timeWindow}-${distance}-${tags.join(",")}-${regionId ?? "noregion"}-${userLocation ? "loc" : "noloc"}`,
+    [kindFilter, categories, priceBucket, timeWindow, distance, tags, regionId, userLocation]
   );
 
   // Initial region calculation
@@ -346,6 +349,10 @@ export function ExploreMapView({
 
         // Helper to apply common filters to a query
         const applyFilters = (query: any) => {
+          // Hard region boundary — the map only shows the active metro's items.
+          if (regionId) {
+            query = query.eq("region_id", regionId);
+          }
           // Price bucket
           if (priceBucket !== "all") {
             query = query.eq("price_bucket", priceBucket);
@@ -489,6 +496,7 @@ export function ExploreMapView({
       filterCacheKey,
       kindFilter,
       userId,
+      regionId,
       fallbackItems,
       getTimeWindowRange,
       getCategoryFilter,
