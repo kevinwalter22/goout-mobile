@@ -394,6 +394,21 @@ Deno.serve(async (req) => {
         // them. Deterministic + idempotent (see advanceRecurring / migration 149).
         advanceRecurring(normalized);
 
+        // Assign the region (metro) for the hard boundary, by coordinates. Left
+        // unset for null-coord rows (upsert preserves any existing region_id);
+        // the migration-150 string fallback + geocoding backfill catch those.
+        if ((normalized as any).lat != null && (normalized as any).lng != null) {
+          try {
+            const { data: rid } = await supabase.rpc("resolve_region", {
+              p_lat: (normalized as any).lat,
+              p_lng: (normalized as any).lng,
+            });
+            if (rid) (normalized as any).region_id = rid;
+          } catch (_e) {
+            // non-fatal — region can be backfilled later
+          }
+        }
+
         // Compute relevance tier based on source type and item quality
         const relevanceTier = computeRelevanceTier(sourceType, normalized, fieldNorm.normalized_confidence);
 

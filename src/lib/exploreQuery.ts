@@ -219,7 +219,8 @@ export async function queryExploreItems(
   supabase: SupabaseClient,
   filters: ExploreFilterState,
   userLocation?: { lat: number; lng: number } | null,
-  userId?: string
+  userId?: string,
+  regionId?: string | null
 ): Promise<QueryResult<any>> {
   try {
     // Debug: Log filter state
@@ -316,6 +317,7 @@ export async function queryExploreItems(
             p_season: currentSeason,
             p_limit: isDistanceSort ? DISTANCE_OVERFETCH_CAP : filters.pageSize,
             p_offset: isDistanceSort ? 0 : offset,
+            p_region_id: regionId ?? null,
           }
         );
 
@@ -330,6 +332,7 @@ export async function queryExploreItems(
             p_time_of_day: null,
             p_tags: dbTags,
             p_season: currentSeason,
+            p_region_id: regionId ?? null,
           }
         );
 
@@ -413,6 +416,11 @@ export async function queryExploreItems(
       query = query.or(
         `and(starts_at.gte.${dateRange.start.toISOString()},starts_at.lte.${dateRange.end.toISOString()}),starts_at.is.null`
       );
+    }
+
+    // Apply the hard region boundary (mirrors the RPC's p_region_id).
+    if (regionId) {
+      query = query.eq("region_id", regionId);
     }
 
     // Apply category filter
