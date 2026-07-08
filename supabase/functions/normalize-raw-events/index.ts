@@ -27,6 +27,39 @@ import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts"
 import { captureEdgeException } from "../_shared/sentry.ts";
 import { requireServiceRole } from "../_shared/auth-guard.ts";
 
+// ─── Geocoding (address → coords) for events that carry a location string but
+// no lat/lng (e.g. ICS feeds). Keeps venue-based events on the map. This is a
+// minimal address-only use of Google Geocoding (NOT place enumeration — the
+// address is already in hand); results are cached per venue within the isolate
+// and every failure is non-fatal (the event still normalizes with null coords).
+const GEO_CACHE = new Map<string, { lat: number; lng: number } | null>();
+async function geocodeAddress(raw: string): Promise<{ lat: number; lng: number } | null> {
+  const addr = (raw || "").trim();
+  const key = addr.toLowerCase();
+  if (GEO_CACHE.has(key)) return GEO_CACHE.get(key)!;
+  // Skip unusable/ambiguous location strings (state-only, virtual, etc.).
+  if (addr.length < 6 || /^(zoom|tbd|online|virtual|me|maine|ny|new york)$/i.test(addr)) {
+    GEO_CACHE.set(key, null);
+    return null;
+  }
+  const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY");
+  if (!apiKey) { GEO_CACHE.set(key, null); return null; }
+  try {
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr)}&key=${apiKey}`;
+    const res = await fetch(url);
+    const j = await res.json();
+    const loc = j?.results?.[0]?.geometry?.location;
+    const out = (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng))
+      ? { lat: loc.lat as number, lng: loc.lng as number }
+      : null;
+    GEO_CACHE.set(key, out);
+    return out;
+  } catch (_e) {
+    GEO_CACHE.set(key, null);
+    return null;
+  }
+}
+
 interface WorkerConfig {
   batch_size?: number;
   max_items?: number;
@@ -291,6 +324,18 @@ Deno.serve(async (req) => {
           continue;
         }
 
+        // Geocode venue-based events that carry an address but no coordinates
+        // (ICS feeds provide a location string, not lat/lng). Non-fatal; keeps
+        // these events on the map viewport.
+        if (((normalized as any).lat == null || (normalized as any).lng == null)
+            && (normalized as any).location_name) {
+          const geo = await geocodeAddress((normalized as any).location_name);
+          if (geo) {
+            (normalized as any).lat = geo.lat;
+            (normalized as any).lng = geo.lng;
+          }
+        }
+
         // Compute relevance tier based on source type and item quality
         const relevanceTier = computeRelevanceTier(sourceType, normalized, fieldNorm.normalized_confidence);
 
@@ -314,6 +359,13 @@ Deno.serve(async (req) => {
           delete upsertPayload.image_url;
           delete upsertPayload.image_thumb_url;
           delete upsertPayload.image_source;
+        }
+
+        // Preserve existing coordinates on re-normalization: adapters without
+        // geo (e.g. ICS) would otherwise null out geocoded/backfilled coords.
+        if (upsertPayload.lat == null || upsertPayload.lng == null) {
+          delete upsertPayload.lat;
+          delete upsertPayload.lng;
         }
 
         // Upsert into explore_items
