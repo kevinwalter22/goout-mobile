@@ -15,6 +15,7 @@ import {
 import { router, useFocusEffect } from "expo-router";
 import * as Location from "expo-location";
 import { getCurrentLocation, requestLocationPermission, verifyCheckInLocation } from "../../src/utils/location";
+import { saveLastKnownLocation, loadLastKnownLocation } from "../../src/utils/lastKnownLocation";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../../src/lib/supabase";
@@ -539,9 +540,29 @@ export default function Explore() {
         if (prev && haversineMeters(prev, next) < 50) return prev;
         return next;
       });
+      // Persist for the next cold start / GPS-off session so the feed stays
+      // metro-scoped even before (or without) a live fix. See exploreQuery.ts.
+      void saveLastKnownLocation(next);
     } catch (error) {
       console.log("[Explore] Could not get location:", error);
     }
+  }, []);
+
+  // Seed userLocation from the last-known persisted location on mount, so the
+  // feed is scoped to the user's metro immediately — before live GPS resolves,
+  // and even if permission is off (layer 2 of the region fallback ladder). A
+  // live fix from updateLocation() overrides this as soon as it arrives; we only
+  // seed when nothing is set yet so we never clobber a fresher live location.
+  useEffect(() => {
+    let cancelled = false;
+    loadLastKnownLocation().then((loc) => {
+      if (!cancelled && loc) {
+        setUserLocation((prev) => prev ?? loc);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Get user's current location on mount and periodically update (every 30 seconds)

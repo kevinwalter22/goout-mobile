@@ -60,6 +60,55 @@ async function geocodeAddress(raw: string): Promise<{ lat: number; lng: number }
   }
 }
 
+// Build the best geocode query from normalized fields. Prefer a full street
+// address (it already carries the town), else fall back to the venue name with
+// the town appended — but only when `town` looks like a real place. The upstream
+// `town` field is sometimes polluted with a street address, so skip appending it
+// when it contains digits (e.g. "6 Raymond St"). Fixes bare venue names like
+// "One Longfellow Square" that Google can't resolve without a town.
+function buildGeoQuery(n: any): string | null {
+  const addr = ((n.address as string) || "").trim();
+  if (addr.length > 8 && /\d/.test(addr)) return addr;
+  const loc = ((n.location_name as string) || "").trim();
+  if (loc.length < 4) return null;
+  const town = ((n.town as string) || "").trim();
+  const townIsPlace = town.length > 2 && !/\d/.test(town);
+  return townIsPlace && !loc.toLowerCase().includes(town.toLowerCase())
+    ? `${loc}, ${town}`
+    : loc;
+}
+
+// Deterministically advance a recurring event's date to the next upcoming
+// occurrence. Mirrors advance_recurring_events() (migration 149): because the
+// roll is deterministic (fixed interval steps to the first occurrence >= now),
+// a re-crawl that re-supplies the ORIGINAL past date self-heals to the same
+// next occurrence instead of fighting the nightly roll. Only known intervals
+// (daily/weekly/monthly); 'custom'/'unknown'/'annual' are left for the durable
+// RRULE model (Tier 2).
+function advanceRecurring(n: any): void {
+  const rec = ((n.recurrence as string) || "").toLowerCase();
+  if (rec !== "daily" && rec !== "weekly" && rec !== "monthly") return;
+  if (!n.starts_at) return;
+  const start = new Date(n.starts_at);
+  if (isNaN(start.getTime())) return;
+  const now = Date.now();
+  if (start.getTime() >= now - 3 * 3600 * 1000) return; // not past (3h grace)
+  const end = n.ends_at ? new Date(n.ends_at) : null;
+  const durationMs =
+    end && !isNaN(end.getTime()) ? end.getTime() - start.getTime() : null;
+  const next = new Date(start.getTime());
+  let guard = 0;
+  while (next.getTime() < now && guard++ < 1000) {
+    if (rec === "daily") next.setDate(next.getDate() + 1);
+    else if (rec === "weekly") next.setDate(next.getDate() + 7);
+    else next.setMonth(next.getMonth() + 1); // monthly
+  }
+  n.starts_at = next.toISOString();
+  if (durationMs != null) {
+    n.ends_at = new Date(next.getTime() + durationMs).toISOString();
+  }
+}
+
 interface WorkerConfig {
   batch_size?: number;
   max_items?: number;
@@ -324,17 +373,26 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Geocode venue-based events that carry an address but no coordinates
-        // (ICS feeds provide a location string, not lat/lng). Non-fatal; keeps
-        // these events on the map viewport.
-        if (((normalized as any).lat == null || (normalized as any).lng == null)
-            && (normalized as any).location_name) {
-          const geo = await geocodeAddress((normalized as any).location_name);
-          if (geo) {
-            (normalized as any).lat = geo.lat;
-            (normalized as any).lng = geo.lng;
+        // Geocode venue-based events that carry a location string but no lat/lng
+        // (ICS/web feeds provide an address or venue name, not coordinates).
+        // Prefer the full street address; fall back to venue name + town. Keeps
+        // these events on the map viewport. Non-fatal.
+        if ((normalized as any).lat == null || (normalized as any).lng == null) {
+          const geoQuery = buildGeoQuery(normalized);
+          if (geoQuery) {
+            const geo = await geocodeAddress(geoQuery);
+            if (geo) {
+              (normalized as any).lat = geo.lat;
+              (normalized as any).lng = geo.lng;
+            }
           }
         }
+
+        // Advance recurring events (daily/weekly/monthly) whose stored date has
+        // passed to their next upcoming occurrence, so the feed shows "next
+        // Tuesday" not "last Tuesday" and the map's date-windowed query includes
+        // them. Deterministic + idempotent (see advanceRecurring / migration 149).
+        advanceRecurring(normalized);
 
         // Compute relevance tier based on source type and item quality
         const relevanceTier = computeRelevanceTier(sourceType, normalized, fieldNorm.normalized_confidence);
