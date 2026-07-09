@@ -409,6 +409,9 @@ export default function Explore() {
 
   // User location (for Postable Now feature)
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  // True once the first live-GPS attempt has settled (granted+resolved, denied,
+  // or errored). Gates the region picker so GPS is always tried first.
+  const [locationSettled, setLocationSettled] = useState(false);
 
   // Engagement-log session id (lazy-minted via getSessionId on mount; survives
   // app idle <30min; resets after). Threaded into every engagement event so
@@ -451,7 +454,7 @@ export default function Explore() {
     activeRegionId,
     setRegion,
     needsPicker,
-  } = useRegion(userLocation);
+  } = useRegion(userLocation, { locationSettled });
 
   // Use the recommender hook (wraps useExploreFilters with scoring)
   const {
@@ -558,6 +561,11 @@ export default function Explore() {
       void saveLastKnownLocation(next);
     } catch (error) {
       console.log("[Explore] Could not get location:", error);
+    } finally {
+      // Mark the GPS attempt as settled (granted+resolved, denied, or errored).
+      // The region picker only appears AFTER this — so live GPS always gets the
+      // first attempt and the picker is a true fallback, never the default.
+      setLocationSettled(true);
     }
   }, []);
 

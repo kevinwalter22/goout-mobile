@@ -76,7 +76,13 @@ export interface UseRegionReturn {
 
 export function useRegion(
   userLocation?: { lat: number; lng: number } | null,
+  opts?: { locationSettled?: boolean },
 ): UseRegionReturn {
+  // GPS-first: only fall through to the manual picker once the live-GPS attempt
+  // has settled (granted+resolved, denied, or errored). Until then we wait —
+  // the picker is a fallback, never the default. Defaults to true so callers
+  // that don't pass it keep the old (immediate) behavior.
+  const locationSettled = opts?.locationSettled ?? true;
   const [regions, setRegions] = useState<Region[]>([]);
   const [loading, setLoading] = useState(true);
   const [manualRegionId, setManualRegionId] = useState<string | null>(null);
@@ -134,10 +140,16 @@ export function useRegion(
     return null;
   }, [regions, manualRegionId, userLocation]);
 
-  // Only claim "needs picker" once regions + persisted pick have loaded and we
-  // still can't resolve anything — avoids a picker flash on cold start.
+  // Only claim "needs picker" once regions + persisted pick have loaded, the
+  // live-GPS attempt has settled, and we STILL can't resolve a region. This
+  // ordering enforces the ladder — live GPS → last-known → saved → picker — so
+  // the picker never pre-empts an in-flight GPS fix on cold start.
   const needsPicker =
-    !loading && manualLoaded && regions.length > 0 && activeRegion == null;
+    !loading &&
+    manualLoaded &&
+    locationSettled &&
+    regions.length > 0 &&
+    activeRegion == null;
 
   return {
     regions,
