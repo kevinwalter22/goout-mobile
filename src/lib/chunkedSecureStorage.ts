@@ -48,15 +48,42 @@ export function createChunkedSecureStorage(
       try {
         const head = await SecureStore.getItemAsync(key);
         if (head == null) return null;
-        if (!head.startsWith(MARKER)) return head; // small / legacy inline value
-        const n = parseInt(head.slice(MARKER.length), 10) || 0;
-        let out = "";
-        for (let i = 0; i < n; i++) {
-          const part = await SecureStore.getItemAsync(`${key}.${i}`);
-          if (part == null) return null; // incomplete → treat as no session
-          out += part;
+        let value: string;
+        if (!head.startsWith(MARKER)) {
+          value = head; // small / legacy inline value
+        } else {
+          const n = parseInt(head.slice(MARKER.length), 10) || 0;
+          let out = "";
+          for (let i = 0; i < n; i++) {
+            const part = await SecureStore.getItemAsync(`${key}.${i}`);
+            if (part == null) {
+              // Incomplete chunk set → corrupt. Clear it and report no session
+              // so supabase-js starts clean instead of choking on a partial read.
+              await clearChunks(key);
+              await SecureStore.deleteItemAsync(key);
+              return null;
+            }
+            out += part;
+          }
+          value = out;
         }
-        return out;
+        // A persisted Supabase session is a JSON object. A value that starts
+        // like one but won't parse is a corrupt/truncated leftover — e.g. from
+        // the OLD adapter overflowing SecureStore's 2048-byte cap, which then
+        // crashed supabase-js in _recoverAndRefresh on the next launch (the
+        // real cause of the intermittent "Something went wrong" login). Purge it
+        // and report "no session" so the next login starts clean. (Non-JSON
+        // values like the PKCE code-verifier are passed through untouched.)
+        if (value.length > 0 && value[0] === "{") {
+          try {
+            JSON.parse(value);
+          } catch {
+            await clearChunks(key);
+            await SecureStore.deleteItemAsync(key);
+            return null;
+          }
+        }
+        return value;
       } catch {
         return null; // corrupt / unreadable → drop to login, don't crash
       }

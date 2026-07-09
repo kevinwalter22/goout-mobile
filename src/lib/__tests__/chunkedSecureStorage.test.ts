@@ -63,4 +63,31 @@ describe("chunkedSecureStorage", () => {
     ss._store.delete("sb-auth.1"); // simulate a truncated/corrupt write
     expect(await s.getItem("sb-auth")).toBeNull();
   });
+
+  // The real-world bug: a prior build overflowed SecureStore and left a
+  // truncated JSON session in the iOS Keychain (which persists across
+  // reinstalls). supabase-js then crashed in _recoverAndRefresh. getItem must
+  // purge such a value and report "no session".
+  it("purges a corrupt/truncated JSON session and reports no session", async () => {
+    const ss = mockSecureStore();
+    ss._store.set("sb-x-auth-token", '{"access_token":"eyJhbGci","refresh_token'); // truncated
+    const s = createChunkedSecureStorage(ss);
+    expect(await s.getItem("sb-x-auth-token")).toBeNull();
+    expect(ss._store.has("sb-x-auth-token")).toBe(false); // purged, can't resurface
+  });
+
+  it("passes through a valid JSON session untouched", async () => {
+    const ss = mockSecureStore();
+    const session = JSON.stringify({ access_token: "a", refresh_token: "b", user: { id: "x" } });
+    ss._store.set("sb-x-auth-token", session);
+    const s = createChunkedSecureStorage(ss);
+    expect(await s.getItem("sb-x-auth-token")).toBe(session);
+  });
+
+  it("passes through a non-JSON value (PKCE code-verifier) untouched", async () => {
+    const ss = mockSecureStore();
+    ss._store.set("sb-x-auth-token-code-verifier", "plain-verifier-abc123");
+    const s = createChunkedSecureStorage(ss);
+    expect(await s.getItem("sb-x-auth-token-code-verifier")).toBe("plain-verifier-abc123");
+  });
 });

@@ -41,9 +41,22 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 // Viewport-aware map: markers follow the visible region. Cap total markers so a
 // dense city view stays performant; beyond the county-scale ceiling we stop
 // querying and prompt the user to zoom in (no state-wide scans).
-const MAP_MAX_MARKERS = 250;
+//
+// 250 image-thumbnail markers overwhelms react-native-maps on iOS (each marker
+// is a native view hosting an <Image>) — with dynamic reloads on pan it can
+// exhaust memory and crash the app. Cap at ~50 (the Tier 3 map-unification
+// target). Clustering is the durable fix; this is the immediate mitigation.
+const MAP_MAX_MARKERS = 50;
 const MAP_MAX_VIEWPORT_DELTA = 0.6; // latitude degrees (~40 mi) — zoom-out ceiling
 const MAP_REGION_DEBOUNCE_MS = 400;
+
+// Grid clustering: divide the visible span into ~CLUSTER_GRID cells across its
+// larger dimension and merge markers that fall in the same cell into one cluster
+// bubble. This is the durable fix for the native-memory crash: instead of up to
+// 50 image-hosting marker views, a dense view renders a handful of lightweight
+// count bubbles (no <Image>), and tapping a bubble zooms in to split it. As the
+// user zooms in, cells shrink and clusters break apart into individual markers.
+const CLUSTER_GRID = 8;
 
 function computeBoundingRegion(items: ExploreItem[]) {
   let minLat = 90;
@@ -160,6 +173,66 @@ const ThumbnailMarker = React.memo(
   }
 );
 
+// Cluster bubble — a lightweight count marker (no <Image>) shown when several
+// items share a grid cell. Tapping it zooms the map in to split the cluster.
+// Keyed by `${cellKey}-${count}` at the call site, so a changed count remounts
+// this and re-renders the label; tracksViewChanges settles to false after the
+// first paint so the native view isn't re-rasterized on every frame.
+const ClusterMarker = React.memo(function ClusterMarker({
+  id,
+  lat,
+  lng,
+  count,
+}: {
+  id: string;
+  lat: number;
+  lng: number;
+  count: number;
+}) {
+  const [tracks, setTracks] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setTracks(false), 250);
+    return () => clearTimeout(t);
+  }, []);
+  const size = count >= 25 ? 52 : count >= 10 ? 46 : 40;
+  return (
+    <Marker
+      identifier={id}
+      coordinate={{ latitude: lat, longitude: lng }}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={tracks}
+    >
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: "rgba(74,144,217,0.94)",
+          borderWidth: 2,
+          borderColor: "#fff",
+          alignItems: "center",
+          justifyContent: "center",
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.3,
+          shadowRadius: 4,
+          elevation: 5,
+        }}
+      >
+        <Text
+          style={{
+            color: "#fff",
+            fontWeight: "700",
+            fontSize: count >= 100 ? 13 : 15,
+          }}
+        >
+          {count}
+        </Text>
+      </View>
+    </Marker>
+  );
+});
+
 export function ExploreMapView({
   items: fallbackItems,
   userLocation,
@@ -199,6 +272,11 @@ export function ExploreMapView({
   // lazily against initialRegion (declared below) to avoid a TDZ reference.
   const regionRef = useRef<MapRegion | null>(null);
   const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Viewport in state (mirrors regionRef) so clustering recomputes when the user
+  // zooms — the grid cell size is derived from the visible span. Updated on
+  // gesture end (onRegionChangeComplete), so it changes once per pan/zoom, not
+  // per frame.
+  const [viewRegion, setViewRegion] = useState<MapRegion | null>(null);
   // True when the viewport is zoomed out past the county-scale ceiling — we stop
   // querying and prompt the user to zoom in rather than scan a whole state.
   const [zoomedOut, setZoomedOut] = useState(false);
@@ -516,6 +594,8 @@ export function ExploreMapView({
   const handleRegionChangeComplete = useCallback(
     (newRegion: MapRegion) => {
       regionRef.current = newRegion;
+      // Re-cluster against the new span (cheap; runs once per gesture end).
+      setViewRegion(newRegion);
       if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
       regionDebounceRef.current = setTimeout(() => {
         fetchMapItems(newRegion);
@@ -558,6 +638,88 @@ export function ExploreMapView({
   const selectItem = useCallback((item: ExploreItem | null) => {
     setSelectedItemId(item?.id || null);
   }, []);
+
+  // Grid-cluster the mappable items against the current viewport span. Items in
+  // the same cell collapse into one lightweight count bubble; lone items render
+  // as normal thumbnail markers. The selected item is always pulled out as its
+  // own marker so its preview card stays anchored. This bounds the number of
+  // native marker views in dense areas — the fix for the map memory crash.
+  const clusters = useMemo(() => {
+    const region = viewRegion ?? initialRegion;
+    const span = Math.max(region.latitudeDelta, region.longitudeDelta);
+    const cell = span / CLUSTER_GRID;
+
+    type Cluster =
+      | { kind: "single"; item: ExploreItem; key: string }
+      | { kind: "cluster"; key: string; lat: number; lng: number; count: number };
+
+    // No usable span (shouldn't happen) — render everything individually.
+    if (!(cell > 0) || mappableItems.length === 0) {
+      return mappableItems.map(
+        (item): Cluster => ({ kind: "single", item, key: item.id })
+      );
+    }
+
+    const buckets = new Map<string, ExploreItem[]>();
+    const forcedSingles: ExploreItem[] = [];
+    for (const item of mappableItems) {
+      // Keep the selected item out of clustering so its marker + preview persist.
+      if (item.id === selectedItemId) {
+        forcedSingles.push(item);
+        continue;
+      }
+      const gx = Math.floor((item.lat as number) / cell);
+      const gy = Math.floor((item.lng as number) / cell);
+      const key = `${gx}:${gy}`;
+      const arr = buckets.get(key);
+      if (arr) arr.push(item);
+      else buckets.set(key, [item]);
+    }
+
+    const out: Cluster[] = [];
+    for (const [key, group] of buckets) {
+      if (group.length === 1) {
+        out.push({ kind: "single", item: group[0], key: group[0].id });
+      } else {
+        let slat = 0;
+        let slng = 0;
+        for (const it of group) {
+          slat += it.lat as number;
+          slng += it.lng as number;
+        }
+        out.push({
+          kind: "cluster",
+          key: `c:${key}`,
+          lat: slat / group.length,
+          lng: slng / group.length,
+          count: group.length,
+        });
+      }
+    }
+    for (const item of forcedSingles) {
+      out.push({ kind: "single", item, key: item.id });
+    }
+    return out;
+  }, [mappableItems, viewRegion, initialRegion, selectedItemId]);
+
+  // Tapping a cluster zooms in toward its centroid so it breaks apart into
+  // individual (or smaller) clusters. animateToRegion fires
+  // onRegionChangeComplete, which re-clusters at the tighter span.
+  const zoomToCluster = useCallback(
+    (lat: number, lng: number) => {
+      const region = regionRef.current ?? viewRegion ?? initialRegion;
+      mapRef.current?.animateToRegion(
+        {
+          latitude: lat,
+          longitude: lng,
+          latitudeDelta: Math.max(region.latitudeDelta / 2.2, 0.004),
+          longitudeDelta: Math.max(region.longitudeDelta / 2.2, 0.004),
+        },
+        350
+      );
+    },
+    [viewRegion, initialRegion]
+  );
 
   // Format helpers
   function formatDistance(item: ExploreItem): string | null {
@@ -620,21 +782,40 @@ export function ExploreMapView({
         onMarkerPress={(e) => {
           // Use identifier from marker for reliable iOS tap handling
           const markerId = e.nativeEvent?.id;
-          if (markerId) {
-            const item = mappableItems.find((i) => i.id === markerId);
-            if (item) {
-              selectItem(item);
+          if (!markerId) return;
+          // Cluster bubble → zoom in to split it (identifiers are "c:<cell>").
+          if (markerId.startsWith("c:")) {
+            const cluster = clusters.find(
+              (c) => c.kind === "cluster" && c.key === markerId
+            );
+            if (cluster && cluster.kind === "cluster") {
+              zoomToCluster(cluster.lat, cluster.lng);
             }
+            return;
+          }
+          const item = mappableItems.find((i) => i.id === markerId);
+          if (item) {
+            selectItem(item);
           }
         }}
       >
-        {mappableItems.map((item) => (
-          <ThumbnailMarker
-            key={item.id}
-            item={item}
-            isSelected={selectedItemId === item.id}
-          />
-        ))}
+        {clusters.map((c) =>
+          c.kind === "cluster" ? (
+            <ClusterMarker
+              key={`${c.key}-${c.count}`}
+              id={c.key}
+              lat={c.lat}
+              lng={c.lng}
+              count={c.count}
+            />
+          ) : (
+            <ThumbnailMarker
+              key={c.item.id}
+              item={c.item}
+              isSelected={selectedItemId === c.item.id}
+            />
+          )
+        )}
         {/* Custom "You are here" dot for review account (native blue dot disabled) */}
         {isLocationOverridden() && userLocation && (
           <Marker

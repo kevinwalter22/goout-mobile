@@ -200,10 +200,18 @@ const BRANDS: BrandEntry[] = [
   { brand: "Hannaford", patterns: ["hannaford"] },
   { brand: "Big Y", patterns: ["big y world class market", "big y"] },
   { brand: "Kroger", patterns: ["kroger"] },
+  // New England + national supermarket gaps (Shaw's is the big NE one missed).
+  { brand: "Shaw's", patterns: ["shaws supermarket", "shaws"] },
+  { brand: "Star Market", patterns: ["star market"] },
+  { brand: "Market Basket", patterns: ["market basket"] },
+  { brand: "Publix", patterns: ["publix"] },
+  { brand: "Safeway", patterns: ["safeway"] },
+  { brand: "Food Lion", patterns: ["food lion"] },
+  { brand: "Meijer", patterns: ["meijer"] },
+  { brand: "Giant Eagle", patterns: ["giant eagle"] },
+  { brand: "Grocery Outlet", patterns: ["grocery outlet"] },
+  { brand: "The Fresh Market", patterns: ["the fresh market"] },
 ];
-
-// 30 + 20 + 5 + 10 + 6 + 15 + 2 + 15 + 7 + 10 + 10 = 130 ✓
-// (v1 base was 128; +Five Below in specialty retail, +Wawa in convenience)
 
 // ────────────────────────────────────────────────────────────────────────────
 // Matching
