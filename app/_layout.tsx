@@ -11,6 +11,7 @@ import { ThemeProvider, useTheme } from "../src/contexts/ThemeContext";
 import { validateEnv, Env } from "../src/config/env";
 import { initSentry, SentryWrap } from "../src/lib/sentry";
 import { captureWarning, captureError } from "../src/lib/logger";
+import { logClientError } from "../src/lib/clientErrorLog";
 import { SwipeableBackGesture } from "../src/components/SwipeableBackGesture";
 import {
   registerForPushNotifications,
@@ -30,6 +31,23 @@ import {
 
 // Initialize Sentry before any component renders
 initSentry();
+
+// DIAGNOSTIC: capture ANY uncaught JS error (incl. async errors that React
+// error boundaries never see) to the client_error_log table so we can read the
+// real crash server-side. Chains to the previous handler (Sentry's) so nothing
+// is lost. Guarded so installing the handler can never itself crash startup.
+try {
+  const EU: any = (globalThis as any).ErrorUtils;
+  if (EU && typeof EU.setGlobalHandler === "function") {
+    const prev = typeof EU.getGlobalHandler === "function" ? EU.getGlobalHandler() : null;
+    EU.setGlobalHandler((err: any, isFatal?: boolean) => {
+      logClientError(isFatal ? "global_fatal" : "global_error", err, { isFatal: !!isFatal });
+      if (typeof prev === "function") prev(err, isFatal);
+    });
+  }
+} catch {
+  /* ignore */
+}
 
 function ThemedStack() {
   const { colors, effectiveMode } = useTheme();
@@ -325,11 +343,14 @@ class AppErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, errorInfo: { componentStack?: string }) {
-    // Report to Sentry with the component stack, and stash it for the on-screen
-    // (non-prod) detail view.
+    // Report to Sentry + the readable client_error_log table, and stash the
+    // component stack for the on-screen (non-prod) detail view.
     captureError(error, {
       action: "AppErrorBoundary",
       componentStack: (errorInfo?.componentStack ?? "").slice(0, 2000),
+    });
+    logClientError("error_boundary", error, {
+      componentStack: errorInfo?.componentStack ?? "",
     });
     this.setState({ info: errorInfo?.componentStack ?? null });
   }

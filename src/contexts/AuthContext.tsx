@@ -6,6 +6,7 @@ import { clearExpiredUrlCache } from "../utils/storage";
 import { setSentryUser, attachSentrySession } from "../lib/sentry";
 import { logAnalyticsEvent } from "../lib/analyticsLogger";
 import { captureError } from "../lib/logger";
+import { logClientError } from "../lib/clientErrorLog";
 import { setLocationOverride } from "../utils/location";
 import { removePushToken } from "../lib/notifications";
 import type { Profile } from "../types/database";
@@ -64,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       .catch((err) => {
         captureError(err, { action: "getInitialSession" });
+        logClientError("get_initial_session", err);
         setSession(null);
         setUser(null);
         setLoading(false);
@@ -123,6 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(data as any);
     } catch (error) {
       captureError(error, { action: "loadProfile" });
+      logClientError("load_profile", error);
       setProfile(null);
     } finally {
       setLoading(false);
