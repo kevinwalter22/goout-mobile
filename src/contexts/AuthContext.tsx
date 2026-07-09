@@ -47,17 +47,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const appState = useRef(AppState.currentState);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLocationOverride(session?.user?.email ?? null);
-      if (session?.user) {
-        loadProfile(session.user.id);
-      } else {
+    // Get initial session. A failure here (e.g. a corrupt/unreadable persisted
+    // session on native) must NOT crash the app — degrade to signed-out so the
+    // user lands on the login screen and can sign in again.
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLocationOverride(session?.user?.email ?? null);
+        if (session?.user) {
+          loadProfile(session.user.id);
+        } else {
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        captureError(err, { action: "getInitialSession" });
+        setSession(null);
+        setUser(null);
         setLoading(false);
-      }
-    });
+      });
 
     // Listen for auth changes
     const {
