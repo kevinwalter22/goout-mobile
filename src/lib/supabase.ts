@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 import type { Database } from "../types/database";
 import { Env } from "../config/env";
 import { devFetch } from "./devNetworkSim";
+import { createChunkedSecureStorage } from "./chunkedSecureStorage";
 
 const supabaseUrl = Env.SUPABASE_URL;
 const supabaseAnonKey = Env.SUPABASE_ANON_KEY;
@@ -18,20 +19,14 @@ if (typeof window !== "undefined") {
       .default;
     storage = AsyncStorage;
   } else {
-    // Use SecureStore for native
+    // Use SecureStore for native — via a CHUNKED, crash-proof adapter. SecureStore
+    // caps values at 2048 bytes; a Supabase session (~1.8KB) can cross that after
+    // token rotation, and the old pass-through adapter then threw / truncated,
+    // corrupting the stored session so the next launch's restore crashed the app
+    // (native-only; web uses AsyncStorage). See src/lib/chunkedSecureStorage.ts.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const SecureStore = require("expo-secure-store");
-    storage = {
-      getItem: (key: string) => {
-        return SecureStore.getItemAsync(key);
-      },
-      setItem: (key: string, value: string) => {
-        return SecureStore.setItemAsync(key, value);
-      },
-      removeItem: (key: string) => {
-        return SecureStore.deleteItemAsync(key);
-      },
-    };
+    storage = createChunkedSecureStorage(SecureStore);
   }
 }
 
