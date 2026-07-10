@@ -12,7 +12,7 @@ import { formatOpeningHours } from "../utils/formatOpeningHours";
 import { sanitizeTimeText } from "../utils/formatTimeText";
 import { regionToBbox, bboxContains, type MapRegion } from "../utils/mapViewport";
 import { getFallbackImage } from "../lib/categoryFallbackImages";
-import { emojiForItem, tintForItem } from "../utils/mapEmoji";
+import { emojiForItem } from "../utils/mapEmoji";
 import {
   regionToZoom,
   regionToPaddedBbox,
@@ -63,6 +63,14 @@ const MAP_REGION_DEBOUNCE_MS = 350;
 // panning within a metro never refetches (only leaving it does).
 const METRO_SCOPE_HALF_LAT = 0.4; // ~28 mi
 const METRO_SCOPE_HALF_LNG = 0.5;
+
+// Clustering tightness (px). Lower = emojis break out of clusters at lower zoom.
+// The crash is fixed natively now, so this is purely a UX knob, not a safety cap.
+const CLUSTER_RADIUS = 24;
+// We render markers for a padded ring around the viewport and let the map cull
+// off-screen ones, so panning slides pins in/out at the edges without a
+// re-cluster. Re-cluster only fires on a zoom change or a pan beyond this ring.
+const RENDER_PAD = 0.6;
 
 function computeBoundingRegion(items: ExploreItem[]) {
   let minLat = 90;
@@ -117,7 +125,9 @@ const EmojiTeardropMarker = React.memo(
     }, [isSelected]);
 
     const emoji = emojiForItem(item);
-    const tint = isSelected ? Colors.primary : tintForItem(item);
+    // Euda purple ring/tail (selected = the darker purple). The emoji already
+    // conveys what the place is, so the border is brand color, not a type color.
+    const tint = isSelected ? Colors.primaryDark : Colors.primary;
     const head = isSelected ? PIN_HEAD + 6 : PIN_HEAD;
 
     return (
@@ -208,7 +218,7 @@ const ClusterMarker = React.memo(function ClusterMarker({
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: "rgba(74,144,217,0.94)",
+          backgroundColor: Colors.primary,
           borderWidth: 2,
           borderColor: "#fff",
           alignItems: "center",
@@ -273,6 +283,10 @@ export function ExploreMapView({
   // lazily against initialRegion (declared below) to avoid a TDZ reference.
   const regionRef = useRef<MapRegion | null>(null);
   const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The (zoom, padded bbox) the currently-rendered markers were clustered for.
+  // We only re-cluster when the integer zoom changes or the viewport pans out of
+  // this padded ring — so idle jitter and small pans never reshuffle the pins.
+  const renderRef = useRef<{ zoom: number; padded: [number, number, number, number] } | null>(null);
   // Viewport in state (mirrors regionRef) so clustering recomputes when the user
   // zooms — the grid cell size is derived from the visible span. Updated on
   // gesture end (onRegionChangeComplete), so it changes once per pan/zoom, not
@@ -596,8 +610,27 @@ export function ExploreMapView({
   const handleRegionChangeComplete = useCallback(
     (newRegion: MapRegion) => {
       regionRef.current = newRegion;
-      setViewRegion(newRegion);
       const vb = regionToBbox(newRegion);
+
+      // Re-cluster ONLY on a real zoom change or when the viewport pans out of the
+      // padded ring we last rendered. This is what stops emojis from popping in
+      // and out on idle/small pans — the marker set is stable until you actually
+      // zoom or pan somewhere new.
+      const z = regionToZoom(newRegion);
+      const rr = renderRef.current;
+      const stillRendered =
+        rr != null &&
+        rr.zoom === z &&
+        rr.padded[0] <= vb.lngMin &&
+        rr.padded[2] >= vb.lngMax &&
+        rr.padded[1] <= vb.latMin &&
+        rr.padded[3] >= vb.latMax;
+      if (!stillRendered) {
+        renderRef.current = { zoom: z, padded: regionToPaddedBbox(newRegion, RENDER_PAD) };
+        setViewRegion(newRegion);
+      }
+
+      // Refetch data only when the viewport leaves the already-fetched scope.
       const covered =
         lastFetchRef.current &&
         lastFetchRef.current.filterKey === filterCacheKey &&
@@ -652,7 +685,7 @@ export function ExploreMapView({
   const superIndex = useMemo(() => {
     if (mappableItems.length === 0) return null;
     const index = new Supercluster<{ itemId: string }>({
-      radius: 64,
+      radius: CLUSTER_RADIUS,
       maxZoom: 18,
       minZoom: 0,
       extent: 512,
@@ -688,7 +721,7 @@ export function ExploreMapView({
     if (!superIndex) return [];
     const region = viewRegion ?? initialRegion;
     const zoom = regionToZoom(region);
-    const bbox = regionToPaddedBbox(region, 0.35);
+    const bbox = regionToPaddedBbox(region, RENDER_PAD);
 
     let raw: any[];
     try {
@@ -702,10 +735,21 @@ export function ExploreMapView({
     for (const f of raw) {
       const [lng, lat] = f.geometry.coordinates as [number, number];
       if (f.properties?.cluster) {
+        // Stable identity: Supercluster's cluster_id changes on every getClusters
+        // call, which would remount (flicker) the bubble. Key by a leaf item id
+        // instead — the same set of points yields the same id across recomputes.
+        const cid = f.properties.cluster_id;
+        let stableId: string;
+        try {
+          const leaf = superIndex.getLeaves(cid, 1)[0];
+          stableId = leaf ? `c:${leaf.properties.itemId}` : `c:${cid}`;
+        } catch {
+          stableId = `c:${cid}`;
+        }
         clusterMarkers.push({
           kind: "cluster",
-          id: `c:${f.properties.cluster_id}`,
-          clusterId: f.properties.cluster_id,
+          id: stableId,
+          clusterId: cid,
           lat,
           lng,
           count: f.properties.point_count,
@@ -872,10 +916,10 @@ export function ExploreMapView({
               width: 20,
               height: 20,
               borderRadius: 10,
-              backgroundColor: "#007AFF",
+              backgroundColor: Colors.primary,
               borderWidth: 3,
               borderColor: "#fff",
-              shadowColor: "#007AFF",
+              shadowColor: Colors.primary,
               shadowOffset: { width: 0, height: 0 },
               shadowOpacity: 0.4,
               shadowRadius: 4,
