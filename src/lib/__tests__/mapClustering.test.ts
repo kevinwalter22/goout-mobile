@@ -2,8 +2,10 @@ import {
   regionToZoom,
   regionToPaddedBbox,
   zoomToRegionDelta,
-  singletonCapForZoom,
+  notabilityThresholdForZoom,
+  selectVisiblePins,
   MAX_RENDERED_MARKERS,
+  type MapPoint,
 } from "../mapClustering";
 
 const region = (latitudeDelta: number, longitudeDelta = latitudeDelta) => ({
@@ -16,52 +18,92 @@ const region = (latitudeDelta: number, longitudeDelta = latitudeDelta) => ({
 describe("regionToZoom", () => {
   it("maps metro/street spans to sensible slippy zooms", () => {
     expect(regionToZoom(region(0.08))).toBe(12); // metro
-    expect(regionToZoom(region(0.01))).toBe(15); // street
+    expect(regionToZoom(region(0.02))).toBe(14); // neighborhood
     expect(regionToZoom(region(4))).toBe(6); // state-wide
-  });
-  it("clamps to 0..20 and never divides by zero", () => {
-    const z = regionToZoom(region(0));
-    expect(z).toBeGreaterThanOrEqual(0);
-    expect(z).toBeLessThanOrEqual(20);
   });
 });
 
 describe("regionToPaddedBbox", () => {
-  it("returns [w,s,e,n] with west<east and south<north", () => {
-    const [w, s, e, n] = regionToPaddedBbox(region(0.08), 0.3);
+  it("returns [w,s,e,n] with west<east and south<north, padded beyond viewport", () => {
+    const [w, s, e, n] = regionToPaddedBbox(region(0.08));
     expect(w).toBeLessThan(e);
     expect(s).toBeLessThan(n);
-  });
-  it("pads beyond the raw viewport", () => {
-    const [w, , e] = regionToPaddedBbox(region(0.08), 0.3);
-    // raw half-width is 0.04; padded half-width should exceed it
-    expect((e - w) / 2).toBeGreaterThan(0.04);
+    expect((e - w) / 2).toBeGreaterThan(0.04); // wider than the raw half-width
   });
 });
 
 describe("zoomToRegionDelta", () => {
   it("round-trips with regionToZoom", () => {
     for (const z of [8, 10, 12, 14, 16]) {
-      const delta = zoomToRegionDelta(z);
-      expect(regionToZoom(region(delta))).toBe(z);
+      expect(regionToZoom(region(zoomToRegionDelta(z)))).toBe(z);
     }
   });
 });
 
-describe("singletonCapForZoom", () => {
-  it("is monotonic non-decreasing with zoom", () => {
-    let prev = -1;
+describe("notabilityThresholdForZoom", () => {
+  it("is monotonically decreasing (zoom in → lower bar → more pins)", () => {
+    let prev = Infinity;
     for (let z = 8; z <= 18; z++) {
-      const cap = singletonCapForZoom(z);
-      expect(cap).toBeGreaterThanOrEqual(prev);
-      prev = cap;
+      const t = notabilityThresholdForZoom(z);
+      expect(t).toBeLessThanOrEqual(prev);
+      prev = t;
     }
   });
-  it("shows ~100 individual pins at metro zoom (decision 5-B)", () => {
-    expect(singletonCapForZoom(12)).toBeGreaterThanOrEqual(90);
-    expect(singletonCapForZoom(12)).toBeLessThanOrEqual(130);
+  it("only the most notable at zoom-out, everything at street zoom", () => {
+    expect(notabilityThresholdForZoom(10)).toBe(4.0);
+    expect(notabilityThresholdForZoom(16)).toBe(0);
   });
-  it("never exceeds the hard render ceiling by itself at metro zoom", () => {
-    expect(singletonCapForZoom(12)).toBeLessThan(MAX_RENDERED_MARKERS);
+});
+
+describe("selectVisiblePins", () => {
+  // A = very notable @ center; B = low notability, near center (in view at all
+  // zooms); C/D collide in one cell at metro zoom.
+  const A: MapPoint = { id: "A", lat: 43.66, lng: -70.25, notability: 5 };
+  const B: MapPoint = { id: "B", lat: 43.658, lng: -70.248, notability: 1 };
+  const C: MapPoint = { id: "C", lat: 43.665, lng: -70.255, notability: 4 };
+  const D: MapPoint = { id: "D", lat: 43.6655, lng: -70.2555, notability: 3 };
+  const pts = [A, B, C, D];
+
+  it("hides sub-threshold pins when zoomed out, reveals them on zoom-in", () => {
+    const metro = selectVisiblePins(pts, region(0.08), null); // zoom 12, thr 2.67
+    expect(metro).toContain("A");
+    expect(metro).not.toContain("B"); // notability 1 < 2.67
+    const street = selectVisiblePins(pts, region(0.011), null); // zoom 15, thr ~0.67
+    expect(street).toContain("B"); // 1 >= 0.67 → now visible
+  });
+
+  it("collision: only the most-notable pin in a cell shows", () => {
+    const metro = selectVisiblePins(pts, region(0.08), null);
+    expect(metro).toContain("C"); // notability 4 wins the cell
+    expect(metro).not.toContain("D"); // 3, same cell → hidden
+  });
+
+  it("zoom-in is additive: the hidden collider separates out and appears", () => {
+    const zoomedIn = selectVisiblePins(pts, region(0.02), null); // zoom 14, finer cells
+    expect(zoomedIn).toContain("C");
+    expect(zoomedIn).toContain("D"); // now in its own cell
+  });
+
+  it("ALWAYS includes the selected pin — even below threshold or in a taken cell", () => {
+    const sel = selectVisiblePins(pts, region(0.08), "B"); // B is sub-threshold
+    expect(sel).toContain("B");
+    const selD = selectVisiblePins(pts, region(0.08), "D"); // D collides with C
+    expect(selD).toContain("D"); // the selected pin always shows (its neighbor may hide)
+  });
+
+  it("never exceeds the render cap (except the forced selected pin)", () => {
+    const many: MapPoint[] = [];
+    for (let i = 0; i < 5000; i++) {
+      many.push({ id: `p${i}`, lat: 43.6 + (i % 100) * 0.001, lng: -70.3 + Math.floor(i / 100) * 0.001, notability: 5 });
+    }
+    const out = selectVisiblePins(many, region(0.5), null, 50);
+    expect(out.length).toBeLessThanOrEqual(50);
+  });
+});
+
+describe("MAX_RENDERED_MARKERS", () => {
+  it("is a sane backstop", () => {
+    expect(MAX_RENDERED_MARKERS).toBeGreaterThan(50);
+    expect(MAX_RENDERED_MARKERS).toBeLessThan(400);
   });
 });

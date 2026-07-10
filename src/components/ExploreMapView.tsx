@@ -6,7 +6,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { Colors } from "../config/theme";
 import { useTheme } from "../contexts/ThemeContext";
-import Supercluster from "supercluster";
 import { getDistanceInMiles, isLocationOverridden } from "../utils/location";
 import { formatOpeningHours } from "../utils/formatOpeningHours";
 import { sanitizeTimeText } from "../utils/formatTimeText";
@@ -16,9 +15,9 @@ import { emojiForItem } from "../utils/mapEmoji";
 import {
   regionToZoom,
   regionToPaddedBbox,
-  zoomToRegionDelta,
-  singletonCapForZoom,
-  MAX_RENDERED_MARKERS,
+  selectVisiblePins,
+  RENDER_PAD,
+  type MapPoint,
 } from "../lib/mapClustering";
 import type { ExploreItem } from "../types/database";
 import type {
@@ -48,11 +47,12 @@ interface ExploreMapViewProps {
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Tier 3 map model (see docs/design/tier3_map_unification.md): fetch a whole
-// region ONCE, index its points with Supercluster, and re-derive what's visible
-// from (bbox, zoom) on every pan/zoom WITHOUT refetching. Panning is stable
-// (on-screen pins persist; new ones enter at the edges); zoom is the
-// level-of-detail control. Markers are emoji teardrops (plain text) + round
-// cluster bubbles — no per-marker <Image>, which is what used to OOM-crash iOS.
+// region ONCE, hold it in memory, and pick which emoji pins to render with an
+// Apple-Maps-style selection (mapClustering.selectVisiblePins) — notability
+// tiered by zoom + a collision grid — so zooming in reveals pins additively and
+// panning slides them in/out at the edges. No count bubbles, no per-marker
+// <Image>. A native react-native-maps patch (patches/) fixes the New-Arch marker
+// crash; this JS side keeps the rendered set small and stable.
 const FETCH_LIMIT = 2000; // per-region fetch ceiling (Portland ≈ 600, so full)
 // Far-guard for the no-region (pre-region-model, e.g. prod) path only: a metro
 // bbox scopes the fetch, and zooming out past this blanks rather than scanning a
@@ -63,14 +63,6 @@ const MAP_REGION_DEBOUNCE_MS = 350;
 // panning within a metro never refetches (only leaving it does).
 const METRO_SCOPE_HALF_LAT = 0.4; // ~28 mi
 const METRO_SCOPE_HALF_LNG = 0.5;
-
-// Clustering tightness (px). Lower = emojis break out of clusters at lower zoom.
-// The crash is fixed natively now, so this is purely a UX knob, not a safety cap.
-const CLUSTER_RADIUS = 24;
-// We render markers for a padded ring around the viewport and let the map cull
-// off-screen ones, so panning slides pins in/out at the edges without a
-// re-cluster. Re-cluster only fires on a zoom change or a pan beyond this ring.
-const RENDER_PAD = 0.6;
 
 function computeBoundingRegion(items: ExploreItem[]) {
   let minLat = 90;
@@ -136,6 +128,7 @@ const EmojiTeardropMarker = React.memo(
         coordinate={{ latitude: item.lat!, longitude: item.lng! }}
         anchor={{ x: 0.5, y: 1 }} // tip of the teardrop sits on the coordinate
         tracksViewChanges={tracks}
+        zIndex={isSelected ? 10 : 1} // selected pin always renders on top
       >
         <View style={{ alignItems: "center" }}>
           <View
@@ -183,66 +176,6 @@ const EmojiTeardropMarker = React.memo(
     );
   }
 );
-
-// Cluster bubble — a lightweight count marker (no <Image>) shown when several
-// items collapse at the current zoom. Tapping it zooms the map in to split the
-// cluster. Keyed by `${id}-${count}` at the call site, so a changed count
-// remounts this and re-renders the label; tracksViewChanges settles to false
-// after the first paint so the native view isn't re-rasterized on every frame.
-const ClusterMarker = React.memo(function ClusterMarker({
-  id,
-  lat,
-  lng,
-  count,
-}: {
-  id: string;
-  lat: number;
-  lng: number;
-  count: number;
-}) {
-  const [tracks, setTracks] = useState(true);
-  useEffect(() => {
-    const t = setTimeout(() => setTracks(false), 250);
-    return () => clearTimeout(t);
-  }, []);
-  const size = count >= 25 ? 52 : count >= 10 ? 46 : 40;
-  return (
-    <Marker
-      identifier={id}
-      coordinate={{ latitude: lat, longitude: lng }}
-      anchor={{ x: 0.5, y: 0.5 }}
-      tracksViewChanges={tracks}
-    >
-      <View
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: Colors.primary,
-          borderWidth: 2,
-          borderColor: "#fff",
-          alignItems: "center",
-          justifyContent: "center",
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.3,
-          shadowRadius: 4,
-          elevation: 5,
-        }}
-      >
-        <Text
-          style={{
-            color: "#fff",
-            fontWeight: "700",
-            fontSize: count >= 100 ? 13 : 15,
-          }}
-        >
-          {count}
-        </Text>
-      </View>
-    </Marker>
-  );
-});
 
 export function ExploreMapView({
   items: fallbackItems,
@@ -679,137 +612,41 @@ export function ExploreMapView({
     setSelectedItemId(item?.id || null);
   }, []);
 
-  // Index all in-memory points once with Supercluster; what's visible is then
-  // derived from (bbox, zoom) on each pan/zoom with no refetch — the source of
-  // stable panning and zoom-driven level-of-detail.
-  const superIndex = useMemo(() => {
-    if (mappableItems.length === 0) return null;
-    const index = new Supercluster<{ itemId: string }>({
-      radius: CLUSTER_RADIUS,
-      maxZoom: 18,
-      minZoom: 0,
-      extent: 512,
-    });
-    index.load(
-      mappableItems.map((it) => ({
-        type: "Feature" as const,
-        properties: { itemId: it.id },
-        geometry: {
-          type: "Point" as const,
-          coordinates: [it.lng as number, it.lat as number],
-        },
-      }))
-    );
-    return index;
-  }, [mappableItems]);
-
+  // Map id -> item, for marker taps and the preview card.
   const itemById = useMemo(() => {
     const m = new Map<string, ExploreItem>();
     for (const it of mappableItems) m.set(it.id, it);
     return m;
   }, [mappableItems]);
 
-  type RenderMarker =
-    | { kind: "single"; id: string; item: ExploreItem }
-    | { kind: "cluster"; id: string; clusterId: number; lat: number; lng: number; count: number };
-
-  // Clusters + individual pins for the current viewport. Singletons are ranked
-  // by notability and capped by zoom (decision 5-B: ~top 100 at metro zoom): so
-  // zoomed out shows the notable few (the rest fold into cluster bubbles) and
-  // zooming in progressively reveals more. The selected item is always kept.
-  const clusters = useMemo<RenderMarker[]>(() => {
-    if (!superIndex) return [];
-    const region = viewRegion ?? initialRegion;
-    const zoom = regionToZoom(region);
-    const bbox = regionToPaddedBbox(region, RENDER_PAD);
-
-    let raw: any[];
-    try {
-      raw = superIndex.getClusters(bbox, zoom);
-    } catch {
-      return [];
-    }
-
-    const clusterMarkers: RenderMarker[] = [];
-    const singleItems: ExploreItem[] = [];
-    for (const f of raw) {
-      const [lng, lat] = f.geometry.coordinates as [number, number];
-      if (f.properties?.cluster) {
-        // Stable identity: Supercluster's cluster_id changes on every getClusters
-        // call, which would remount (flicker) the bubble. Key by a leaf item id
-        // instead — the same set of points yields the same id across recomputes.
-        const cid = f.properties.cluster_id;
-        let stableId: string;
-        try {
-          const leaf = superIndex.getLeaves(cid, 1)[0];
-          stableId = leaf ? `c:${leaf.properties.itemId}` : `c:${cid}`;
-        } catch {
-          stableId = `c:${cid}`;
-        }
-        clusterMarkers.push({
-          kind: "cluster",
-          id: stableId,
-          clusterId: cid,
-          lat,
-          lng,
-          count: f.properties.point_count,
-        });
-      } else {
-        const item = itemById.get(f.properties.itemId);
-        if (item) singleItems.push(item);
-      }
-    }
-
-    // Rank singletons by notability; the most notable win the zoom budget.
-    singleItems.sort(
-      (a, b) => ((b as any).notability_score ?? 0) - ((a as any).notability_score ?? 0)
-    );
-
-    const budget = Math.min(
-      singletonCapForZoom(zoom),
-      MAX_RENDERED_MARKERS - clusterMarkers.length
-    );
-    const kept: ExploreItem[] = [];
-    const keptIds = new Set<string>();
-    // Always keep the selected item pinned (and its preview anchored).
-    if (selectedItemId) {
-      const sel = itemById.get(selectedItemId);
-      if (sel && sel.lat != null && sel.lng != null) {
-        kept.push(sel);
-        keptIds.add(sel.id);
-      }
-    }
-    for (const it of singleItems) {
-      if (kept.length >= budget) break;
-      if (keptIds.has(it.id)) continue;
-      kept.push(it);
-      keptIds.add(it.id);
-    }
-
-    const out: RenderMarker[] = clusterMarkers.slice(0, MAX_RENDERED_MARKERS);
-    for (const it of kept) out.push({ kind: "single", id: it.id, item: it });
-    return out;
-  }, [superIndex, viewRegion, initialRegion, itemById, selectedItemId]);
-
-  // Tapping a cluster zooms to the point where it breaks apart (Supercluster's
-  // expansion zoom), centered on the cluster.
-  const zoomToCluster = useCallback(
-    (clusterId: number, lat: number, lng: number) => {
-      if (!superIndex) return;
-      let expZoom = 16;
-      try {
-        expZoom = superIndex.getClusterExpansionZoom(clusterId);
-      } catch {
-        // fall back to a fixed zoom-in
-      }
-      const delta = zoomToRegionDelta(Math.min(expZoom + 0.5, 18));
-      mapRef.current?.animateToRegion(
-        { latitude: lat, longitude: lng, latitudeDelta: delta, longitudeDelta: delta },
-        350
-      );
-    },
-    [superIndex]
+  // Lightweight point list for the selection math.
+  const points = useMemo<MapPoint[]>(
+    () =>
+      mappableItems.map((it) => ({
+        id: it.id,
+        lat: it.lat as number,
+        lng: it.lng as number,
+        notability: (it as any).notability_score ?? 0,
+      })),
+    [mappableItems]
   );
+
+  // Which pins to render (Apple-Maps model, see docs/design/tier3_map_unification):
+  // notability-tiered by zoom + a collision grid so pins never overlap, revealed
+  // ADDITIVELY as you zoom in (a visible pin never vanishes on zoom-in). The
+  // selected pin is always included, so a tap can never make it disappear.
+  // Recomputes only when the region (guarded to zoom-change / big-pan) or the
+  // selection changes — never on idle jitter.
+  const visibleMarkers = useMemo<ExploreItem[]>(() => {
+    const region = viewRegion ?? initialRegion;
+    const ids = selectVisiblePins(points, region, selectedItemId);
+    const out: ExploreItem[] = [];
+    for (const id of ids) {
+      const item = itemById.get(id);
+      if (item) out.push(item);
+    }
+    return out;
+  }, [points, viewRegion, initialRegion, selectedItemId, itemById]);
 
   // Format helpers
   function formatDistance(item: ExploreItem): string | null {
@@ -870,42 +707,22 @@ export function ExploreMapView({
         showsMyLocationButton={!isLocationOverridden()}
         onPress={() => selectItem(null)}
         onMarkerPress={(e) => {
-          // Use identifier from marker for reliable iOS tap handling
+          // Use identifier from marker for reliable iOS tap handling.
           const markerId = e.nativeEvent?.id;
           if (!markerId) return;
-          // Cluster bubble → zoom in to split it (identifiers are "c:<cluster_id>").
-          if (markerId.startsWith("c:")) {
-            const cluster = clusters.find(
-              (c) => c.kind === "cluster" && c.id === markerId
-            );
-            if (cluster && cluster.kind === "cluster") {
-              zoomToCluster(cluster.clusterId, cluster.lat, cluster.lng);
-            }
-            return;
-          }
           const item = itemById.get(markerId);
           if (item) {
             selectItem(item);
           }
         }}
       >
-        {clusters.map((c) =>
-          c.kind === "cluster" ? (
-            <ClusterMarker
-              key={`${c.id}-${c.count}`}
-              id={c.id}
-              lat={c.lat}
-              lng={c.lng}
-              count={c.count}
-            />
-          ) : (
-            <EmojiTeardropMarker
-              key={c.item.id}
-              item={c.item}
-              isSelected={selectedItemId === c.item.id}
-            />
-          )
-        )}
+        {visibleMarkers.map((item) => (
+          <EmojiTeardropMarker
+            key={item.id}
+            item={item}
+            isSelected={selectedItemId === item.id}
+          />
+        ))}
         {/* Custom "You are here" dot for review account (native blue dot disabled) */}
         {isLocationOverridden() && userLocation && (
           <Marker
