@@ -6,11 +6,20 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { Colors } from "../config/theme";
 import { useTheme } from "../contexts/ThemeContext";
-import { getDistanceInMeters, getDistanceInMiles, isLocationOverridden } from "../utils/location";
+import Supercluster from "supercluster";
+import { getDistanceInMiles, isLocationOverridden } from "../utils/location";
 import { formatOpeningHours } from "../utils/formatOpeningHours";
 import { sanitizeTimeText } from "../utils/formatTimeText";
 import { regionToBbox, bboxContains, type MapRegion } from "../utils/mapViewport";
 import { getFallbackImage } from "../lib/categoryFallbackImages";
+import { emojiForItem, tintForItem } from "../utils/mapEmoji";
+import {
+  regionToZoom,
+  regionToPaddedBbox,
+  zoomToRegionDelta,
+  singletonCapForZoom,
+  MAX_RENDERED_MARKERS,
+} from "../lib/mapClustering";
 import type { ExploreItem } from "../types/database";
 import type {
   KindFilter,
@@ -38,12 +47,22 @@ interface ExploreMapViewProps {
 // 7-day window for events
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
-// Viewport-aware map: markers follow the visible region. Cap total markers so a
-// dense city view stays performant; beyond the county-scale ceiling we stop
-// querying and prompt the user to zoom in (no state-wide scans).
-const MAP_MAX_MARKERS = 250;
-const MAP_MAX_VIEWPORT_DELTA = 0.6; // latitude degrees (~40 mi) — zoom-out ceiling
-const MAP_REGION_DEBOUNCE_MS = 400;
+// Tier 3 map model (see docs/design/tier3_map_unification.md): fetch a whole
+// region ONCE, index its points with Supercluster, and re-derive what's visible
+// from (bbox, zoom) on every pan/zoom WITHOUT refetching. Panning is stable
+// (on-screen pins persist; new ones enter at the edges); zoom is the
+// level-of-detail control. Markers are emoji teardrops (plain text) + round
+// cluster bubbles — no per-marker <Image>, which is what used to OOM-crash iOS.
+const FETCH_LIMIT = 2000; // per-region fetch ceiling (Portland ≈ 600, so full)
+// Far-guard for the no-region (pre-region-model, e.g. prod) path only: a metro
+// bbox scopes the fetch, and zooming out past this blanks rather than scanning a
+// whole state. With a region_id the fetch is already metro-bounded, no blank.
+const MAP_MAX_VIEWPORT_DELTA = 1.2; // latitude degrees
+const MAP_REGION_DEBOUNCE_MS = 350;
+// No-region fetch scope: a generous metro box around the viewport center, so
+// panning within a metro never refetches (only leaving it does).
+const METRO_SCOPE_HALF_LAT = 0.4; // ~28 mi
+const METRO_SCOPE_HALF_LNG = 0.5;
 
 function computeBoundingRegion(items: ExploreItem[]) {
   let minLat = 90;
@@ -72,86 +91,81 @@ function computeBoundingRegion(items: ExploreItem[]) {
   };
 }
 
-// Thumbnail marker component - memoized to prevent unnecessary re-renders
-// Note: We use identifier + onMarkerPress on MapView for reliable iOS tap handling
-const MARKER_SIZE = 40;
+// Emoji teardrop marker (Tier 3, decision 5-A). Each pin shows an emoji that
+// describes the place (picked from sub_category → category → kind), sitting in a
+// teardrop whose tip points at the exact coordinate. The emoji is plain text, so
+// the marker costs almost nothing to render — this is what replaces the photo
+// thumbnails that used to exhaust native memory and crash the map. The photo
+// still appears in the preview card on tap.
+const PIN_HEAD = 38;
 
-const ThumbnailMarker = React.memo(
-  function ThumbnailMarker({
+const EmojiTeardropMarker = React.memo(
+  function EmojiTeardropMarker({
     item,
     isSelected,
   }: {
     item: ExploreItem;
     isSelected: boolean;
   }) {
-    const imageUrl = item.image_thumb_url || item.image_url;
-    const [imageError, setImageError] = useState(false);
-    const [imageLoaded, setImageLoaded] = useState(false);
-
-    // Brief settling period after selection change so native view can commit the update
-    const [settling, setSettling] = useState(false);
-    const prevSelected = useRef(isSelected);
+    // Track view changes briefly on mount / selection change so the native view
+    // rasterizes the current emoji + ring, then stop (nothing animates).
+    const [tracks, setTracks] = useState(true);
     useEffect(() => {
-      if (prevSelected.current !== isSelected) {
-        prevSelected.current = isSelected;
-        setSettling(true);
-        const timer = setTimeout(() => setSettling(false), 200);
-        return () => clearTimeout(timer);
-      }
+      setTracks(true);
+      const t = setTimeout(() => setTracks(false), 300);
+      return () => clearTimeout(t);
     }, [isSelected]);
 
-    // Default pin colors
-    const defaultColor = item.kind === "event" ? "#FF6B6B" : "#4A90D9";
-    const selectedColor = Colors.primary;
+    const emoji = emojiForItem(item);
+    const tint = isSelected ? Colors.primary : tintForItem(item);
+    const head = isSelected ? PIN_HEAD + 6 : PIN_HEAD;
 
-    if (imageUrl && !imageError) {
-      return (
-        <Marker
-          identifier={item.id}
-          coordinate={{ latitude: item.lat!, longitude: item.lng! }}
-          anchor={{ x: 0.5, y: 0.5 }}
-          // Track view changes only while image loads or during selection transition
-          // Stable size (no resize) prevents flicker when deselecting
-          tracksViewChanges={!imageLoaded || settling}
-        >
-          <View
-            style={{
-              width: MARKER_SIZE,
-              height: MARKER_SIZE,
-              borderRadius: MARKER_SIZE / 2,
-              borderWidth: isSelected ? 3 : 2,
-              borderColor: isSelected ? selectedColor : "#fff",
-              backgroundColor: "#fff",
-              overflow: "hidden",
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.25,
-              shadowRadius: 4,
-              elevation: isSelected ? 6 : 4,
-            }}
-          >
-            <Image
-              source={{ uri: imageUrl }}
-              style={{ width: "100%", height: "100%" }}
-              resizeMode="cover"
-              onError={() => setImageError(true)}
-              onLoad={() => setImageLoaded(true)}
-            />
-          </View>
-        </Marker>
-      );
-    }
-
-    // Fallback to default pin - no custom view, no tracksViewChanges needed
     return (
       <Marker
         identifier={item.id}
         coordinate={{ latitude: item.lat!, longitude: item.lng! }}
-        pinColor={isSelected ? selectedColor : defaultColor}
-      />
+        anchor={{ x: 0.5, y: 1 }} // tip of the teardrop sits on the coordinate
+        tracksViewChanges={tracks}
+      >
+        <View style={{ alignItems: "center" }}>
+          <View
+            style={{
+              width: head,
+              height: head,
+              borderRadius: head / 2,
+              backgroundColor: "#fff",
+              borderWidth: isSelected ? 3 : 2,
+              borderColor: tint,
+              alignItems: "center",
+              justifyContent: "center",
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.28,
+              shadowRadius: 3,
+              elevation: 5,
+            }}
+          >
+            <Text style={{ fontSize: isSelected ? 22 : 19 }}>{emoji}</Text>
+          </View>
+          {/* Downward pointer (teardrop tail) in the ring color. */}
+          <View
+            style={{
+              width: 0,
+              height: 0,
+              borderLeftWidth: 7,
+              borderRightWidth: 7,
+              borderTopWidth: 10,
+              borderLeftColor: "transparent",
+              borderRightColor: "transparent",
+              borderTopColor: tint,
+              marginTop: -2,
+            }}
+          />
+        </View>
+      </Marker>
     );
   },
-  // Custom comparison: only re-render if selection state or item id changes
+  // Only re-render if selection state or item id changes.
   (prevProps, nextProps) => {
     return (
       prevProps.item.id === nextProps.item.id &&
@@ -159,6 +173,66 @@ const ThumbnailMarker = React.memo(
     );
   }
 );
+
+// Cluster bubble — a lightweight count marker (no <Image>) shown when several
+// items collapse at the current zoom. Tapping it zooms the map in to split the
+// cluster. Keyed by `${id}-${count}` at the call site, so a changed count
+// remounts this and re-renders the label; tracksViewChanges settles to false
+// after the first paint so the native view isn't re-rasterized on every frame.
+const ClusterMarker = React.memo(function ClusterMarker({
+  id,
+  lat,
+  lng,
+  count,
+}: {
+  id: string;
+  lat: number;
+  lng: number;
+  count: number;
+}) {
+  const [tracks, setTracks] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setTracks(false), 250);
+    return () => clearTimeout(t);
+  }, []);
+  const size = count >= 25 ? 52 : count >= 10 ? 46 : 40;
+  return (
+    <Marker
+      identifier={id}
+      coordinate={{ latitude: lat, longitude: lng }}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={tracks}
+    >
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: "rgba(74,144,217,0.94)",
+          borderWidth: 2,
+          borderColor: "#fff",
+          alignItems: "center",
+          justifyContent: "center",
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.3,
+          shadowRadius: 4,
+          elevation: 5,
+        }}
+      >
+        <Text
+          style={{
+            color: "#fff",
+            fontWeight: "700",
+            fontSize: count >= 100 ? 13 : 15,
+          }}
+        >
+          {count}
+        </Text>
+      </View>
+    </Marker>
+  );
+});
 
 export function ExploreMapView({
   items: fallbackItems,
@@ -199,6 +273,11 @@ export function ExploreMapView({
   // lazily against initialRegion (declared below) to avoid a TDZ reference.
   const regionRef = useRef<MapRegion | null>(null);
   const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Viewport in state (mirrors regionRef) so clustering recomputes when the user
+  // zooms — the grid cell size is derived from the visible span. Updated on
+  // gesture end (onRegionChangeComplete), so it changes once per pan/zoom, not
+  // per frame.
+  const [viewRegion, setViewRegion] = useState<MapRegion | null>(null);
   // True when the viewport is zoomed out past the county-scale ceiling — we stop
   // querying and prompt the user to zoom in rather than scan a whole state.
   const [zoomedOut, setZoomedOut] = useState(false);
@@ -307,13 +386,13 @@ export function ExploreMapView({
         // Category filter
         const categoryValues = getCategoryFilter();
 
-        // The map shows "what I'm looking at": the query is bounded by the
-        // visible viewport, which wins over the distance filter.
+        // The map shows the active metro. We fetch the whole scope ONCE and
+        // cluster client-side, so panning/zooming never refetch.
         const region = regionArg || regionRef.current || initialRegion;
 
-        // Zoom-out ceiling — above county scale we stop querying (no state-wide
-        // scans) and prompt the user to zoom in.
-        if (region.latitudeDelta > MAP_MAX_VIEWPORT_DELTA) {
+        // Far-guard for the no-region path only (pre-region-model, e.g. prod):
+        // don't scan a whole state. With a region_id the fetch is metro-bounded.
+        if (!regionId && region.latitudeDelta > MAP_MAX_VIEWPORT_DELTA) {
           setZoomedOut(true);
           setMapItems([]);
           lastFetchRef.current = null;
@@ -322,27 +401,38 @@ export function ExploreMapView({
         }
         setZoomedOut(false);
 
-        const bbox = regionToBbox(region);
+        // Fetch scope: the whole region (region_id path → a wide no-op box, the
+        // region_id filter does the bounding) or a generous metro box around the
+        // viewport center (no-region path).
+        const scope = regionId
+          ? { latMin: -90, latMax: 90, lngMin: -180, lngMax: 180 }
+          : {
+              latMin: region.latitude - METRO_SCOPE_HALF_LAT,
+              latMax: region.latitude + METRO_SCOPE_HALF_LAT,
+              lngMin: region.longitude - METRO_SCOPE_HALF_LNG,
+              lngMax: region.longitude + METRO_SCOPE_HALF_LNG,
+            };
 
-        // Containment skip: if the same filters already fetched a superset bbox
-        // that wasn't marker-capped, this (tighter) view is already covered.
+        // Skip the refetch when the same filters already loaded a scope that
+        // still covers the current viewport — panning within a metro re-clusters
+        // from memory instead of re-querying (this is what stops pins vanishing).
+        const viewportBbox = regionToBbox(region);
         if (
           lastFetchRef.current &&
           lastFetchRef.current.filterKey === filterCacheKey &&
-          !lastFetchRef.current.wasCapped &&
-          bboxContains(lastFetchRef.current.bbox, bbox)
+          bboxContains(lastFetchRef.current.bbox, viewportBbox)
         ) {
           setLoading(false);
           return;
         }
 
-        // Bound any query to the visible viewport.
+        // Bound the query to the fetch scope.
         const applyBbox = (q: any) =>
           q
-            .gte("lat", bbox.latMin)
-            .lte("lat", bbox.latMax)
-            .gte("lng", bbox.lngMin)
-            .lte("lng", bbox.lngMax);
+            .gte("lat", scope.latMin)
+            .lte("lat", scope.latMax)
+            .gte("lng", scope.lngMin)
+            .lte("lng", scope.lngMax);
 
         let events: ExploreItem[] = [];
         let activities: ExploreItem[] = [];
@@ -398,7 +488,7 @@ export function ExploreMapView({
             .or(reviewStatusFilter);
 
           eventQuery = applyFilters(applyBbox(eventQuery));
-          const { data: eventData } = await eventQuery.limit(MAP_MAX_MARKERS);
+          const { data: eventData } = await eventQuery.limit(FETCH_LIMIT);
 
           // 2. Recurring items without starts_at (e.g., weekly wing night, trivia)
           //    These have schedule_text or recurrence but no concrete date,
@@ -422,9 +512,9 @@ export function ExploreMapView({
           }
 
           recurringQuery = applyFilters(applyBbox(recurringQuery));
-          const { data: recurringData } = await recurringQuery.limit(MAP_MAX_MARKERS);
+          const { data: recurringData } = await recurringQuery.limit(FETCH_LIMIT);
 
-          // Viewport already bounds these; no client-side distance filter.
+          // Scope already bounds these; clustering + LOD decide what renders.
           events = [...(eventData || []), ...(recurringData || [])];
         }
 
@@ -442,9 +532,12 @@ export function ExploreMapView({
             .or("review_status.is.null,review_status.in.(auto_approved,approved)");
 
           activityQuery = applyFilters(applyBbox(activityQuery));
-          // Over-fetch beyond the marker cap so the proximity sort below has room
-          // to pick the best markers across the viewport.
-          const { data: activityData } = await activityQuery.limit(MAP_MAX_MARKERS * 3);
+          // Order by notability so that if a region ever exceeds FETCH_LIMIT we
+          // keep the most notable items (notability_score isn't in the stale
+          // generated types yet — cast the column name).
+          const { data: activityData } = await activityQuery
+            .order("notability_score" as any, { ascending: false, nullsFirst: false })
+            .limit(FETCH_LIMIT);
           activities = activityData || [];
         }
 
@@ -457,31 +550,17 @@ export function ExploreMapView({
           return true;
         });
 
-        // Cap total markers. Events first (time-bounded and fewer, so they're
-        // never crowded out), then activities by priority, then proximity to the
-        // viewport center.
-        const centerLat = region.latitude;
-        const centerLng = region.longitude;
-        deduped.sort((a, b) => {
-          const ae = a.kind === "event" ? 0 : 1;
-          const be = b.kind === "event" ? 0 : 1;
-          if (ae !== be) return ae - be;
-          const ap = a.priority ?? 0;
-          const bp = b.priority ?? 0;
-          if (ap !== bp) return bp - ap;
-          const ad = getDistanceInMeters(centerLat, centerLng, a.lat!, a.lng!);
-          const bd = getDistanceInMeters(centerLat, centerLng, b.lat!, b.lng!);
-          return ad - bd;
-        });
-        const wasCapped = deduped.length > MAP_MAX_MARKERS;
-        setMapItems(wasCapped ? deduped.slice(0, MAP_MAX_MARKERS) : deduped);
+        // Hold the whole scope in memory; Supercluster + the zoom LOD decide
+        // what actually renders. No proximity cap here — that's what made pins
+        // vanish when the viewport center moved during a pan.
+        setMapItems(deduped);
 
-        // Update cache (bbox + cap state drive the containment-skip above).
+        // Remember the scope we fetched so panning within it skips the refetch.
         lastFetchRef.current = {
           filterKey: filterCacheKey,
           timestamp: now,
-          bbox,
-          wasCapped,
+          bbox: scope,
+          wasCapped: deduped.length >= FETCH_LIMIT,
         };
       } catch (err) {
         console.error("[ExploreMapView] Fetch error:", err);
@@ -511,17 +590,25 @@ export function ExploreMapView({
     fetchMapItems(regionRef.current ?? undefined);
   }, [filterCacheKey]);
 
-  // Debounced refetch as the user pans/zooms the map. The map is "what I'm
-  // looking at", so the visible region drives the query.
+  // On pan/zoom: always re-cluster from the in-memory index (instant), and only
+  // refetch when the viewport has left the loaded scope. Panning within a metro
+  // never re-queries, so on-screen pins persist and nothing flickers.
   const handleRegionChangeComplete = useCallback(
     (newRegion: MapRegion) => {
       regionRef.current = newRegion;
+      setViewRegion(newRegion);
+      const vb = regionToBbox(newRegion);
+      const covered =
+        lastFetchRef.current &&
+        lastFetchRef.current.filterKey === filterCacheKey &&
+        bboxContains(lastFetchRef.current.bbox, vb);
+      if (covered) return;
       if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
       regionDebounceRef.current = setTimeout(() => {
         fetchMapItems(newRegion);
       }, MAP_REGION_DEBOUNCE_MS);
     },
-    [fetchMapItems]
+    [fetchMapItems, filterCacheKey]
   );
 
   // Clear any pending debounce on unmount.
@@ -558,6 +645,127 @@ export function ExploreMapView({
   const selectItem = useCallback((item: ExploreItem | null) => {
     setSelectedItemId(item?.id || null);
   }, []);
+
+  // Index all in-memory points once with Supercluster; what's visible is then
+  // derived from (bbox, zoom) on each pan/zoom with no refetch — the source of
+  // stable panning and zoom-driven level-of-detail.
+  const superIndex = useMemo(() => {
+    if (mappableItems.length === 0) return null;
+    const index = new Supercluster<{ itemId: string }>({
+      radius: 64,
+      maxZoom: 18,
+      minZoom: 0,
+      extent: 512,
+    });
+    index.load(
+      mappableItems.map((it) => ({
+        type: "Feature" as const,
+        properties: { itemId: it.id },
+        geometry: {
+          type: "Point" as const,
+          coordinates: [it.lng as number, it.lat as number],
+        },
+      }))
+    );
+    return index;
+  }, [mappableItems]);
+
+  const itemById = useMemo(() => {
+    const m = new Map<string, ExploreItem>();
+    for (const it of mappableItems) m.set(it.id, it);
+    return m;
+  }, [mappableItems]);
+
+  type RenderMarker =
+    | { kind: "single"; id: string; item: ExploreItem }
+    | { kind: "cluster"; id: string; clusterId: number; lat: number; lng: number; count: number };
+
+  // Clusters + individual pins for the current viewport. Singletons are ranked
+  // by notability and capped by zoom (decision 5-B: ~top 100 at metro zoom): so
+  // zoomed out shows the notable few (the rest fold into cluster bubbles) and
+  // zooming in progressively reveals more. The selected item is always kept.
+  const clusters = useMemo<RenderMarker[]>(() => {
+    if (!superIndex) return [];
+    const region = viewRegion ?? initialRegion;
+    const zoom = regionToZoom(region);
+    const bbox = regionToPaddedBbox(region, 0.35);
+
+    let raw: any[];
+    try {
+      raw = superIndex.getClusters(bbox, zoom);
+    } catch {
+      return [];
+    }
+
+    const clusterMarkers: RenderMarker[] = [];
+    const singleItems: ExploreItem[] = [];
+    for (const f of raw) {
+      const [lng, lat] = f.geometry.coordinates as [number, number];
+      if (f.properties?.cluster) {
+        clusterMarkers.push({
+          kind: "cluster",
+          id: `c:${f.properties.cluster_id}`,
+          clusterId: f.properties.cluster_id,
+          lat,
+          lng,
+          count: f.properties.point_count,
+        });
+      } else {
+        const item = itemById.get(f.properties.itemId);
+        if (item) singleItems.push(item);
+      }
+    }
+
+    // Rank singletons by notability; the most notable win the zoom budget.
+    singleItems.sort(
+      (a, b) => ((b as any).notability_score ?? 0) - ((a as any).notability_score ?? 0)
+    );
+
+    const budget = Math.min(
+      singletonCapForZoom(zoom),
+      MAX_RENDERED_MARKERS - clusterMarkers.length
+    );
+    const kept: ExploreItem[] = [];
+    const keptIds = new Set<string>();
+    // Always keep the selected item pinned (and its preview anchored).
+    if (selectedItemId) {
+      const sel = itemById.get(selectedItemId);
+      if (sel && sel.lat != null && sel.lng != null) {
+        kept.push(sel);
+        keptIds.add(sel.id);
+      }
+    }
+    for (const it of singleItems) {
+      if (kept.length >= budget) break;
+      if (keptIds.has(it.id)) continue;
+      kept.push(it);
+      keptIds.add(it.id);
+    }
+
+    const out: RenderMarker[] = clusterMarkers.slice(0, MAX_RENDERED_MARKERS);
+    for (const it of kept) out.push({ kind: "single", id: it.id, item: it });
+    return out;
+  }, [superIndex, viewRegion, initialRegion, itemById, selectedItemId]);
+
+  // Tapping a cluster zooms to the point where it breaks apart (Supercluster's
+  // expansion zoom), centered on the cluster.
+  const zoomToCluster = useCallback(
+    (clusterId: number, lat: number, lng: number) => {
+      if (!superIndex) return;
+      let expZoom = 16;
+      try {
+        expZoom = superIndex.getClusterExpansionZoom(clusterId);
+      } catch {
+        // fall back to a fixed zoom-in
+      }
+      const delta = zoomToRegionDelta(Math.min(expZoom + 0.5, 18));
+      mapRef.current?.animateToRegion(
+        { latitude: lat, longitude: lng, latitudeDelta: delta, longitudeDelta: delta },
+        350
+      );
+    },
+    [superIndex]
+  );
 
   // Format helpers
   function formatDistance(item: ExploreItem): string | null {
@@ -620,21 +828,40 @@ export function ExploreMapView({
         onMarkerPress={(e) => {
           // Use identifier from marker for reliable iOS tap handling
           const markerId = e.nativeEvent?.id;
-          if (markerId) {
-            const item = mappableItems.find((i) => i.id === markerId);
-            if (item) {
-              selectItem(item);
+          if (!markerId) return;
+          // Cluster bubble → zoom in to split it (identifiers are "c:<cluster_id>").
+          if (markerId.startsWith("c:")) {
+            const cluster = clusters.find(
+              (c) => c.kind === "cluster" && c.id === markerId
+            );
+            if (cluster && cluster.kind === "cluster") {
+              zoomToCluster(cluster.clusterId, cluster.lat, cluster.lng);
             }
+            return;
+          }
+          const item = itemById.get(markerId);
+          if (item) {
+            selectItem(item);
           }
         }}
       >
-        {mappableItems.map((item) => (
-          <ThumbnailMarker
-            key={item.id}
-            item={item}
-            isSelected={selectedItemId === item.id}
-          />
-        ))}
+        {clusters.map((c) =>
+          c.kind === "cluster" ? (
+            <ClusterMarker
+              key={`${c.id}-${c.count}`}
+              id={c.id}
+              lat={c.lat}
+              lng={c.lng}
+              count={c.count}
+            />
+          ) : (
+            <EmojiTeardropMarker
+              key={c.item.id}
+              item={c.item}
+              isSelected={selectedItemId === c.item.id}
+            />
+          )
+        )}
         {/* Custom "You are here" dot for review account (native blue dot disabled) */}
         {isLocationOverridden() && userLocation && (
           <Marker

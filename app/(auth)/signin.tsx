@@ -14,6 +14,7 @@ import { Image } from "expo-image";
 import { Link, router } from "expo-router";
 import { useAuth } from "../../src/hooks/useAuth";
 import { friendlyMessage } from "../../src/lib/errorMessages";
+import { logClientError } from "../../src/lib/clientErrorLog";
 import { logSecurityEvent, SEC } from "../../src/lib/securityEvents";
 import { logAuthEvent } from "../../src/lib/authLog";
 import { useTheme } from "../../src/contexts/ThemeContext";
@@ -46,6 +47,13 @@ export default function SignIn() {
         ? "invalid_credentials"
         : (error as any).code || "unknown";
       logAuthEvent("signin_failed", { email, errorCode, errorMessage: error.message });
+      // Keep a guaranteed record of the raw auth error (fire-and-forget) so any
+      // future login regression stays diagnosable without needing a repro build.
+      logClientError("signin_error", error, {
+        status: (error as any)?.status,
+        code: (error as any)?.code,
+        name: error?.name,
+      });
       Alert.alert("Error", friendlyMessage(error));
     } else {
       logAuthEvent("signin_succeeded", { email });
