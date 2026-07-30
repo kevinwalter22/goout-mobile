@@ -173,16 +173,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signIn(email: string, password: string) {
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
+    const attempt = async () => {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+    };
+
+    const isUserCredError = (err: unknown) => {
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+      return (
+        msg.includes("invalid login") ||
+        msg.includes("invalid credentials") ||
+        msg.includes("email not confirmed") ||
+        msg.includes("not confirmed")
+      );
+    };
+
+    try {
+      await attempt();
       return { error: null };
     } catch (error) {
-      return { error: error as Error };
+      // Wrong password / unconfirmed email are expected — surface straight to UI.
+      if (isUserCredError(error)) {
+        return { error: error as Error };
+      }
+      // Anything else (a network hiccup, a stale/locked session recovery racing
+      // the sign-in, a storage error) is unexpected and was previously INVISIBLE:
+      // signIn never reported to Sentry, so intermittent "Something went wrong"
+      // failures left no trace anywhere. Capture it (Sentry tags the build), then
+      // retry once after a beat — which also clears most transient races (the
+      // "log into prod first, then staging" symptom).
+      captureError(error, { action: "signIn", stage: "first" });
+      logClientError("signin_error", error, { stage: "first" });
+      await new Promise((r) => setTimeout(r, 600));
+      try {
+        await attempt();
+        return { error: null };
+      } catch (error2) {
+        captureError(error2, { action: "signIn", stage: "retry" });
+        logClientError("signin_error", error2, { stage: "retry" });
+        return { error: error2 as Error };
+      }
     }
   }
 
