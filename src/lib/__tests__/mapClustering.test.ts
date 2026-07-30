@@ -84,6 +84,31 @@ describe("selectVisiblePins", () => {
     expect(zoomedIn).toContain("D"); // now in its own cell
   });
 
+  it("MONOTONIC zoom-in: a visible pin never disappears when zooming in (the bug)", () => {
+    // A tight cluster (Kevin's "5 drink icons"): all stay inside the viewport at
+    // every tested zoom, so the ONLY reason one could vanish would be the cell
+    // grid — which the nesting fix forbids.
+    const cluster: MapPoint[] = [];
+    for (let i = 0; i < 12; i++) {
+      cluster.push({
+        id: `bar${i}`,
+        lat: 43.657 + (i % 4) * 0.0015,
+        lng: -70.253 + Math.floor(i / 4) * 0.0018,
+        notability: 2 + ((i * 7) % 5) * 0.4, // varied, all >= 2 (clears threshold ≤ zoom 13)
+      });
+    }
+    const zoomsWideToTight = [0.16, 0.08, 0.04, 0.02]; // ~zoom 11 → 14
+    let prevVisible = new Set(selectVisiblePins(cluster, region(zoomsWideToTight[0]), null));
+    for (let k = 1; k < zoomsWideToTight.length; k++) {
+      const nowVisible = new Set(selectVisiblePins(cluster, region(zoomsWideToTight[k]), null));
+      // everything visible when zoomed out must still be visible zoomed in
+      for (const id of prevVisible) expect(nowVisible.has(id)).toBe(true);
+      // and zooming in should never show fewer
+      expect(nowVisible.size).toBeGreaterThanOrEqual(prevVisible.size);
+      prevVisible = nowVisible;
+    }
+  });
+
   it("ALWAYS includes the selected pin — even below threshold or in a taken cell", () => {
     const sel = selectVisiblePins(pts, region(0.08), "B"); // B is sub-threshold
     expect(sel).toContain("B");
