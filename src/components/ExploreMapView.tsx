@@ -11,7 +11,7 @@ import { formatOpeningHours } from "../utils/formatOpeningHours";
 import { sanitizeTimeText } from "../utils/formatTimeText";
 import { regionToBbox, bboxContains, type MapRegion } from "../utils/mapViewport";
 import { getFallbackImage } from "../lib/categoryFallbackImages";
-import { emojiForItem } from "../utils/mapEmoji";
+import { useMarkerImages, markerKey } from "./useMarkerImages";
 import {
   regionToZoom,
   regionToPaddedBbox,
@@ -92,92 +92,6 @@ function computeBoundingRegion(items: ExploreItem[]) {
     longitudeDelta: Math.max((maxLng - minLng) * 1.3, 0.02),
   };
 }
-
-// Emoji teardrop marker (Tier 3, decision 5-A). Each pin shows an emoji that
-// describes the place (picked from sub_category → category → kind), sitting in a
-// teardrop whose tip points at the exact coordinate. The emoji is plain text, so
-// the marker costs almost nothing to render — this is what replaces the photo
-// thumbnails that used to exhaust native memory and crash the map. The photo
-// still appears in the preview card on tap.
-const PIN_HEAD = 38;
-
-const EmojiTeardropMarker = React.memo(
-  function EmojiTeardropMarker({
-    item,
-    isSelected,
-  }: {
-    item: ExploreItem;
-    isSelected: boolean;
-  }) {
-    // Track view changes briefly on mount / selection change so the native view
-    // rasterizes the current emoji + ring, then stop (nothing animates).
-    const [tracks, setTracks] = useState(true);
-    useEffect(() => {
-      setTracks(true);
-      const t = setTimeout(() => setTracks(false), 300);
-      return () => clearTimeout(t);
-    }, [isSelected]);
-
-    const emoji = emojiForItem(item);
-    // Euda purple ring/tail (selected = the darker purple). The emoji already
-    // conveys what the place is, so the border is brand color, not a type color.
-    const tint = isSelected ? Colors.primaryDark : Colors.primary;
-    const head = isSelected ? PIN_HEAD + 6 : PIN_HEAD;
-
-    return (
-      <Marker
-        identifier={item.id}
-        coordinate={{ latitude: item.lat!, longitude: item.lng! }}
-        anchor={{ x: 0.5, y: 1 }} // tip of the teardrop sits on the coordinate
-        tracksViewChanges={tracks}
-        zIndex={isSelected ? 10 : 1} // selected pin always renders on top
-      >
-        <View style={{ alignItems: "center" }}>
-          <View
-            style={{
-              width: head,
-              height: head,
-              borderRadius: head / 2,
-              backgroundColor: "#fff",
-              borderWidth: isSelected ? 3 : 2,
-              borderColor: tint,
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.28,
-              shadowRadius: 3,
-              elevation: 5,
-            }}
-          >
-            <Text style={{ fontSize: isSelected ? 22 : 19 }}>{emoji}</Text>
-          </View>
-          {/* Downward pointer (teardrop tail) in the ring color. */}
-          <View
-            style={{
-              width: 0,
-              height: 0,
-              borderLeftWidth: 7,
-              borderRightWidth: 7,
-              borderTopWidth: 10,
-              borderLeftColor: "transparent",
-              borderRightColor: "transparent",
-              borderTopColor: tint,
-              marginTop: -2,
-            }}
-          />
-        </View>
-      </Marker>
-    );
-  },
-  // Only re-render if selection state or item id changes.
-  (prevProps, nextProps) => {
-    return (
-      prevProps.item.id === nextProps.item.id &&
-      prevProps.isSelected === nextProps.isSelected
-    );
-  }
-);
 
 export function ExploreMapView({
   items: fallbackItems,
@@ -650,6 +564,10 @@ export function ExploreMapView({
     return out;
   }, [points, viewRegion, initialRegion, selectedItemId, itemById]);
 
+  // Pre-generate a static image per distinct emoji badge (normal + selected), so
+  // pins are plain images to MapKit — no live-view/tracksViewChanges fragility.
+  const { uris: markerImages, renderer: markerRenderer } = useMarkerImages(visibleMarkers);
+
   // Format helpers
   function formatDistance(item: ExploreItem): string | null {
     if (!userLocation || !item.lat || !item.lng) return null;
@@ -699,6 +617,9 @@ export function ExploreMapView({
 
   return (
     <View style={{ flex: 1 }}>
+      {/* Off-screen: renders each distinct emoji badge once so it can be
+          snapshotted into a static marker image (see useMarkerImages). */}
+      {markerRenderer}
       <MapView
         ref={mapRef}
         style={{ flex: 1 }}
@@ -718,13 +639,23 @@ export function ExploreMapView({
           }
         }}
       >
-        {visibleMarkers.map((item) => (
-          <EmojiTeardropMarker
-            key={item.id}
-            item={item}
-            isSelected={selectedItemId === item.id}
-          />
-        ))}
+        {visibleMarkers.map((item) => {
+          const isSelected = selectedItemId === item.id;
+          const uri = markerImages.get(markerKey(item, isSelected));
+          // Static image marker (no live view / tracksViewChanges) — reliable.
+          // Skip until its image is generated (appears within a moment on load).
+          if (!uri) return null;
+          return (
+            <Marker
+              key={item.id}
+              identifier={item.id}
+              coordinate={{ latitude: item.lat!, longitude: item.lng! }}
+              anchor={{ x: 0.5, y: 1 }} // teardrop tip on the coordinate
+              image={{ uri }}
+              zIndex={isSelected ? 10 : 1}
+            />
+          );
+        })}
         {/* Custom "You are here" dot for review account (native blue dot disabled) */}
         {isLocationOverridden() && userLocation && (
           <Marker
