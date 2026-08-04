@@ -43,8 +43,10 @@ interface ExploreMapViewProps {
   tags?: string[];
 }
 
-// 7-day window for events
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+// Default map events horizon: 60 days (region-model decision A2). Only applies
+// when no explicit time filter is chosen; specific filters (today/this week/…)
+// still narrow it. Was 7 days, which made the events map look empty.
+const EVENT_HORIZON_MS = 60 * 24 * 60 * 60 * 1000;
 
 // Tier 3 map model (see docs/design/tier3_map_unification.md): fetch a whole
 // region ONCE, hold it in memory, and pick which emoji pins to render with an
@@ -323,12 +325,12 @@ export function ExploreMapView({
 
       try {
         const nowDate = new Date();
-        const sevenDaysLater = new Date(nowDate.getTime() + SEVEN_DAYS_MS);
+        const horizonEnd = new Date(nowDate.getTime() + EVENT_HORIZON_MS);
 
-        // Time window range (or default 7-day for events)
+        // Time window range (or the default 60-day horizon for events)
         const timeRange = getTimeWindowRange();
         const startDate = timeRange?.start || nowDate;
-        const endDate = timeRange?.end || sevenDaysLater;
+        const endDate = timeRange?.end || horizonEnd;
 
         // Category filter
         const categoryValues = getCategoryFilter();
