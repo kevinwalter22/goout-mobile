@@ -72,19 +72,26 @@ export function notabilityThresholdForZoom(zoom: number): number {
   return (4.0 * (16 - zoom)) / 6;
 }
 
-export type MapPoint = { id: string; lat: number; lng: number; notability: number };
+export type MapPoint = { id: string; lat: number; lng: number; notability: number; isEvent: boolean };
 
 /**
- * Choose which pins to render for the current region. Returns the ids to show,
- * most-notable-first. The `selectedId` pin is ALWAYS included (so tapping can
- * never make it vanish). Everything else must be in the padded viewport, clear
- * the zoom's importance bar, and win its collision cell (most notable wins; the
- * rest hide until a zoom-in separates them).
+ * Choose which pins to render for the current region — deliberately INDEPENDENT
+ * of the current selection, so tapping a pin can never reshuffle the map.
+ *
+ * Events and venues get different level-of-detail:
+ *  - **Events** are time-relevant "what's happening" and carry no venue-style
+ *    notability score, so they ALWAYS qualify when in view (a notability gate
+ *    would hide them everywhere — the 28-events-but-none-visible bug).
+ *  - **Activities/venues** are notability-tiered by zoom (only the notable few
+ *    when zoomed out; more as you zoom in).
+ *
+ * Everything then wins a collision cell — events first, then most-notable — so
+ * pins never overlap; the nesting grid keeps zoom-in additive; a cap bounds the
+ * rendered count for scale.
  */
 export function selectVisiblePins(
   points: MapPoint[],
   region: MapRegion,
-  selectedId: string | null,
   maxPins: number = MAX_RENDERED_MARKERS
 ): string[] {
   const zoom = regionToZoom(region);
@@ -94,27 +101,25 @@ export function selectVisiblePins(
 
   const candidates = points.filter(
     (p) =>
-      p.id === selectedId ||
-      (p.lng >= w &&
-        p.lng <= e &&
-        p.lat >= s &&
-        p.lat <= n &&
-        p.notability >= threshold)
+      p.lng >= w &&
+      p.lng <= e &&
+      p.lat >= s &&
+      p.lat <= n &&
+      (p.isEvent || p.notability >= threshold)
   );
-  // Most notable first; the selected pin is pinned to the very front.
+  // Events first (they're the priority and win collision cells / cap slots),
+  // then most-notable venues.
   candidates.sort((a, b) => {
-    if (a.id === selectedId) return -1;
-    if (b.id === selectedId) return 1;
+    if (a.isEvent !== b.isEvent) return a.isEvent ? -1 : 1;
     return b.notability - a.notability;
   });
 
   const taken = new Set<string>();
   const kept: string[] = [];
   for (const p of candidates) {
-    const isSelected = p.id === selectedId;
-    if (!isSelected && kept.length >= maxPins) break;
+    if (kept.length >= maxPins) break;
     const key = `${Math.floor(p.lat / cell)}:${Math.floor(p.lng / cell)}`;
-    if (!isSelected && taken.has(key)) continue; // a more-notable pin owns this cell
+    if (taken.has(key)) continue; // a higher-priority pin owns this cell
     taken.add(key);
     kept.push(p.id);
   }

@@ -543,26 +543,25 @@ export function ExploreMapView({
         lat: it.lat as number,
         lng: it.lng as number,
         notability: (it as any).notability_score ?? 0,
+        isEvent: it.kind === "event",
       })),
     [mappableItems]
   );
 
-  // Which pins to render (Apple-Maps model, see docs/design/tier3_map_unification):
-  // notability-tiered by zoom + a collision grid so pins never overlap, revealed
-  // ADDITIVELY as you zoom in (a visible pin never vanishes on zoom-in). The
-  // selected pin is always included, so a tap can never make it disappear.
-  // Recomputes only when the region (guarded to zoom-change / big-pan) or the
-  // selection changes — never on idle jitter.
+  // Which pins to render — Apple-Maps model: events always shown in view; venues
+  // notability-tiered by zoom; collision grid so pins never overlap, revealed
+  // additively as you zoom in. Deliberately INDEPENDENT of selectedItemId so a
+  // tap can never reshuffle the set (selection is handled in the render layer).
   const visibleMarkers = useMemo<ExploreItem[]>(() => {
     const region = viewRegion ?? initialRegion;
-    const ids = selectVisiblePins(points, region, selectedItemId);
+    const ids = selectVisiblePins(points, region);
     const out: ExploreItem[] = [];
     for (const id of ids) {
       const item = itemById.get(id);
       if (item) out.push(item);
     }
     return out;
-  }, [points, viewRegion, initialRegion, selectedItemId, itemById]);
+  }, [points, viewRegion, initialRegion, itemById]);
 
   // Pre-generate a static image per distinct emoji badge (normal + selected), so
   // pins are plain images to MapKit — no live-view/tracksViewChanges fragility.
@@ -641,9 +640,13 @@ export function ExploreMapView({
       >
         {visibleMarkers.map((item) => {
           const isSelected = selectedItemId === item.id;
-          const uri = markerImages.get(markerKey(item, isSelected));
+          // Prefer the bold (selected) image; fall back to the normal one if the
+          // selected variant isn't generated yet — so a tap NEVER blanks the pin.
+          const uri =
+            (isSelected ? markerImages.get(markerKey(item, true)) : undefined) ??
+            markerImages.get(markerKey(item, false));
           // Static image marker (no live view / tracksViewChanges) — reliable.
-          // Skip until its image is generated (appears within a moment on load).
+          // Only null on very first load before any image is generated.
           if (!uri) return null;
           return (
             <Marker
