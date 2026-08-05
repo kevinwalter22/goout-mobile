@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Image, Pressable, Text, View } from "react-native";
-import MapView, { Marker, PROVIDER_DEFAULT } from "react-native-maps";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
@@ -11,14 +10,8 @@ import { formatOpeningHours } from "../utils/formatOpeningHours";
 import { sanitizeTimeText } from "../utils/formatTimeText";
 import { regionToBbox, bboxContains, type MapRegion } from "../utils/mapViewport";
 import { getFallbackImage } from "../lib/categoryFallbackImages";
-import { emojiForItem } from "../utils/mapEmoji";
-import {
-  regionToZoom,
-  regionToPaddedBbox,
-  selectVisiblePins,
-  RENDER_PAD,
-  type MapPoint,
-} from "../lib/mapClustering";
+import { MapboxPlacesMap } from "./MapboxPlacesMap";
+import { regionToZoom } from "../lib/mapClustering";
 import type { ExploreItem } from "../types/database";
 import type {
   KindFilter,
@@ -43,8 +36,10 @@ interface ExploreMapViewProps {
   tags?: string[];
 }
 
-// 7-day window for events
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+// Default map events horizon: 60 days (region-model decision A2). Only applies
+// when no explicit time filter is chosen; specific filters (today/this week/…)
+// still narrow it. Was 7 days, which made the events map look empty.
+const EVENT_HORIZON_MS = 60 * 24 * 60 * 60 * 1000;
 
 // Tier 3 map model (see docs/design/tier3_map_unification.md): fetch a whole
 // region ONCE, hold it in memory, and pick which emoji pins to render with an
@@ -91,92 +86,6 @@ function computeBoundingRegion(items: ExploreItem[]) {
   };
 }
 
-// Emoji teardrop marker (Tier 3, decision 5-A). Each pin shows an emoji that
-// describes the place (picked from sub_category → category → kind), sitting in a
-// teardrop whose tip points at the exact coordinate. The emoji is plain text, so
-// the marker costs almost nothing to render — this is what replaces the photo
-// thumbnails that used to exhaust native memory and crash the map. The photo
-// still appears in the preview card on tap.
-const PIN_HEAD = 38;
-
-const EmojiTeardropMarker = React.memo(
-  function EmojiTeardropMarker({
-    item,
-    isSelected,
-  }: {
-    item: ExploreItem;
-    isSelected: boolean;
-  }) {
-    // Track view changes briefly on mount / selection change so the native view
-    // rasterizes the current emoji + ring, then stop (nothing animates).
-    const [tracks, setTracks] = useState(true);
-    useEffect(() => {
-      setTracks(true);
-      const t = setTimeout(() => setTracks(false), 300);
-      return () => clearTimeout(t);
-    }, [isSelected]);
-
-    const emoji = emojiForItem(item);
-    // Euda purple ring/tail (selected = the darker purple). The emoji already
-    // conveys what the place is, so the border is brand color, not a type color.
-    const tint = isSelected ? Colors.primaryDark : Colors.primary;
-    const head = isSelected ? PIN_HEAD + 6 : PIN_HEAD;
-
-    return (
-      <Marker
-        identifier={item.id}
-        coordinate={{ latitude: item.lat!, longitude: item.lng! }}
-        anchor={{ x: 0.5, y: 1 }} // tip of the teardrop sits on the coordinate
-        tracksViewChanges={tracks}
-        zIndex={isSelected ? 10 : 1} // selected pin always renders on top
-      >
-        <View style={{ alignItems: "center" }}>
-          <View
-            style={{
-              width: head,
-              height: head,
-              borderRadius: head / 2,
-              backgroundColor: "#fff",
-              borderWidth: isSelected ? 3 : 2,
-              borderColor: tint,
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.28,
-              shadowRadius: 3,
-              elevation: 5,
-            }}
-          >
-            <Text style={{ fontSize: isSelected ? 22 : 19 }}>{emoji}</Text>
-          </View>
-          {/* Downward pointer (teardrop tail) in the ring color. */}
-          <View
-            style={{
-              width: 0,
-              height: 0,
-              borderLeftWidth: 7,
-              borderRightWidth: 7,
-              borderTopWidth: 10,
-              borderLeftColor: "transparent",
-              borderRightColor: "transparent",
-              borderTopColor: tint,
-              marginTop: -2,
-            }}
-          />
-        </View>
-      </Marker>
-    );
-  },
-  // Only re-render if selection state or item id changes.
-  (prevProps, nextProps) => {
-    return (
-      prevProps.item.id === nextProps.item.id &&
-      prevProps.isSelected === nextProps.isSelected
-    );
-  }
-);
-
 export function ExploreMapView({
   items: fallbackItems,
   userLocation,
@@ -190,7 +99,6 @@ export function ExploreMapView({
   tags = [],
 }: ExploreMapViewProps) {
   const { colors } = useTheme();
-  const mapRef = useRef<MapView>(null);
 
   // Track selected item ID separately for marker rendering optimization
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -216,15 +124,6 @@ export function ExploreMapView({
   // lazily against initialRegion (declared below) to avoid a TDZ reference.
   const regionRef = useRef<MapRegion | null>(null);
   const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // The (zoom, padded bbox) the currently-rendered markers were clustered for.
-  // We only re-cluster when the integer zoom changes or the viewport pans out of
-  // this padded ring — so idle jitter and small pans never reshuffle the pins.
-  const renderRef = useRef<{ zoom: number; padded: [number, number, number, number] } | null>(null);
-  // Viewport in state (mirrors regionRef) so clustering recomputes when the user
-  // zooms — the grid cell size is derived from the visible span. Updated on
-  // gesture end (onRegionChangeComplete), so it changes once per pan/zoom, not
-  // per frame.
-  const [viewRegion, setViewRegion] = useState<MapRegion | null>(null);
   // True when the viewport is zoomed out past the county-scale ceiling — we stop
   // querying and prompt the user to zoom in rather than scan a whole state.
   const [zoomedOut, setZoomedOut] = useState(false);
@@ -323,12 +222,12 @@ export function ExploreMapView({
 
       try {
         const nowDate = new Date();
-        const sevenDaysLater = new Date(nowDate.getTime() + SEVEN_DAYS_MS);
+        const horizonEnd = new Date(nowDate.getTime() + EVENT_HORIZON_MS);
 
-        // Time window range (or default 7-day for events)
+        // Time window range (or the default 60-day horizon for events)
         const timeRange = getTimeWindowRange();
         const startDate = timeRange?.start || nowDate;
-        const endDate = timeRange?.end || sevenDaysLater;
+        const endDate = timeRange?.end || horizonEnd;
 
         // Category filter
         const categoryValues = getCategoryFilter();
@@ -537,33 +436,13 @@ export function ExploreMapView({
     fetchMapItems(regionRef.current ?? undefined);
   }, [filterCacheKey]);
 
-  // On pan/zoom: always re-cluster from the in-memory index (instant), and only
-  // refetch when the viewport has left the loaded scope. Panning within a metro
-  // never re-queries, so on-screen pins persist and nothing flickers.
+  // On pan/zoom end (from Mapbox): refetch only when the viewport has left the
+  // already-fetched scope. Rendering/LOD is handled natively by Mapbox now, so
+  // this is purely the data-fetch trigger.
   const handleRegionChangeComplete = useCallback(
     (newRegion: MapRegion) => {
       regionRef.current = newRegion;
       const vb = regionToBbox(newRegion);
-
-      // Re-cluster ONLY on a real zoom change or when the viewport pans out of the
-      // padded ring we last rendered. This is what stops emojis from popping in
-      // and out on idle/small pans — the marker set is stable until you actually
-      // zoom or pan somewhere new.
-      const z = regionToZoom(newRegion);
-      const rr = renderRef.current;
-      const stillRendered =
-        rr != null &&
-        rr.zoom === z &&
-        rr.padded[0] <= vb.lngMin &&
-        rr.padded[2] >= vb.lngMax &&
-        rr.padded[1] <= vb.latMin &&
-        rr.padded[3] >= vb.latMax;
-      if (!stillRendered) {
-        renderRef.current = { zoom: z, padded: regionToPaddedBbox(newRegion, RENDER_PAD) };
-        setViewRegion(newRegion);
-      }
-
-      // Refetch data only when the viewport leaves the already-fetched scope.
       const covered =
         lastFetchRef.current &&
         lastFetchRef.current.filterKey === filterCacheKey &&
@@ -619,34 +498,8 @@ export function ExploreMapView({
     return m;
   }, [mappableItems]);
 
-  // Lightweight point list for the selection math.
-  const points = useMemo<MapPoint[]>(
-    () =>
-      mappableItems.map((it) => ({
-        id: it.id,
-        lat: it.lat as number,
-        lng: it.lng as number,
-        notability: (it as any).notability_score ?? 0,
-      })),
-    [mappableItems]
-  );
-
-  // Which pins to render (Apple-Maps model, see docs/design/tier3_map_unification):
-  // notability-tiered by zoom + a collision grid so pins never overlap, revealed
-  // ADDITIVELY as you zoom in (a visible pin never vanishes on zoom-in). The
-  // selected pin is always included, so a tap can never make it disappear.
-  // Recomputes only when the region (guarded to zoom-change / big-pan) or the
-  // selection changes — never on idle jitter.
-  const visibleMarkers = useMemo<ExploreItem[]>(() => {
-    const region = viewRegion ?? initialRegion;
-    const ids = selectVisiblePins(points, region, selectedItemId);
-    const out: ExploreItem[] = [];
-    for (const id of ids) {
-      const item = itemById.get(id);
-      if (item) out.push(item);
-    }
-    return out;
-  }, [points, viewRegion, initialRegion, selectedItemId, itemById]);
+  // (Marker selection + rendering now live in MapboxPlacesMap, which aggregates
+  // `mappableItems` into places and renders them with a native symbol layer.)
 
   // Format helpers
   function formatDistance(item: ExploreItem): string | null {
@@ -697,54 +550,19 @@ export function ExploreMapView({
 
   return (
     <View style={{ flex: 1 }}>
-      <MapView
-        ref={mapRef}
-        style={{ flex: 1 }}
-        provider={PROVIDER_DEFAULT}
-        initialRegion={initialRegion}
-        onRegionChangeComplete={handleRegionChangeComplete}
-        showsUserLocation={!isLocationOverridden()}
-        showsMyLocationButton={!isLocationOverridden()}
-        onPress={() => selectItem(null)}
-        onMarkerPress={(e) => {
-          // Use identifier from marker for reliable iOS tap handling.
-          const markerId = e.nativeEvent?.id;
-          if (!markerId) return;
-          const item = itemById.get(markerId);
-          if (item) {
-            selectItem(item);
-          }
-        }}
-      >
-        {visibleMarkers.map((item) => (
-          <EmojiTeardropMarker
-            key={item.id}
-            item={item}
-            isSelected={selectedItemId === item.id}
-          />
-        ))}
-        {/* Custom "You are here" dot for review account (native blue dot disabled) */}
-        {isLocationOverridden() && userLocation && (
-          <Marker
-            coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
-            <View style={{
-              width: 20,
-              height: 20,
-              borderRadius: 10,
-              backgroundColor: Colors.primary,
-              borderWidth: 3,
-              borderColor: "#fff",
-              shadowColor: Colors.primary,
-              shadowOffset: { width: 0, height: 0 },
-              shadowOpacity: 0.4,
-              shadowRadius: 4,
-              elevation: 3,
-            }} />
-          </Marker>
-        )}
-      </MapView>
+      {/* Native Mapbox symbol-layer map over the place aggregation (one pin per
+          venue; native collision + LOD; no per-marker views). */}
+      <MapboxPlacesMap
+        items={mappableItems}
+        initialCenter={{ lat: initialRegion.latitude, lng: initialRegion.longitude }}
+        initialZoom={regionToZoom(initialRegion)}
+        selectedItemId={selectedItemId}
+        userLocation={userLocation}
+        showUserDot={isLocationOverridden()}
+        onRegionChange={handleRegionChangeComplete}
+        onSelectItem={selectItem}
+        itemById={itemById}
+      />
 
       {/* Zoom-out ceiling: prompt to zoom in rather than scan a whole state */}
       {zoomedOut && (

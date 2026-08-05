@@ -1,6 +1,6 @@
 # Euda — Project State
 
-**Last updated:** 06/22/2026 (Chief Engineer Setup COMPLETE — Phases 1–7 validated end-to-end; V1.1 data-quality sprint resumes on the new infra)
+**Last updated:** 08/04/2026 (Map & events overhaul in progress; big July feel-test/region/recurrence/map/login batch shipped to STAGING, prod promotion pending)
 **Owner:** Kevin Walter
 **Operating layer:** Claude (via this document) coordinating Claude Code
 
@@ -92,7 +92,16 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 
 ## 2. Current Priorities
 
-> **🎯 Now (week of 06/22/2026): V1.1 data-quality sprint — resuming on top of the now-complete Chief Engineer infrastructure.** Phases 1–7 are done and validated end-to-end (CI gate → staging auto-deploy → gated prod deploy → monitors → Sentry → rollback). Day-to-day engineering now runs through the [autonomy ladder](docs/chief_engineer/autonomy_ladder.md): Tier 1–2 work ships through staging on its own, Kevin is pinged only for Tier 3–4 and the production approval gate. **Phase A of the V1.1 sprint is queued and starts next.**
+> **🎯 Now (08/04/2026): Map & Events Overhaul** — see [docs/design/map_events_overhaul.md](docs/design/map_events_overhaul.md). Fixing (1) unreliable map pins → **image markers** instead of live-view markers (kills red-pin fallback / tap-blank / disappear), (2) **empty events map** → widen fetch 7d→60d + geocode the ~70% of events missing coords, (3) **recurring weekly events** (farmers markets, trivia) misclassified as activities → detect + surface as events with next-occurrence dates. Sequence: data fixes first, then rendering.
+>
+> **⚠️ State of the two environments (as of 08/04):**
+> - **STAGING is ~1 month ahead of PROD.** The whole July batch — Tier 1–3 feel-test fixes, **region model** (metro boundary + resolution ladder, migr 150), **recurrence collapse** (event_series, migr 152), the **map redesign** (emoji pins + notability LOD), **login crash fix** (chunked SecureStore + signIn retry/visibility), and the **react-native-maps AIRMap crash patch** (build 21) — is all on staging (migrations → 152, build 22). Prod is at migration **149**, last deploy **07-08**, and does NOT have region/recurrence/map/login yet.
+> - **Next gate:** once the map is confirmed good on staging, promote **staging → main** (gated prod deploy) so all of the above reaches real users together + a fresh prod build.
+> - App is **stable** — zero new mobile crashes since build 21; the AIRMap crash is gone. CI / staging-deploy / gated-prod-deploy / monitors / Sentry all functional (verified 07-30 sweep).
+>
+> **Gotcha added:** local staging OTAs must isolate `.env`/`.env.local` (they point at prod) and grep-verify the bundled key, or the OTA ships the prod key → "Invalid API key" (memory: ota-env-contamination).
+>
+> _(Historical priorities preserved below.)_ **The V1.1 data-quality sprint (Warwick/Portland) infrastructure — Chief Engineer Phases 1–7 — remains complete and validated; day-to-day autonomy runs through the [autonomy ladder](docs/chief_engineer/autonomy_ladder.md).**
 
 **This week (Warwick, week of [05/18/2026]):**
 - ✅ Migrations 126, 127, 128 applied (Warwick partitions, collector targets, URL fixes)
@@ -135,6 +144,11 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 
 | Date | Decision | Rationale | Decided by |
 |------|----------|-----------|------------|
+| [08/04/2026] | **Map & Events Overhaul approved** ([design](docs/design/map_events_overhaul.md)). Rendering → image markers (not live-view markers); events map → 60-day window + geocode events; recurring weeklies (farmers markets/trivia) → detect + surface as events. Data fixes first, then rendering. | Live-view markers on rn-maps New-Arch are fundamentally unreliable (red-pin fallback / tap-blank / disappear); events map empty due to a 7-day window + ~70% of events missing coords + recurring events misclassified as activities. | Kevin (approved), Claude (design) |
+| [07/30/2026] | **PR #90 merged to staging** (login retry/visibility + Apple-style map pins). Deploy-staging succeeded (build 22). Prod promotion still pending map confirmation. | Durable-commit the OTA-only work; unblock the prod path. | Kevin |
+| [07/10/2026] | **react-native-maps AIRMap crash patched** (`patches/react-native-maps+1.20.1.patch` via patch-package): guard nil + clamp index in `insertReactSubview`. Native → build 21. The real map crash (Sentry: NSRangeException in `-[AIRMap insertReactSubview:atIndex:]` on New Arch), NOT the "image markers → OOM" I first theorized. | Documented rn-maps New-Arch interop bug (#5345 / expo#34614). Only a build (not OTA) delivers it. Zero recurrences since. | Claude (Sentry root-cause), Kevin (build) |
+| [07/10/2026] | **Login crash fixed + made observable.** `chunkedSecureStorage` (never overflow the 2048-byte SecureStore cap; purge corrupt/truncated sessions) + `signIn` now reports failures to Sentry and auto-retries transient errors. | The recurring "Something went wrong" login was an old adapter overflowing SecureStore on save + a corrupt session crashing supabase-js on launch; signIn failures were previously invisible. | Kevin (confirmed working), Claude |
+| [07/09/2026] | **Tier 2 recurrence collapse** (migration 152): `event_series` + `series_id` + trigger; `filter_/count_explore_items` collapse a series to its soonest occurrence in browse, expand in date-windowed views (decision A4). **Region model** (migration 150): hard metro boundary + GPS→last-known→saved→manual resolution ladder, 60-day horizon (A2). | Recurring events showed one card per date ("Summer Sunsets" ×14); cross-metro bleed (Potsdam events in Portland). | Kevin (5 decisions locked), Claude |
 | [06/27/2026] | **Prod service-role key rotation — DEFERRED to V1.1 adoption.** The leaked legacy service-role JWT (in git history, commit `4d80619`) was migrated off everywhere: all 8 prod cron jobs + the 4 monitors (`app_config`) + GitHub `SUPABASE_PROD_SERVICE_ROLE_KEY` + `.env.local` now use the new `sb_secret`; `LEGACY_SERVICE_ROLE_JWT` was unset on functions so the leaked key is **permanently rejected by all edge functions (403)**. The final kill (disable legacy keys → leaked key 401 from REST) is **deferred**: the live App Store app is build (16) from 2026-04-20, which predates the publishable-key migration (06-15) and has no EAS Update capability, so it still uses the **legacy anon** key. Disabling legacy now would break ~30 live users; no OTA can reach that build. **Plan:** V1.1 ships the publishable key + OTA; after ~80% adoption (~1 week of Kevin nudging his ~30 users directly), Kevin explicitly approves disabling legacy → rotation closes. **Residual until then (accepted):** service_role REST access via a key in a *private* repo's history; narrow attack surface (repo access = Kevin + Claude Code sandbox only); bounded window ~2–4 weeks. | Kevin |
 | [05/18/2026] | Adopt lead-engineer-agent model with Claude in role | Founder wants to spend time on app and business, not on technical operations | Kevin |
 | [05/18/2026] | PROJECT_STATE.md as single source of truth, lives in repo | Markdown is portable, Claude Code can read/write it, version controlled by default | Kevin + Claude |
