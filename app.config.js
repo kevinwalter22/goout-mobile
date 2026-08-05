@@ -10,20 +10,34 @@
 // unchanged unless this is a staging build.
 
 module.exports = ({ config }) => {
+  // Inject the Mapbox config plugin. The SECRET download token is read from env
+  // (MAPBOX_DOWNLOAD_TOKEN — an EAS secret / .env.local), never committed. The
+  // public runtime token is EXPO_PUBLIC_MAPBOX_TOKEN.
+  const base = {
+    ...config,
+    plugins: [
+      ...(config.plugins || []),
+      [
+        "@rnmapbox/maps",
+        { RNMapboxMapsDownloadToken: process.env.MAPBOX_DOWNLOAD_TOKEN || "" },
+      ],
+    ],
+  };
+
   if (process.env.EXPO_PUBLIC_APP_ENV !== "staging") {
-    return config; // production + local dev: identical to app.json
+    return base; // production + local dev
   }
 
   return {
-    ...config,
+    ...base,
     name: "Euda (Staging)",
     scheme: "euda-staging",
     ios: {
-      ...config.ios,
+      ...base.ios,
       bundleIdentifier: "com.euda.app.staging",
     },
     android: {
-      ...config.android,
+      ...base.android,
       package: "com.euda.app.staging",
     },
   };
