@@ -1,13 +1,11 @@
 import React, { useMemo, useRef } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View } from "react-native";
 import Mapbox, {
   MapView,
   Camera,
   ShapeSource,
   SymbolLayer,
   CircleLayer,
-  Images,
-  Image as MapImage,
 } from "@rnmapbox/maps";
 import { Colors } from "../config/theme";
 import { aggregateToPlaces, placePriority } from "../lib/mapPlaces";
@@ -17,10 +15,16 @@ import type { ExploreItem } from "../types/database";
 // One-time SDK token (public — safe in the client). Restricted to the map SKU.
 Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || "");
 
-// Empty collection reused for the "nothing selected" state so the selection
-// ShapeSource can stay mounted (updating a shape is far cheaper than mounting a
-// native source+layer on every tap — that was the ~1s selection lag).
+// Reused for the "nothing selected" state so the selection ShapeSource stays
+// mounted (updating a shape is far cheaper than mounting a native source+layer on
+// every tap — that was the ~1s selection lag).
 const EMPTY_FC = { type: "FeatureCollection" as const, features: [] };
+
+// Pin colors. Event-places read in Euda purple; browsable venues are a calmer
+// slate so events pop. (Emoji glyphs come back as bundled icon images in a
+// follow-up — Mapbox text/`Image`-view rendering can't show color emoji here.)
+const EVENT_COLOR = Colors.primary;
+const VENUE_COLOR = "#7C8DA6";
 
 type Props = {
   items: ExploreItem[]; // mappable items in scope (events + activities)
@@ -50,11 +54,9 @@ function toFeatureCollection(items: ExploreItem[]) {
           id: p.id,
           emoji: p.emoji,
           count: p.eventCount,
-          // Higher priority is placed FIRST and therefore WINS native collision
-          // when pins overlap. Events rank above venues, then by notability — so
-          // zoomed out you see the notable few, and the long tail fills in as the
-          // map de-densifies on zoom-in. (Mapbox draws lowest sort-key first, so
-          // the value is negated where it's used as symbolSortKey.)
+          hasEvents: p.hasEvents ? 1 : 0,
+          // Higher priority is drawn on top (events, then notability), so the
+          // notable pins win visually where things are dense.
           priority: placePriority(p),
           repId: p.itemIds[0],
           allIds: p.itemIds.join(","),
@@ -63,19 +65,6 @@ function toFeatureCollection(items: ExploreItem[]) {
     },
     places,
   };
-}
-
-// Small round pin: white disc, faint purple ring, emoji centered. Rendered once
-// per UNIQUE emoji and referenced by name from the symbol layer (iconImage), so
-// there are no per-marker views — the GPU composites the shared images.
-function EmojiPin({ emoji }: { emoji: string }) {
-  return (
-    <View style={styles.pin}>
-      <Text style={styles.pinEmoji} allowFontScaling={false}>
-        {emoji}
-      </Text>
-    </View>
-  );
 }
 
 export function MapboxPlacesMap({
@@ -92,12 +81,6 @@ export function MapboxPlacesMap({
   const mapRef = useRef<MapView>(null);
 
   const { fc } = useMemo(() => toFeatureCollection(items), [items]);
-
-  // Distinct emojis in view — one shared image per emoji (not per place).
-  const uniqueEmojis = useMemo(
-    () => Array.from(new Set(fc.features.map((f) => f.properties.emoji as string))),
-    [fc]
-  );
 
   // Selected place as a 1-feature shape (or empty). The source stays mounted; we
   // only swap the shape, so the ring appears immediately on tap.
@@ -152,23 +135,12 @@ export function MapboxPlacesMap({
           animationDuration={0}
         />
 
-        {/* Register one image per unique emoji. @rnmapbox snapshots each RN view
-            to a native image; the symbol layer references them by emoji name. */}
-        <Images>
-          {uniqueEmojis.map((emoji) => (
-            <MapImage key={emoji} name={emoji}>
-              <EmojiPin emoji={emoji} />
-            </MapImage>
-          ))}
-        </Images>
-
-        {/* Selection ring — always mounted, empty until a pin is tapped. Drawn
-            under the pins so it haloes the selected one without covering it. */}
+        {/* Selection ring — always mounted, empty until a pin is tapped. */}
         <ShapeSource id="selected-place" shape={selectedShape}>
           <CircleLayer
             id="selected-ring"
             style={{
-              circleRadius: 22,
+              circleRadius: 18,
               circleColor: "rgba(0,0,0,0)",
               circleStrokeColor: Colors.primaryDark,
               circleStrokeWidth: 3,
@@ -178,33 +150,44 @@ export function MapboxPlacesMap({
         </ShapeSource>
 
         <ShapeSource id="places" shape={fc} onPress={handlePlacePress}>
-          {/* One symbol per place: emoji-disc icon + optional event-count badge.
-              iconAllowOverlap:false is the native collision that de-clutters when
-              zoomed out; symbolSortKey (=-priority) decides who survives — events
-              and notable venues win, the long tail fills in on zoom-in. The badge
-              rides on the same symbol (textOptional) so it never floats alone. */}
-          <SymbolLayer
-            id="place-pin"
+          {/* Vector dot per place — always renders (no image dependency). Event
+              places are bigger + Euda purple; venues are smaller + slate. Radius
+              grows with zoom so the map reads clean when zoomed out and detailed
+              when zoomed in. circleSortKey puts high-priority dots on top. */}
+          <CircleLayer
+            id="place-dot"
             style={{
-              iconImage: ["get", "emoji"],
-              iconSize: 0.9,
-              iconAllowOverlap: false,
-              iconOptional: false,
-              iconPadding: 6,
-              symbolSortKey: ["*", -1, ["get", "priority"]],
-              textField: [
+              circleColor: [
                 "case",
                 [">", ["get", "count"], 0],
-                ["to-string", ["get", "count"]],
-                "",
+                EVENT_COLOR,
+                VENUE_COLOR,
               ],
-              textSize: 11,
+              circleRadius: [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                9,
+                ["case", [">", ["get", "count"], 0], 5, 3],
+                14,
+                ["case", [">", ["get", "count"], 0], 10, 7],
+              ],
+              circleStrokeColor: "#ffffff",
+              circleStrokeWidth: 1.5,
+              circlePitchAlignment: "map",
+              circleSortKey: ["get", "priority"],
+            }}
+          />
+          {/* Event-count badge (numbers render fine in the glyph fonts). */}
+          <SymbolLayer
+            id="place-count"
+            filter={[">", ["get", "count"], 1]}
+            style={{
+              textField: ["to-string", ["get", "count"]],
+              textSize: 10,
               textColor: "#ffffff",
-              textHaloColor: Colors.primaryDark,
-              textHaloWidth: 2,
-              textOffset: [0.95, -0.95],
               textAllowOverlap: true,
-              textOptional: true,
+              textIgnorePlacement: true,
             }}
           />
         </ShapeSource>
@@ -239,26 +222,3 @@ export function MapboxPlacesMap({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  pin: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "#ffffff",
-    borderWidth: 1.5,
-    borderColor: Colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    // subtle lift so pins read against the map
-    shadowColor: "#000",
-    shadowOpacity: 0.18,
-    shadowRadius: 2,
-    shadowOffset: { width: 0, height: 1 },
-  },
-  pinEmoji: {
-    fontSize: 18,
-    lineHeight: 22,
-    textAlign: "center",
-  },
-});
