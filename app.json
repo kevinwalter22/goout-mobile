@@ -128,7 +128,7 @@
     },
     "owner": "kevwalt22",
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "fingerprint"
     },
     "updates": {
       "url": "https://u.expo.dev/4c8f3119-7056-4a82-a35a-c0f05b161d8a"
