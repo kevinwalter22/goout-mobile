@@ -6,9 +6,11 @@ import Mapbox, {
   ShapeSource,
   SymbolLayer,
   CircleLayer,
+  Images,
 } from "@rnmapbox/maps";
 import { Colors } from "../config/theme";
 import { aggregateToPlaces, placePriority } from "../lib/mapPlaces";
+import { MAP_PIN_IMAGES } from "../utils/mapPinImages";
 import type { MapRegion } from "../utils/mapViewport";
 import type { ExploreItem } from "../types/database";
 
@@ -20,11 +22,10 @@ Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || "");
 // every tap — that was the ~1s selection lag).
 const EMPTY_FC = { type: "FeatureCollection" as const, features: [] };
 
-// Pin colors. Event-places read in Euda purple; browsable venues are a calmer
-// slate so events pop. (Emoji glyphs come back as bundled icon images in a
-// follow-up — Mapbox text/`Image`-view rendering can't show color emoji here.)
-const EVENT_COLOR = Colors.primary;
-const VENUE_COLOR = "#7C8DA6";
+// Fallback pin for any emoji without a bundled image (📍 is always in the set) —
+// guarantees every place resolves to a real iconImage, so a pin is never missing.
+const FALLBACK_EMOJI = "📍";
+const iconFor = (emoji: string): string => (MAP_PIN_IMAGES[emoji] ? emoji : FALLBACK_EMOJI);
 
 type Props = {
   items: ExploreItem[]; // mappable items in scope (events + activities)
@@ -52,11 +53,14 @@ function toFeatureCollection(items: ExploreItem[]) {
         geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
         properties: {
           id: p.id,
-          emoji: p.emoji,
+          // icon = the emoji's bundled pin (or the fallback pin) — always a valid image key
+          icon: iconFor(p.emoji),
           count: p.eventCount,
-          hasEvents: p.hasEvents ? 1 : 0,
-          // Higher priority is drawn on top (events, then notability), so the
-          // notable pins win visually where things are dense.
+          // Higher priority is placed FIRST and therefore WINS native collision
+          // when pins overlap. Events rank above venues, then by notability — so
+          // zoomed out you see the notable few, and the long tail fills in as the
+          // map de-densifies on zoom-in. (Mapbox draws lowest sort-key first, so
+          // the value is negated where it's used as symbolSortKey.)
           priority: placePriority(p),
           repId: p.itemIds[0],
           allIds: p.itemIds.join(","),
@@ -135,13 +139,23 @@ export function MapboxPlacesMap({
           animationDuration={0}
         />
 
-        {/* Selection ring — always mounted, empty until a pin is tapped. */}
+        {/* Bundled emoji-disc pins (static require assets — the reliable image
+            path). Referenced by name from the symbol layer via iconImage. */}
+        <Images
+          images={MAP_PIN_IMAGES}
+          onImageMissing={(name) => {
+            if (__DEV__) console.warn("[map] missing pin image for", name);
+          }}
+        />
+
+        {/* Selection ring — always mounted, empty until a pin is tapped. Sized to
+            sit just outside the ~36pt pin. */}
         <ShapeSource id="selected-place" shape={selectedShape}>
           <CircleLayer
             id="selected-ring"
             style={{
-              circleRadius: 18,
-              circleColor: "rgba(0,0,0,0)",
+              circleRadius: 24,
+              circleColor: "rgba(124,58,237,0.12)",
               circleStrokeColor: Colors.primaryDark,
               circleStrokeWidth: 3,
               circlePitchAlignment: "map",
@@ -150,44 +164,33 @@ export function MapboxPlacesMap({
         </ShapeSource>
 
         <ShapeSource id="places" shape={fc} onPress={handlePlacePress}>
-          {/* Vector dot per place — always renders (no image dependency). Event
-              places are bigger + Euda purple; venues are smaller + slate. Radius
-              grows with zoom so the map reads clean when zoomed out and detailed
-              when zoomed in. circleSortKey puts high-priority dots on top. */}
-          <CircleLayer
-            id="place-dot"
-            style={{
-              circleColor: [
-                "case",
-                [">", ["get", "count"], 0],
-                EVENT_COLOR,
-                VENUE_COLOR,
-              ],
-              circleRadius: [
-                "interpolate",
-                ["linear"],
-                ["zoom"],
-                9,
-                ["case", [">", ["get", "count"], 0], 5, 3],
-                14,
-                ["case", [">", ["get", "count"], 0], 10, 7],
-              ],
-              circleStrokeColor: "#ffffff",
-              circleStrokeWidth: 1.5,
-              circlePitchAlignment: "map",
-              circleSortKey: ["get", "priority"],
-            }}
-          />
-          {/* Event-count badge (numbers render fine in the glyph fonts). */}
+          {/* One symbol per place: emoji-disc icon + optional event-count badge.
+              iconAllowOverlap:false is the native collision that de-clutters when
+              zoomed out; symbolSortKey (=-priority) decides who survives — events
+              and notable venues win, the long tail fills in on zoom-in. The badge
+              rides on the same symbol (textOptional) so it never floats alone. */}
           <SymbolLayer
-            id="place-count"
-            filter={[">", ["get", "count"], 1]}
+            id="place-pin"
             style={{
-              textField: ["to-string", ["get", "count"]],
-              textSize: 10,
+              iconImage: ["get", "icon"],
+              iconSize: 0.5, // 72px asset -> ~36pt pin
+              iconAllowOverlap: false,
+              iconOptional: false,
+              iconPadding: 4,
+              symbolSortKey: ["*", -1, ["get", "priority"]],
+              textField: [
+                "case",
+                [">", ["get", "count"], 1],
+                ["to-string", ["get", "count"]],
+                "",
+              ],
+              textSize: 11,
               textColor: "#ffffff",
+              textHaloColor: Colors.primaryDark,
+              textHaloWidth: 2,
+              textOffset: [0.9, -0.9],
               textAllowOverlap: true,
-              textIgnorePlacement: true,
+              textOptional: true,
             }}
           />
         </ShapeSource>
