@@ -10,6 +10,7 @@ import Mapbox, {
 } from "@rnmapbox/maps";
 import { Colors } from "../config/theme";
 import { aggregateToPlaces, placePriority } from "../lib/mapPlaces";
+import { nearestRepId } from "../lib/mapTap";
 import { MAP_PIN_IMAGES } from "../utils/mapPinImages";
 import type { MapRegion } from "../utils/mapViewport";
 import type { ExploreItem } from "../types/database";
@@ -83,6 +84,9 @@ export function MapboxPlacesMap({
   itemById,
 }: Props) {
   const mapRef = useRef<MapView>(null);
+  // Timestamp of the last pin tap — used to swallow the map's deselect-on-tap
+  // that can pair with a pin tap and undo the selection (the "took 3 tries" feel).
+  const lastPinTapRef = useRef(0);
 
   const { fc } = useMemo(() => toFeatureCollection(items), [items]);
 
@@ -115,10 +119,10 @@ export function MapboxPlacesMap({
   };
 
   const handlePlacePress = (e: any) => {
-    const f = e?.features?.[0];
-    const repId: string | undefined = f?.properties?.repId;
+    lastPinTapRef.current = Date.now();
+    const repId = nearestRepId(e?.features, e?.coordinates);
     const item = repId ? itemById.get(repId) : undefined;
-    onSelectItem(item ?? null);
+    if (item) onSelectItem(item); // a resolved pin tap always selects; never deselects
   };
 
   return (
@@ -128,7 +132,12 @@ export function MapboxPlacesMap({
         style={{ flex: 1 }}
         styleURL={Mapbox.StyleURL.Street}
         scaleBarEnabled={false}
-        onPress={() => onSelectItem(null)}
+        onPress={() => {
+          // Ignore the map-level tap that immediately follows a pin tap (they can
+          // both fire), which would otherwise deselect what you just selected.
+          if (Date.now() - lastPinTapRef.current < 250) return;
+          onSelectItem(null);
+        }}
         onMapIdle={handleIdle as any}
       >
         <Camera
@@ -148,7 +157,12 @@ export function MapboxPlacesMap({
           }}
         />
 
-        <ShapeSource id="places" shape={fc} onPress={handlePlacePress}>
+        <ShapeSource
+          id="places"
+          shape={fc}
+          onPress={handlePlacePress}
+          hitbox={{ width: 48, height: 48 }}
+        >
           {/* One symbol per place: emoji-disc icon + optional event-count badge.
               iconAllowOverlap:false is the native collision that de-clutters when
               zoomed out; symbolSortKey (=-priority) decides who survives — events
