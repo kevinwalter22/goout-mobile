@@ -6,14 +6,26 @@ import Mapbox, {
   ShapeSource,
   SymbolLayer,
   CircleLayer,
+  Images,
 } from "@rnmapbox/maps";
 import { Colors } from "../config/theme";
 import { aggregateToPlaces, placePriority } from "../lib/mapPlaces";
+import { MAP_PIN_IMAGES } from "../utils/mapPinImages";
 import type { MapRegion } from "../utils/mapViewport";
 import type { ExploreItem } from "../types/database";
 
 // One-time SDK token (public — safe in the client). Restricted to the map SKU.
 Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || "");
+
+// Reused for the "nothing selected" state so the selection ShapeSource stays
+// mounted (updating a shape is far cheaper than mounting a native source+layer on
+// every tap — that was the ~1s selection lag).
+const EMPTY_FC = { type: "FeatureCollection" as const, features: [] };
+
+// Fallback pin for any emoji without a bundled image (📍 is always in the set) —
+// guarantees every place resolves to a real iconImage, so a pin is never missing.
+const FALLBACK_EMOJI = "📍";
+const iconFor = (emoji: string): string => (MAP_PIN_IMAGES[emoji] ? emoji : FALLBACK_EMOJI);
 
 type Props = {
   items: ExploreItem[]; // mappable items in scope (events + activities)
@@ -41,11 +53,15 @@ function toFeatureCollection(items: ExploreItem[]) {
         geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
         properties: {
           id: p.id,
-          emoji: p.emoji,
+          // icon = the emoji's bundled pin (or the fallback pin) — always a valid image key
+          icon: iconFor(p.emoji),
           count: p.eventCount,
+          // Higher priority is placed FIRST and therefore WINS native collision
+          // when pins overlap. Events rank above venues, then by notability — so
+          // zoomed out you see the notable few, and the long tail fills in as the
+          // map de-densifies on zoom-in. (Mapbox draws lowest sort-key first, so
+          // the value is negated where it's used as symbolSortKey.)
           priority: placePriority(p),
-          // representative item to open on tap = first id (aggregate keeps the
-          // venue/top-event first via placePriority ordering upstream)
           repId: p.itemIds[0],
           allIds: p.itemIds.join(","),
         },
@@ -70,16 +86,17 @@ export function MapboxPlacesMap({
 
   const { fc } = useMemo(() => toFeatureCollection(items), [items]);
 
-  // The selected place, as its own 1-feature source, so a ring can highlight it
-  // without touching the main layer (no churn).
-  const selectedFc = useMemo(() => {
-    if (!selectedItemId) return null;
-    const sel = fc.features.find((f) => (f.properties.allIds as string).split(",").includes(selectedItemId));
-    return sel ? { type: "FeatureCollection" as const, features: [sel] } : null;
+  // Selected place as a 1-feature shape (or empty). The source stays mounted; we
+  // only swap the shape, so the ring appears immediately on tap.
+  const selectedShape = useMemo(() => {
+    if (!selectedItemId) return EMPTY_FC;
+    const sel = fc.features.find((f) =>
+      (f.properties.allIds as string).split(",").includes(selectedItemId)
+    );
+    return sel ? { type: "FeatureCollection" as const, features: [sel] } : EMPTY_FC;
   }, [fc, selectedItemId]);
 
   const handleIdle = async (feat: any) => {
-    // The idle payload carries the visible bounds + zoom when the camera settles.
     const p: any = feat?.properties || {};
     const bounds = p.visibleBounds as [[number, number], [number, number]] | undefined; // [[neLng,neLat],[swLng,swLat]]
     const center = (feat.geometry?.coordinates as [number, number]) || [initialCenter.lng, initialCenter.lat];
@@ -122,65 +139,86 @@ export function MapboxPlacesMap({
           animationDuration={0}
         />
 
+        {/* Bundled emoji-disc pins (static require assets — the reliable image
+            path). Referenced by name from the symbol layer via iconImage. */}
+        <Images
+          images={MAP_PIN_IMAGES}
+          onImageMissing={(name) => {
+            if (__DEV__) console.warn("[map] missing pin image for", name);
+          }}
+        />
+
         <ShapeSource id="places" shape={fc} onPress={handlePlacePress}>
-          {/* White pin disc, drawn behind the emoji. circleSortKey mirrors the
-              symbol sort so the disc under a kept emoji is the one shown. */}
-          <CircleLayer
-            id="place-disc"
-            style={{
-              circleRadius: 15,
-              circleColor: "#ffffff",
-              circleStrokeColor: Colors.primary,
-              circleStrokeWidth: 2,
-              circlePitchAlignment: "map",
-              circleSortKey: ["*", -1, ["get", "priority"]],
-            }}
-          />
-          {/* Emoji as native text — GPU-rendered, no per-marker views. Native
-              collision (textAllowOverlap:false) = Apple-style LOD; higher-priority
-              (events first, then notability) win via symbolSortKey. */}
+          {/* One symbol per place: emoji-disc icon + optional event-count badge.
+              iconAllowOverlap:false is the native collision that de-clutters when
+              zoomed out; symbolSortKey (=-priority) decides who survives — events
+              and notable venues win, the long tail fills in on zoom-in. The badge
+              rides on the same symbol (textOptional) so it never floats alone. */}
           <SymbolLayer
-            id="place-emoji"
+            id="place-pin"
             style={{
-              textField: ["get", "emoji"],
-              textSize: 20,
-              textAllowOverlap: false,
-              textIgnorePlacement: false,
-              textOptional: false,
+              iconImage: ["get", "icon"],
+              iconSize: 0.5, // 72px asset -> ~36pt pin
+              iconAllowOverlap: false,
+              iconOptional: false,
+              iconPadding: 4,
               symbolSortKey: ["*", -1, ["get", "priority"]],
-            }}
-          />
-          {/* Event-count badge for places with upcoming events. */}
-          <SymbolLayer
-            id="place-count"
-            filter={[">", ["get", "count"], 0]}
-            style={{
-              textField: ["to-string", ["get", "count"]],
-              textSize: 10,
+              textField: [
+                "case",
+                [">", ["get", "count"], 1],
+                ["to-string", ["get", "count"]],
+                "",
+              ],
+              textSize: 11,
               textColor: "#ffffff",
               textHaloColor: Colors.primaryDark,
               textHaloWidth: 2,
-              textOffset: [1.1, -1.1],
+              textOffset: [0.9, -0.9],
               textAllowOverlap: true,
-              symbolSortKey: ["*", -1, ["get", "priority"]],
+              textOptional: true,
             }}
           />
         </ShapeSource>
 
-        {/* Selection ring — separate source so tapping never disturbs the pins. */}
-        {selectedFc && (
-          <ShapeSource id="selected-place" shape={selectedFc}>
-            <CircleLayer
-              id="selected-ring"
-              style={{
-                circleRadius: 20,
-                circleColor: "rgba(0,0,0,0)",
-                circleStrokeColor: Colors.primaryDark,
-                circleStrokeWidth: 3,
-              }}
-            />
-          </ShapeSource>
-        )}
+        {/* Selection layer — always mounted (empty until a pin is tapped), drawn
+            ON TOP of the places layer. It carries BOTH the ring AND the selected
+            pin with collision disabled, so the selected place stays put when you
+            zoom out even if it would otherwise be collision-dropped. Deselecting
+            empties the shape, so the pin then follows normal collision again. */}
+        <ShapeSource id="selected-place" shape={selectedShape}>
+          <CircleLayer
+            id="selected-ring"
+            style={{
+              circleRadius: 24,
+              circleColor: "rgba(124,58,237,0.12)",
+              circleStrokeColor: Colors.primaryDark,
+              circleStrokeWidth: 3,
+              circlePitchAlignment: "map",
+            }}
+          />
+          <SymbolLayer
+            id="selected-pin"
+            style={{
+              iconImage: ["get", "icon"],
+              iconSize: 0.5,
+              iconAllowOverlap: true,
+              iconIgnorePlacement: true,
+              textField: [
+                "case",
+                [">", ["get", "count"], 1],
+                ["to-string", ["get", "count"]],
+                "",
+              ],
+              textSize: 11,
+              textColor: "#ffffff",
+              textHaloColor: Colors.primaryDark,
+              textHaloWidth: 2,
+              textOffset: [0.9, -0.9],
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+            }}
+          />
+        </ShapeSource>
 
         {/* "You are here" (review/override account). */}
         {showUserDot && userLocation && (

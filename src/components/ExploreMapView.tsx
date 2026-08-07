@@ -476,13 +476,14 @@ export function ExploreMapView({
     [selectedItemId, mappableItems]
   );
 
-  // Animate preview card in/out
+  // Animate preview card in/out. A short timing curve (not a spring) keeps the
+  // card feeling instant on tap — combined with the always-mounted selection
+  // ring in MapboxPlacesMap, selecting a place is snappy now.
   useEffect(() => {
-    Animated.spring(previewAnim, {
+    Animated.timing(previewAnim, {
       toValue: selectedItem ? 1 : 0,
+      duration: selectedItem ? 160 : 120,
       useNativeDriver: true,
-      tension: 100,
-      friction: 10,
     }).start();
   }, [selectedItem, previewAnim]);
 
