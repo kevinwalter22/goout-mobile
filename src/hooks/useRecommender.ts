@@ -33,6 +33,8 @@ export interface UseRecommenderOptions {
   enableLLMReranker?: boolean;
   /** Override page size for initial fetch (e.g., 200 for cards mode) */
   pageSizeOverride?: number;
+  /** Active region (metro) to hard-scope the feed to. Null = unscoped. */
+  regionId?: string | null;
 }
 
 export interface UseRecommenderReturn extends Omit<UseExploreFiltersReturn, "items"> {
@@ -60,10 +62,10 @@ export function useRecommender(
   userLocation?: { lat: number; lng: number } | null,
   options: UseRecommenderOptions = {}
 ): UseRecommenderReturn {
-  const { enableScoring = true, enableLLMReranker = false, pageSizeOverride } = options;
+  const { enableScoring = true, enableLLMReranker = false, pageSizeOverride, regionId } = options;
 
   const { user } = useAuth();
-  const exploreFilters = useExploreFilters(userLocation, { pageSizeOverride });
+  const exploreFilters = useExploreFilters(userLocation, { pageSizeOverride, regionId });
   const { weather } = useWeather(userLocation);
   const { flags: featureFlags } = useFeatureFlags();
 

@@ -45,12 +45,23 @@ async function geocodeAddress(raw: string): Promise<{ lat: number; lng: number }
   const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY");
   if (!apiKey) { GEO_CACHE.set(key, null); return null; }
   try {
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr)}&key=${apiKey}`;
-    const res = await fetch(url);
+    // Use the Places API (New) Text Search, NOT the Geocoding API: the Geocoding
+    // and legacy Places APIs are not activated on the Cloud project (they return
+    // REQUEST_DENIED), but Places (New) IS enabled — it's what ingests venues.
+    // This regressed silently to null coords on all events ~2026-07 until fixed.
+    const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": "places.location",
+      },
+      body: JSON.stringify({ textQuery: addr, maxResultCount: 1 }),
+    });
     const j = await res.json();
-    const loc = j?.results?.[0]?.geometry?.location;
-    const out = (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng))
-      ? { lat: loc.lat as number, lng: loc.lng as number }
+    const loc = j?.places?.[0]?.location;
+    const out = (loc && Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude))
+      ? { lat: loc.latitude as number, lng: loc.longitude as number }
       : null;
     GEO_CACHE.set(key, out);
     return out;
@@ -393,6 +404,21 @@ Deno.serve(async (req) => {
         // Tuesday" not "last Tuesday" and the map's date-windowed query includes
         // them. Deterministic + idempotent (see advanceRecurring / migration 149).
         advanceRecurring(normalized);
+
+        // Assign the region (metro) for the hard boundary, by coordinates. Left
+        // unset for null-coord rows (upsert preserves any existing region_id);
+        // the migration-150 string fallback + geocoding backfill catch those.
+        if ((normalized as any).lat != null && (normalized as any).lng != null) {
+          try {
+            const { data: rid } = await supabase.rpc("resolve_region", {
+              p_lat: (normalized as any).lat,
+              p_lng: (normalized as any).lng,
+            });
+            if (rid) (normalized as any).region_id = rid;
+          } catch (_e) {
+            // non-fatal — region can be backfilled later
+          }
+        }
 
         // Compute relevance tier based on source type and item quality
         const relevanceTier = computeRelevanceTier(sourceType, normalized, fieldNorm.normalized_confidence);

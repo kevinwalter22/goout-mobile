@@ -1,0 +1,27 @@
+diff --git a/node_modules/react-native-maps/ios/AirMaps/AIRMap.m b/node_modules/react-native-maps/ios/AirMaps/AIRMap.m
+index 07a4638..f4c7fb0 100644
+--- a/node_modules/react-native-maps/ios/AirMaps/AIRMap.m
++++ b/node_modules/react-native-maps/ios/AirMaps/AIRMap.m
+@@ -106,6 +106,11 @@ const NSInteger AIRMapMaxZoomLevel = 20;
+ - (void)insertReactSubview:(id<RCTComponent>)subview atIndex:(NSInteger)atIndex {
+     // Our desired API is to pass up markers/overlays as children to the mapview component.
+     // This is where we intercept them and do the appropriate underlying mapview action.
++    // New Architecture (Fabric) can call this with a nil subview or an index past the
++    // current subview count during a mounting transaction, which crashes with
++    // NSInvalidArgumentException / NSRangeException (react-native-maps#5345, expo#34614).
++    // Guard both.
++    if (subview == nil) { return; }
+     if ([subview isKindOfClass:[AIRMapMarker class]]) {
+         [self addAnnotation:(id <MKAnnotation>) subview];
+     } else if ([subview isKindOfClass:[AIRMapPolyline class]]) {
+@@ -135,7 +140,9 @@ const NSInteger AIRMapMaxZoomLevel = 20;
+             [self insertReactSubview:(UIView *)childSubviews[i] atIndex:atIndex];
+         }
+     }
+-    [_reactSubviews insertObject:(UIView *)subview atIndex:(NSUInteger) atIndex];
++    // Clamp the index so an out-of-range insert can never throw (see guard note above).
++    NSUInteger safeIndex = MIN((NSUInteger) MAX((NSInteger) 0, atIndex), _reactSubviews.count);
++    [_reactSubviews insertObject:(UIView *)subview atIndex:safeIndex];
+ }
+ #pragma clang diagnostic pop
+ 

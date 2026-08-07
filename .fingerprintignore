@@ -1,0 +1,8 @@
+# Generated native projects (managed / continuous-native-generation workflow).
+# These are produced by `expo prebuild` during the EAS build, so they exist when
+# EAS computes its verification fingerprint (post-prebuild) but NOT when the CI
+# runner computes the fingerprint (pre-prebuild). Excluding them keeps the
+# fingerprint identical on both sides. Native config still affects the
+# fingerprint via the config plugins + native dependencies, which ARE hashed.
+/ios
+/android

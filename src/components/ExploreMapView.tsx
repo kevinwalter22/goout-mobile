@@ -1,16 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Image, Pressable, Text, View } from "react-native";
-import MapView, { Marker, PROVIDER_DEFAULT } from "react-native-maps";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabase";
 import { Colors } from "../config/theme";
 import { useTheme } from "../contexts/ThemeContext";
-import { getDistanceInMeters, getDistanceInMiles, isLocationOverridden } from "../utils/location";
+import { getDistanceInMiles, isLocationOverridden } from "../utils/location";
 import { formatOpeningHours } from "../utils/formatOpeningHours";
 import { sanitizeTimeText } from "../utils/formatTimeText";
 import { regionToBbox, bboxContains, type MapRegion } from "../utils/mapViewport";
 import { getFallbackImage } from "../lib/categoryFallbackImages";
+import { MapboxPlacesMap } from "./MapboxPlacesMap";
+import { regionToZoom } from "../lib/mapClustering";
 import type { ExploreItem } from "../types/database";
 import type {
   KindFilter,
@@ -24,6 +25,8 @@ interface ExploreMapViewProps {
   items: ExploreItem[]; // Fallback items from parent
   userLocation: { lat: number; lng: number } | null;
   userId?: string;
+  /** Active region — hard-scopes map markers to the current metro. */
+  regionId?: string | null;
   // Filter props
   kindFilter: KindFilter;
   categories?: CategoryId[];
@@ -33,15 +36,28 @@ interface ExploreMapViewProps {
   tags?: string[];
 }
 
-// 7-day window for events
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+// Default map events horizon: 60 days (region-model decision A2). Only applies
+// when no explicit time filter is chosen; specific filters (today/this week/…)
+// still narrow it. Was 7 days, which made the events map look empty.
+const EVENT_HORIZON_MS = 60 * 24 * 60 * 60 * 1000;
 
-// Viewport-aware map: markers follow the visible region. Cap total markers so a
-// dense city view stays performant; beyond the county-scale ceiling we stop
-// querying and prompt the user to zoom in (no state-wide scans).
-const MAP_MAX_MARKERS = 250;
-const MAP_MAX_VIEWPORT_DELTA = 0.6; // latitude degrees (~40 mi) — zoom-out ceiling
-const MAP_REGION_DEBOUNCE_MS = 400;
+// Tier 3 map model (see docs/design/tier3_map_unification.md): fetch a whole
+// region ONCE, hold it in memory, and pick which emoji pins to render with an
+// Apple-Maps-style selection (mapClustering.selectVisiblePins) — notability
+// tiered by zoom + a collision grid — so zooming in reveals pins additively and
+// panning slides them in/out at the edges. No count bubbles, no per-marker
+// <Image>. A native react-native-maps patch (patches/) fixes the New-Arch marker
+// crash; this JS side keeps the rendered set small and stable.
+const FETCH_LIMIT = 2000; // per-region fetch ceiling (Portland ≈ 600, so full)
+// Far-guard for the no-region (pre-region-model, e.g. prod) path only: a metro
+// bbox scopes the fetch, and zooming out past this blanks rather than scanning a
+// whole state. With a region_id the fetch is already metro-bounded, no blank.
+const MAP_MAX_VIEWPORT_DELTA = 1.2; // latitude degrees
+const MAP_REGION_DEBOUNCE_MS = 350;
+// No-region fetch scope: a generous metro box around the viewport center, so
+// panning within a metro never refetches (only leaving it does).
+const METRO_SCOPE_HALF_LAT = 0.4; // ~28 mi
+const METRO_SCOPE_HALF_LNG = 0.5;
 
 function computeBoundingRegion(items: ExploreItem[]) {
   let minLat = 90;
@@ -70,98 +86,11 @@ function computeBoundingRegion(items: ExploreItem[]) {
   };
 }
 
-// Thumbnail marker component - memoized to prevent unnecessary re-renders
-// Note: We use identifier + onMarkerPress on MapView for reliable iOS tap handling
-const MARKER_SIZE = 40;
-
-const ThumbnailMarker = React.memo(
-  function ThumbnailMarker({
-    item,
-    isSelected,
-  }: {
-    item: ExploreItem;
-    isSelected: boolean;
-  }) {
-    const imageUrl = item.image_thumb_url || item.image_url;
-    const [imageError, setImageError] = useState(false);
-    const [imageLoaded, setImageLoaded] = useState(false);
-
-    // Brief settling period after selection change so native view can commit the update
-    const [settling, setSettling] = useState(false);
-    const prevSelected = useRef(isSelected);
-    useEffect(() => {
-      if (prevSelected.current !== isSelected) {
-        prevSelected.current = isSelected;
-        setSettling(true);
-        const timer = setTimeout(() => setSettling(false), 200);
-        return () => clearTimeout(timer);
-      }
-    }, [isSelected]);
-
-    // Default pin colors
-    const defaultColor = item.kind === "event" ? "#FF6B6B" : "#4A90D9";
-    const selectedColor = Colors.primary;
-
-    if (imageUrl && !imageError) {
-      return (
-        <Marker
-          identifier={item.id}
-          coordinate={{ latitude: item.lat!, longitude: item.lng! }}
-          anchor={{ x: 0.5, y: 0.5 }}
-          // Track view changes only while image loads or during selection transition
-          // Stable size (no resize) prevents flicker when deselecting
-          tracksViewChanges={!imageLoaded || settling}
-        >
-          <View
-            style={{
-              width: MARKER_SIZE,
-              height: MARKER_SIZE,
-              borderRadius: MARKER_SIZE / 2,
-              borderWidth: isSelected ? 3 : 2,
-              borderColor: isSelected ? selectedColor : "#fff",
-              backgroundColor: "#fff",
-              overflow: "hidden",
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.25,
-              shadowRadius: 4,
-              elevation: isSelected ? 6 : 4,
-            }}
-          >
-            <Image
-              source={{ uri: imageUrl }}
-              style={{ width: "100%", height: "100%" }}
-              resizeMode="cover"
-              onError={() => setImageError(true)}
-              onLoad={() => setImageLoaded(true)}
-            />
-          </View>
-        </Marker>
-      );
-    }
-
-    // Fallback to default pin - no custom view, no tracksViewChanges needed
-    return (
-      <Marker
-        identifier={item.id}
-        coordinate={{ latitude: item.lat!, longitude: item.lng! }}
-        pinColor={isSelected ? selectedColor : defaultColor}
-      />
-    );
-  },
-  // Custom comparison: only re-render if selection state or item id changes
-  (prevProps, nextProps) => {
-    return (
-      prevProps.item.id === nextProps.item.id &&
-      prevProps.isSelected === nextProps.isSelected
-    );
-  }
-);
-
 export function ExploreMapView({
   items: fallbackItems,
   userLocation,
   userId,
+  regionId,
   kindFilter,
   categories = [],
   priceBucket = "all",
@@ -170,7 +99,6 @@ export function ExploreMapView({
   tags = [],
 }: ExploreMapViewProps) {
   const { colors } = useTheme();
-  const mapRef = useRef<MapView>(null);
 
   // Track selected item ID separately for marker rendering optimization
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -203,8 +131,8 @@ export function ExploreMapView({
   // Generate a cache key from all filter values
   const filterCacheKey = useMemo(
     () =>
-      `${kindFilter}-${categories.join("+")}-${priceBucket}-${timeWindow}-${distance}-${tags.join(",")}-${userLocation ? "loc" : "noloc"}`,
-    [kindFilter, categories, priceBucket, timeWindow, distance, tags, userLocation]
+      `${kindFilter}-${categories.join("+")}-${priceBucket}-${timeWindow}-${distance}-${tags.join(",")}-${regionId ?? "noregion"}-${userLocation ? "loc" : "noloc"}`,
+    [kindFilter, categories, priceBucket, timeWindow, distance, tags, regionId, userLocation]
   );
 
   // Initial region calculation
@@ -294,23 +222,23 @@ export function ExploreMapView({
 
       try {
         const nowDate = new Date();
-        const sevenDaysLater = new Date(nowDate.getTime() + SEVEN_DAYS_MS);
+        const horizonEnd = new Date(nowDate.getTime() + EVENT_HORIZON_MS);
 
-        // Time window range (or default 7-day for events)
+        // Time window range (or the default 60-day horizon for events)
         const timeRange = getTimeWindowRange();
         const startDate = timeRange?.start || nowDate;
-        const endDate = timeRange?.end || sevenDaysLater;
+        const endDate = timeRange?.end || horizonEnd;
 
         // Category filter
         const categoryValues = getCategoryFilter();
 
-        // The map shows "what I'm looking at": the query is bounded by the
-        // visible viewport, which wins over the distance filter.
+        // The map shows the active metro. We fetch the whole scope ONCE and
+        // cluster client-side, so panning/zooming never refetch.
         const region = regionArg || regionRef.current || initialRegion;
 
-        // Zoom-out ceiling — above county scale we stop querying (no state-wide
-        // scans) and prompt the user to zoom in.
-        if (region.latitudeDelta > MAP_MAX_VIEWPORT_DELTA) {
+        // Far-guard for the no-region path only (pre-region-model, e.g. prod):
+        // don't scan a whole state. With a region_id the fetch is metro-bounded.
+        if (!regionId && region.latitudeDelta > MAP_MAX_VIEWPORT_DELTA) {
           setZoomedOut(true);
           setMapItems([]);
           lastFetchRef.current = null;
@@ -319,33 +247,48 @@ export function ExploreMapView({
         }
         setZoomedOut(false);
 
-        const bbox = regionToBbox(region);
+        // Fetch scope: the whole region (region_id path → a wide no-op box, the
+        // region_id filter does the bounding) or a generous metro box around the
+        // viewport center (no-region path).
+        const scope = regionId
+          ? { latMin: -90, latMax: 90, lngMin: -180, lngMax: 180 }
+          : {
+              latMin: region.latitude - METRO_SCOPE_HALF_LAT,
+              latMax: region.latitude + METRO_SCOPE_HALF_LAT,
+              lngMin: region.longitude - METRO_SCOPE_HALF_LNG,
+              lngMax: region.longitude + METRO_SCOPE_HALF_LNG,
+            };
 
-        // Containment skip: if the same filters already fetched a superset bbox
-        // that wasn't marker-capped, this (tighter) view is already covered.
+        // Skip the refetch when the same filters already loaded a scope that
+        // still covers the current viewport — panning within a metro re-clusters
+        // from memory instead of re-querying (this is what stops pins vanishing).
+        const viewportBbox = regionToBbox(region);
         if (
           lastFetchRef.current &&
           lastFetchRef.current.filterKey === filterCacheKey &&
-          !lastFetchRef.current.wasCapped &&
-          bboxContains(lastFetchRef.current.bbox, bbox)
+          bboxContains(lastFetchRef.current.bbox, viewportBbox)
         ) {
           setLoading(false);
           return;
         }
 
-        // Bound any query to the visible viewport.
+        // Bound the query to the fetch scope.
         const applyBbox = (q: any) =>
           q
-            .gte("lat", bbox.latMin)
-            .lte("lat", bbox.latMax)
-            .gte("lng", bbox.lngMin)
-            .lte("lng", bbox.lngMax);
+            .gte("lat", scope.latMin)
+            .lte("lat", scope.latMax)
+            .gte("lng", scope.lngMin)
+            .lte("lng", scope.lngMax);
 
         let events: ExploreItem[] = [];
         let activities: ExploreItem[] = [];
 
         // Helper to apply common filters to a query
         const applyFilters = (query: any) => {
+          // Hard region boundary — the map only shows the active metro's items.
+          if (regionId) {
+            query = query.eq("region_id", regionId);
+          }
           // Price bucket
           if (priceBucket !== "all") {
             query = query.eq("price_bucket", priceBucket);
@@ -391,7 +334,7 @@ export function ExploreMapView({
             .or(reviewStatusFilter);
 
           eventQuery = applyFilters(applyBbox(eventQuery));
-          const { data: eventData } = await eventQuery.limit(MAP_MAX_MARKERS);
+          const { data: eventData } = await eventQuery.limit(FETCH_LIMIT);
 
           // 2. Recurring items without starts_at (e.g., weekly wing night, trivia)
           //    These have schedule_text or recurrence but no concrete date,
@@ -415,9 +358,9 @@ export function ExploreMapView({
           }
 
           recurringQuery = applyFilters(applyBbox(recurringQuery));
-          const { data: recurringData } = await recurringQuery.limit(MAP_MAX_MARKERS);
+          const { data: recurringData } = await recurringQuery.limit(FETCH_LIMIT);
 
-          // Viewport already bounds these; no client-side distance filter.
+          // Scope already bounds these; clustering + LOD decide what renders.
           events = [...(eventData || []), ...(recurringData || [])];
         }
 
@@ -435,9 +378,12 @@ export function ExploreMapView({
             .or("review_status.is.null,review_status.in.(auto_approved,approved)");
 
           activityQuery = applyFilters(applyBbox(activityQuery));
-          // Over-fetch beyond the marker cap so the proximity sort below has room
-          // to pick the best markers across the viewport.
-          const { data: activityData } = await activityQuery.limit(MAP_MAX_MARKERS * 3);
+          // Order by notability so that if a region ever exceeds FETCH_LIMIT we
+          // keep the most notable items (notability_score isn't in the stale
+          // generated types yet — cast the column name).
+          const { data: activityData } = await activityQuery
+            .order("notability_score" as any, { ascending: false, nullsFirst: false })
+            .limit(FETCH_LIMIT);
           activities = activityData || [];
         }
 
@@ -450,31 +396,17 @@ export function ExploreMapView({
           return true;
         });
 
-        // Cap total markers. Events first (time-bounded and fewer, so they're
-        // never crowded out), then activities by priority, then proximity to the
-        // viewport center.
-        const centerLat = region.latitude;
-        const centerLng = region.longitude;
-        deduped.sort((a, b) => {
-          const ae = a.kind === "event" ? 0 : 1;
-          const be = b.kind === "event" ? 0 : 1;
-          if (ae !== be) return ae - be;
-          const ap = a.priority ?? 0;
-          const bp = b.priority ?? 0;
-          if (ap !== bp) return bp - ap;
-          const ad = getDistanceInMeters(centerLat, centerLng, a.lat!, a.lng!);
-          const bd = getDistanceInMeters(centerLat, centerLng, b.lat!, b.lng!);
-          return ad - bd;
-        });
-        const wasCapped = deduped.length > MAP_MAX_MARKERS;
-        setMapItems(wasCapped ? deduped.slice(0, MAP_MAX_MARKERS) : deduped);
+        // Hold the whole scope in memory; Supercluster + the zoom LOD decide
+        // what actually renders. No proximity cap here — that's what made pins
+        // vanish when the viewport center moved during a pan.
+        setMapItems(deduped);
 
-        // Update cache (bbox + cap state drive the containment-skip above).
+        // Remember the scope we fetched so panning within it skips the refetch.
         lastFetchRef.current = {
           filterKey: filterCacheKey,
           timestamp: now,
-          bbox,
-          wasCapped,
+          bbox: scope,
+          wasCapped: deduped.length >= FETCH_LIMIT,
         };
       } catch (err) {
         console.error("[ExploreMapView] Fetch error:", err);
@@ -489,6 +421,7 @@ export function ExploreMapView({
       filterCacheKey,
       kindFilter,
       userId,
+      regionId,
       fallbackItems,
       getTimeWindowRange,
       getCategoryFilter,
@@ -503,17 +436,24 @@ export function ExploreMapView({
     fetchMapItems(regionRef.current ?? undefined);
   }, [filterCacheKey]);
 
-  // Debounced refetch as the user pans/zooms the map. The map is "what I'm
-  // looking at", so the visible region drives the query.
+  // On pan/zoom end (from Mapbox): refetch only when the viewport has left the
+  // already-fetched scope. Rendering/LOD is handled natively by Mapbox now, so
+  // this is purely the data-fetch trigger.
   const handleRegionChangeComplete = useCallback(
     (newRegion: MapRegion) => {
       regionRef.current = newRegion;
+      const vb = regionToBbox(newRegion);
+      const covered =
+        lastFetchRef.current &&
+        lastFetchRef.current.filterKey === filterCacheKey &&
+        bboxContains(lastFetchRef.current.bbox, vb);
+      if (covered) return;
       if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
       regionDebounceRef.current = setTimeout(() => {
         fetchMapItems(newRegion);
       }, MAP_REGION_DEBOUNCE_MS);
     },
-    [fetchMapItems]
+    [fetchMapItems, filterCacheKey]
   );
 
   // Clear any pending debounce on unmount.
@@ -536,13 +476,14 @@ export function ExploreMapView({
     [selectedItemId, mappableItems]
   );
 
-  // Animate preview card in/out
+  // Animate preview card in/out. A short timing curve (not a spring) keeps the
+  // card feeling instant on tap — combined with the always-mounted selection
+  // ring in MapboxPlacesMap, selecting a place is snappy now.
   useEffect(() => {
-    Animated.spring(previewAnim, {
+    Animated.timing(previewAnim, {
       toValue: selectedItem ? 1 : 0,
+      duration: selectedItem ? 160 : 120,
       useNativeDriver: true,
-      tension: 100,
-      friction: 10,
     }).start();
   }, [selectedItem, previewAnim]);
 
@@ -550,6 +491,16 @@ export function ExploreMapView({
   const selectItem = useCallback((item: ExploreItem | null) => {
     setSelectedItemId(item?.id || null);
   }, []);
+
+  // Map id -> item, for marker taps and the preview card.
+  const itemById = useMemo(() => {
+    const m = new Map<string, ExploreItem>();
+    for (const it of mappableItems) m.set(it.id, it);
+    return m;
+  }, [mappableItems]);
+
+  // (Marker selection + rendering now live in MapboxPlacesMap, which aggregates
+  // `mappableItems` into places and renders them with a native symbol layer.)
 
   // Format helpers
   function formatDistance(item: ExploreItem): string | null {
@@ -600,55 +551,19 @@ export function ExploreMapView({
 
   return (
     <View style={{ flex: 1 }}>
-      <MapView
-        ref={mapRef}
-        style={{ flex: 1 }}
-        provider={PROVIDER_DEFAULT}
-        initialRegion={initialRegion}
-        onRegionChangeComplete={handleRegionChangeComplete}
-        showsUserLocation={!isLocationOverridden()}
-        showsMyLocationButton={!isLocationOverridden()}
-        onPress={() => selectItem(null)}
-        onMarkerPress={(e) => {
-          // Use identifier from marker for reliable iOS tap handling
-          const markerId = e.nativeEvent?.id;
-          if (markerId) {
-            const item = mappableItems.find((i) => i.id === markerId);
-            if (item) {
-              selectItem(item);
-            }
-          }
-        }}
-      >
-        {mappableItems.map((item) => (
-          <ThumbnailMarker
-            key={item.id}
-            item={item}
-            isSelected={selectedItemId === item.id}
-          />
-        ))}
-        {/* Custom "You are here" dot for review account (native blue dot disabled) */}
-        {isLocationOverridden() && userLocation && (
-          <Marker
-            coordinate={{ latitude: userLocation.lat, longitude: userLocation.lng }}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
-            <View style={{
-              width: 20,
-              height: 20,
-              borderRadius: 10,
-              backgroundColor: "#007AFF",
-              borderWidth: 3,
-              borderColor: "#fff",
-              shadowColor: "#007AFF",
-              shadowOffset: { width: 0, height: 0 },
-              shadowOpacity: 0.4,
-              shadowRadius: 4,
-              elevation: 3,
-            }} />
-          </Marker>
-        )}
-      </MapView>
+      {/* Native Mapbox symbol-layer map over the place aggregation (one pin per
+          venue; native collision + LOD; no per-marker views). */}
+      <MapboxPlacesMap
+        items={mappableItems}
+        initialCenter={{ lat: initialRegion.latitude, lng: initialRegion.longitude }}
+        initialZoom={regionToZoom(initialRegion)}
+        selectedItemId={selectedItemId}
+        userLocation={userLocation}
+        showUserDot={isLocationOverridden()}
+        onRegionChange={handleRegionChangeComplete}
+        onSelectItem={selectItem}
+        itemById={itemById}
+      />
 
       {/* Zoom-out ceiling: prompt to zoom in rather than scan a whole state */}
       {zoomedOut && (

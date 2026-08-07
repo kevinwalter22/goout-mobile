@@ -68,7 +68,7 @@ export interface UseExploreFiltersReturn {
 
 export function useExploreFilters(
   userLocation?: { lat: number; lng: number } | null,
-  options?: { pageSizeOverride?: number }
+  options?: { pageSizeOverride?: number; regionId?: string | null }
 ): UseExploreFiltersReturn {
   const { user } = useAuth();
 
@@ -114,7 +114,8 @@ export function useExploreFilters(
           supabase,
           queryFilters,
           userLocation,
-          user?.id
+          user?.id,
+          options?.regionId ?? null
         );
 
         // Check if this is still the latest query
@@ -184,7 +185,7 @@ export function useExploreFilters(
         }
       }
     },
-    [userLocation, options?.pageSizeOverride]
+    [userLocation, options?.pageSizeOverride, options?.regionId]
   );
 
   // ========================================
@@ -247,6 +248,17 @@ export function useExploreFilters(
     prevPageSizeOverrideRef.current = pageSizeOverride;
     executeQuery({ ...filtersRef.current, page: 0 }, false);
   }, [pageSizeOverride, executeQuery]);
+
+  // Re-fetch when the active region changes (user switched metro, or GPS
+  // resolved a region). Reset to page 0 so the new metro loads from the top.
+  const regionId = options?.regionId;
+  const prevRegionIdRef = useRef<string | null | undefined>(regionId);
+  useEffect(() => {
+    if (!hasLoadedRef.current) return; // initial load handles first fetch
+    if (regionId === prevRegionIdRef.current) return;
+    prevRegionIdRef.current = regionId;
+    executeQuery({ ...filtersRef.current, page: 0 }, false);
+  }, [regionId, executeQuery]);
 
   // ========================================
   // Filter update helper

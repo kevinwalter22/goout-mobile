@@ -1,7 +1,7 @@
 import { Component, useEffect, useRef, useState } from "react";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { Alert, Platform, Pressable, Text, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthProvider } from "../src/contexts/AuthContext";
@@ -10,7 +10,8 @@ import { ToastProvider } from "../src/context/ToastContext";
 import { ThemeProvider, useTheme } from "../src/contexts/ThemeContext";
 import { validateEnv, Env } from "../src/config/env";
 import { initSentry, SentryWrap } from "../src/lib/sentry";
-import { captureWarning } from "../src/lib/logger";
+import { captureWarning, captureError } from "../src/lib/logger";
+import { logClientError } from "../src/lib/clientErrorLog";
 import { SwipeableBackGesture } from "../src/components/SwipeableBackGesture";
 import {
   registerForPushNotifications,
@@ -30,6 +31,23 @@ import {
 
 // Initialize Sentry before any component renders
 initSentry();
+
+// DIAGNOSTIC: capture ANY uncaught JS error (incl. async errors that React
+// error boundaries never see) to the client_error_log table so we can read the
+// real crash server-side. Chains to the previous handler (Sentry's) so nothing
+// is lost. Guarded so installing the handler can never itself crash startup.
+try {
+  const EU: any = (globalThis as any).ErrorUtils;
+  if (EU && typeof EU.setGlobalHandler === "function") {
+    const prev = typeof EU.getGlobalHandler === "function" ? EU.getGlobalHandler() : null;
+    EU.setGlobalHandler((err: any, isFatal?: boolean) => {
+      logClientError(isFatal ? "global_fatal" : "global_error", err, { isFatal: !!isFatal });
+      if (typeof prev === "function") prev(err, isFatal);
+    });
+  }
+} catch {
+  /* ignore */
+}
 
 function ThemedStack() {
   const { colors, effectiveMode } = useTheme();
@@ -232,7 +250,19 @@ function NotificationInitializer() {
   return null;
 }
 
-function FallbackScreen({ onRetry }: { onRetry?: () => void }) {
+function FallbackScreen({
+  onRetry,
+  error,
+  info,
+}: {
+  onRetry?: () => void;
+  error?: Error | null;
+  info?: string | null;
+}) {
+  // Surface the real error on non-prod builds so crashes are diagnosable
+  // on-device (staging is our safety net; we should never be blind to a crash).
+  // Prod keeps the friendly generic message.
+  const showDetails = Env.APP_ENV !== "prod" && !!(error || info);
   return (
     <View
       style={{
@@ -262,6 +292,26 @@ function FallbackScreen({ onRetry }: { onRetry?: () => void }) {
       <Text style={{ fontSize: 15, color: "#666", textAlign: "center", lineHeight: 22 }}>
         Euda ran into an unexpected error. Your data is safe — tap below to try again.
       </Text>
+      {showDetails && (
+        <ScrollView
+          style={{
+            alignSelf: "stretch",
+            maxHeight: 260,
+            backgroundColor: "#FEF2F2",
+            borderColor: "#FCA5A5",
+            borderWidth: 1,
+            borderRadius: 8,
+            padding: 10,
+          }}
+        >
+          <Text selectable style={{ fontSize: 11, color: "#991B1B", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace" }}>
+            {String(error?.message ?? error ?? "unknown error")}
+            {"\n\n"}
+            {(error?.stack ?? "").slice(0, 1400)}
+            {info ? "\n\n---- component stack ----\n" + info.slice(0, 1200) : ""}
+          </Text>
+        </ScrollView>
+      )}
       {onRetry && (
         <Pressable
           onPress={onRetry}
@@ -284,18 +334,35 @@ function FallbackScreen({ onRetry }: { onRetry?: () => void }) {
 
 class AppErrorBoundary extends Component<
   { children: React.ReactNode },
-  { hasError: boolean }
+  { hasError: boolean; error: Error | null; info: string | null }
 > {
-  state = { hasError: false };
+  state = { hasError: false, error: null as Error | null, info: null as string | null };
 
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: { componentStack?: string }) {
+    // Report to Sentry + the readable client_error_log table, and stash the
+    // component stack for the on-screen (non-prod) detail view.
+    captureError(error, {
+      action: "AppErrorBoundary",
+      componentStack: (errorInfo?.componentStack ?? "").slice(0, 2000),
+    });
+    logClientError("error_boundary", error, {
+      componentStack: errorInfo?.componentStack ?? "",
+    });
+    this.setState({ info: errorInfo?.componentStack ?? null });
   }
 
   render() {
     if (this.state.hasError) {
       return (
-        <FallbackScreen onRetry={() => this.setState({ hasError: false })} />
+        <FallbackScreen
+          error={this.state.error}
+          info={this.state.info}
+          onRetry={() => this.setState({ hasError: false, error: null, info: null })}
+        />
       );
     }
     return this.props.children;

@@ -15,6 +15,7 @@
       "distribution": "store",
       "channel": "staging",
       "autoIncrement": true,
+      "environment": "preview",
       "env": {
         "EXPO_PUBLIC_APP_ENV": "staging",
         "EXPO_PUBLIC_SUPABASE_URL": "https://baulipaydofqtkihkghj.supabase.co",
@@ -26,6 +27,7 @@
     "production": {
       "autoIncrement": true,
       "channel": "production",
+      "environment": "production",
       "env": {
         "EXPO_PUBLIC_APP_ENV": "prod",
         "EXPO_PUBLIC_SUPABASE_URL": "https://lkmntknpaiaiqvupzjbz.supabase.co",

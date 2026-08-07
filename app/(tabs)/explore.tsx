@@ -27,6 +27,8 @@ import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { FilterSheet } from "../../src/components/FilterSheet";
 import { ExploreMapView } from "../../src/components/ExploreMapView";
+import { useRegion } from "../../src/hooks/useRegion";
+import { RegionPicker } from "../../src/components/RegionPicker";
 import { GroupedExploreFeed } from "../../src/components/GroupedExploreFeed";
 import { ViewModeToggle, type ViewMode } from "../../src/components/ViewModeToggle";
 import { processPostableNow } from "../../src/lib/postableNow";
@@ -407,6 +409,9 @@ export default function Explore() {
 
   // User location (for Postable Now feature)
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  // True once the first live-GPS attempt has settled (granted+resolved, denied,
+  // or errored). Gates the region picker so GPS is always tried first.
+  const [locationSettled, setLocationSettled] = useState(false);
 
   // Engagement-log session id (lazy-minted via getSessionId on mount; survives
   // app idle <30min; resets after). Threaded into every engagement event so
@@ -441,6 +446,16 @@ export default function Explore() {
   // Item suppressions ("Not Interested")
   const { suppressedIds, suppressItem } = useItemSuppressions(user?.id);
 
+  // Active region (metro). Hard-scopes the feed to ONE region; the server
+  // enforces the boundary via region_id, this just decides which region.
+  const {
+    regions,
+    activeRegion,
+    activeRegionId,
+    setRegion,
+    needsPicker,
+  } = useRegion(userLocation, { locationSettled });
+
   // Use the recommender hook (wraps useExploreFilters with scoring)
   const {
     filters,
@@ -467,6 +482,7 @@ export default function Explore() {
   } = useRecommender(userLocation, {
     enableScoring: true,
     pageSizeOverride: viewMode === "cards" ? 200 : undefined,
+    regionId: activeRegionId,
   });
 
   // Listen for scroll-to-top events
@@ -545,6 +561,11 @@ export default function Explore() {
       void saveLastKnownLocation(next);
     } catch (error) {
       console.log("[Explore] Could not get location:", error);
+    } finally {
+      // Mark the GPS attempt as settled (granted+resolved, denied, or errored).
+      // The region picker only appears AFTER this — so live GPS always gets the
+      // first attempt and the picker is a true fallback, never the default.
+      setLocationSettled(true);
     }
   }, []);
 
@@ -584,18 +605,22 @@ export default function Explore() {
     async function fetchPostableNowCandidates() {
       if (!userLocation) return;
 
-      const { data } = await supabase
+      let q = supabase
         .from("explore_items")
         .select("*")
         .is("deleted_at", null)
         .not("lat", "is", null)
         .not("lng", "is", null);
+      // Hard region boundary — postable-now must respect the active metro too.
+      if (activeRegionId) q = q.eq("region_id", activeRegionId);
+
+      const { data } = await q;
 
       setPostableNowCandidates(data || []);
     }
 
     fetchPostableNowCandidates();
-  }, [userLocation, postableNowVersion]);
+  }, [userLocation, postableNowVersion, activeRegionId]);
 
   // Load friends list once
   useEffect(() => {
@@ -979,6 +1004,18 @@ export default function Explore() {
         )}
       </View>
 
+      {/* Region (metro) switcher — hard-scopes the feed to one city. Opens
+          locked when no region is resolvable so the feed is never unscoped. */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 8, backgroundColor: colors.background }}>
+        <RegionPicker
+          regions={regions}
+          activeRegion={activeRegion}
+          onSelect={setRegion}
+          forceOpen={needsPicker}
+          hasLocation={!!userLocation}
+        />
+      </View>
+
       {/* Action Bar: Kind filter pills + View mode icons + Filter button */}
       <View
         style={{
@@ -1135,6 +1172,7 @@ export default function Explore() {
           items={orderedItems}
           userLocation={userLocation}
           userId={user?.id}
+          regionId={activeRegionId}
           kindFilter={effectiveFilters.kindFilter}
           categories={effectiveFilters.categories}
           priceBucket={effectiveFilters.priceBucket}

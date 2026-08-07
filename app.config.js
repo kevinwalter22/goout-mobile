@@ -10,20 +10,36 @@
 // unchanged unless this is a staging build.
 
 module.exports = ({ config }) => {
+  // Inject the Mapbox config plugin with NO options so this config is fully
+  // deterministic — nothing here reads process.env. That matters because
+  // runtimeVersion uses the fingerprint policy: any env-dependent value in the
+  // Expo config (e.g. the old `RNMapboxMapsDownloadToken: process.env...`) makes
+  // the fingerprint differ between the CI runner (no secret) and the EAS build
+  // server (has the secret) → "runtime version mismatch" build failure.
+  //
+  // The SECRET download token is instead supplied to pod install / gradle via the
+  // `RNMAPBOX_MAPS_DOWNLOAD_TOKEN` environment variable (EAS secret / .env.local),
+  // which the @rnmapbox/maps podspec + gradle read directly. The public runtime
+  // token is EXPO_PUBLIC_MAPBOX_TOKEN.
+  const base = {
+    ...config,
+    plugins: [...(config.plugins || []), "@rnmapbox/maps"],
+  };
+
   if (process.env.EXPO_PUBLIC_APP_ENV !== "staging") {
-    return config; // production + local dev: identical to app.json
+    return base; // production + local dev
   }
 
   return {
-    ...config,
+    ...base,
     name: "Euda (Staging)",
     scheme: "euda-staging",
     ios: {
-      ...config.ios,
+      ...base.ios,
       bundleIdentifier: "com.euda.app.staging",
     },
     android: {
-      ...config.android,
+      ...base.android,
       package: "com.euda.app.staging",
     },
   };
