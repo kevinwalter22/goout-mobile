@@ -148,21 +148,6 @@ export function MapboxPlacesMap({
           }}
         />
 
-        {/* Selection ring — always mounted, empty until a pin is tapped. Sized to
-            sit just outside the ~36pt pin. */}
-        <ShapeSource id="selected-place" shape={selectedShape}>
-          <CircleLayer
-            id="selected-ring"
-            style={{
-              circleRadius: 24,
-              circleColor: "rgba(124,58,237,0.12)",
-              circleStrokeColor: Colors.primaryDark,
-              circleStrokeWidth: 3,
-              circlePitchAlignment: "map",
-            }}
-          />
-        </ShapeSource>
-
         <ShapeSource id="places" shape={fc} onPress={handlePlacePress}>
           {/* One symbol per place: emoji-disc icon + optional event-count badge.
               iconAllowOverlap:false is the native collision that de-clutters when
@@ -191,6 +176,46 @@ export function MapboxPlacesMap({
               textOffset: [0.9, -0.9],
               textAllowOverlap: true,
               textOptional: true,
+            }}
+          />
+        </ShapeSource>
+
+        {/* Selection layer — always mounted (empty until a pin is tapped), drawn
+            ON TOP of the places layer. It carries BOTH the ring AND the selected
+            pin with collision disabled, so the selected place stays put when you
+            zoom out even if it would otherwise be collision-dropped. Deselecting
+            empties the shape, so the pin then follows normal collision again. */}
+        <ShapeSource id="selected-place" shape={selectedShape}>
+          <CircleLayer
+            id="selected-ring"
+            style={{
+              circleRadius: 24,
+              circleColor: "rgba(124,58,237,0.12)",
+              circleStrokeColor: Colors.primaryDark,
+              circleStrokeWidth: 3,
+              circlePitchAlignment: "map",
+            }}
+          />
+          <SymbolLayer
+            id="selected-pin"
+            style={{
+              iconImage: ["get", "icon"],
+              iconSize: 0.5,
+              iconAllowOverlap: true,
+              iconIgnorePlacement: true,
+              textField: [
+                "case",
+                [">", ["get", "count"], 1],
+                ["to-string", ["get", "count"]],
+                "",
+              ],
+              textSize: 11,
+              textColor: "#ffffff",
+              textHaloColor: Colors.primaryDark,
+              textHaloWidth: 2,
+              textOffset: [0.9, -0.9],
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
             }}
           />
         </ShapeSource>
