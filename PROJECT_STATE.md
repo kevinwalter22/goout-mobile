@@ -104,9 +104,8 @@ When something significant is decided — by Kevin, by Claude, or jointly — it
 > **✅ PROD PROMOTION COMPLETE (08/07/2026) — `v1.0.0-prod.18`.** The full batch is live on production, shipped through the gated pipeline (Kevin approved the `Production` gate). Sequence: `feat/map-emoji-icons` → staging (native build #27, embedded emoji map, Kevin clean-install validated + tap-accuracy fix) → `staging → main` (PR #99) → `deploy-production #18`.
 > - **Applied to prod:** migrations **150 (region model) + 151 (client_error_log) + 152 (recurrence collapse)** on the prod DB; all edge functions redeployed (incl. the **geocode fix**); prod app **build #32** (build-only). Prod DB was at 149; now 152.
 > - **Prod build #32 verified** via `.ipa` grep: **prod key `sb_publishable_mxVui…` present, staging key absent, prod URL `lkmntkn…`, `Euda.app` (prod bundle), 40 emoji pins embedded.** The env-isolation fix is confirmed correct in BOTH directions (staging build → staging key; prod build → prod key).
-> - **⏳ PENDING (both Kevin's call, not yet done):**
->   1. **Prod geocode/coord backfill** — **153 of 254 upcoming prod events are missing coords** (won't show on the map until backfilled). New events geocode automatically now; this is a one-time fix for the backlog. Two-pass (inherit co-located coords free → geocode the rest via Places API New; realistically a few dozen calls, **< $5**). **Tier 3 prod data write — awaiting Kevin's go.**
->   2. **App Store submit** — build #32 is build-only; pushing it to the App Store/TestFlight is the separate manual gated `submit-production` step. Kevin's timing.
+> - **✅ Prod geocode backfill DONE (08/10/2026).** Upcoming-event coord coverage **~40% → 98.8% (239/242)**. These events had no `address` — only `town` (+ occasionally `location_name`), so we geocoded by `location_name`/`title + town` via Places API (New) searchText, **restricted to each event's metro bounding box** (Portland ME / Potsdam NY / Hudson Valley) so ambiguous towns can't misplace (e.g. "Writers Group, Potsdam" → SUNY Potsdam, NOT Potsdam Germany). 74/77 placed in two passes; **3 vague-title events left unplaced (correct — no resolvable venue).** Write was via the Supabase Management API (mgmt token, not a service-role key); idempotent, only filled missing lat/lng. Script: `scratchpad/prod_geocode_backfill.mjs`.
+> - **⏳ App Store submit — dispatched, WAITING at the Production gate for Kevin.** `submit-production` run #1 is paused; on approval it `eas submit`s prod build #32 to TestFlight/App Store. (Separate from the build; Kevin's approval + timing.)
 >
 > **Infra note (08/06):** a GitHub Actions runner-capacity outage (~17:50) starved every job for ~7h; recovered ~00:53 on 08/07 (scheduled monitors green since). One zombie **Deploy #61** is stuck `queued` in a state the API won't cancel — harmless; the next staging deploy supersedes it via the concurrency group. During the outage the map OTA/build went out **directly on EAS** (bypasses GitHub runners), grep-verified.
 >
@@ -554,9 +553,9 @@ Per-crawl cost is **$0.027** (above design doc's $0.005 estimate). Monthly proje
 - `docs/llm_extraction_design.md §C` — updated to reflect the chain filter and the corrected `relevance_tier >= 2` anchor (the original `venue_score >= 3` referenced a column that was never built).
 
 ### In flight
-- **Prod geocode backfill (pending Kevin's go)** — 153/254 upcoming prod events missing coords. Two-pass (inherit co-located coords → geocode rest via Places API New). Tier 3 prod data write, < $5. Not started.
-- **App Store submit of prod build #32 (pending Kevin's timing)** — separate manual gated `submit-production` step.
-- `feat/map-emoji-icons` — fully merged to `staging` (PR #98) and to prod via `staging→main` (PR #99). Local branch may sit 1 doc-commit ahead (this PROJECT_STATE update); syncs on next promotion.
+- **App Store submit of prod build #32** — `submit-production` run #1 **dispatched, waiting at the Production gate** for Kevin. On approval → `eas submit` #32 to TestFlight/App Store.
+- **Prod geocode backfill: ✅ DONE (08/10)** — 98.8% upcoming-event coord coverage; metro-restricted geocoding; 3 vague events unplaced. (Not a live task; recorded for history.)
+- `feat/map-emoji-icons` — fully merged to `staging` (PR #98) and to prod via `staging→main` (PR #99). Local branch sits a couple doc-commits ahead (PROJECT_STATE updates); syncs on next promotion.
 - Zombie **Deploy #61** stuck `queued` (GitHub-side, uncancellable via API) — superseded by later staging deploys; ignore.
 
 ### Disabled / Feature-flagged
