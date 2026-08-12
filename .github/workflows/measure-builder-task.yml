@@ -1,0 +1,123 @@
+name: Measure · Builder task (quota probe)
+
+# One-shot harness for "what does one builder task cost against the weekly Max
+# pool". Triggered by pushing a branch:
+#   * measure/smoke — proves the toolchain (Expo web export + Playwright
+#     screenshot) works in CI. Runs NO Claude → ZERO subscription quota.
+#   * measure/run   — the real measurement: Claude implements a representative
+#     Tier-1/2 fix (QUALITY_AUDIT F5/2b), self-tests (typecheck + unit + web
+#     export + Playwright screenshot), iterates, and opens a PR. Runs on the Max
+#     SUBSCRIPTION via CLAUDE_CODE_OAUTH_TOKEN — never ANTHROPIC_API_KEY.
+#
+# The pool-% number is read from Kevin's /status meter bracketing the measure/run
+# push. This harness reports wall-clock + the opened PR (visible iteration
+# commits) + whatever usage the action surfaces in the run log.
+
+on:
+  push:
+    branches: [measure/smoke, measure/run]
+
+concurrency:
+  group: measure-builder
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      EXPO_PUBLIC_APP_ENV: staging
+      EXPO_PUBLIC_SUPABASE_URL: https://${{ secrets.SUPABASE_STAGING_PROJECT_REF }}.supabase.co
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_STAGING_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Install Playwright chromium (deterministic, no quota)
+        run: |
+          npm i --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Toolchain smoke — expo web export + screenshot
+        id: smoke
+        run: bash .github/scripts/measure_smoke.sh
+
+      - name: Upload artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: measure-${{ github.ref_name == 'measure/run' && 'run' || 'smoke' }}
+          path: measure-artifacts/
+          if-no-files-found: ignore
+
+      - name: Record start
+        if: ${{ github.ref_name == 'measure/run' && steps.smoke.outcome == 'success' }}
+        run: echo "MEASURE_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Claude — implement + self-test + open PR (SUBSCRIPTION)
+        if: ${{ github.ref_name == 'measure/run' && steps.smoke.outcome == 'success' }}
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are a Euda builder agent running a ONE-OFF, measured task. Implement
+            one real Tier 1–2 fix end to end, self-test it, and open a PR. Work like
+            the overnight builder would: implement, test, iterate, ship a PR.
+
+            TASK (docs/QUALITY_AUDIT.md, Finding F5 / fix 2b): niche card groups
+            need too many items to appear, so the grouped explore feed collapses to
+            a few broad groups and feels random. Add a per-group minimum-items
+            override so niche groups can surface with fewer items.
+            - Add an optional `minItems` field to the GroupDefinition type and honor
+              it in the grouping engine (fall back to the existing global minimum
+              when unset). Grep src/ for GroupDefinition / minItemsPerGroup /
+              groupingEngine / groupTaxonomy to find the exact files.
+            - Set `minItems: 2` for niche groups (e.g. date_night, pet_friendly,
+              volunteer) in the group taxonomy.
+            - Keep it minimal and behavior-preserving for groups without an
+              override. Presentation change only — do NOT touch auth, RLS, schema,
+              or the geo+time invariant.
+
+            SELF-TEST (run these; iterate until green):
+            1. npm run typecheck
+            2. npm test  (add/adjust a unit test for the grouping engine proving a
+               niche group with 2 items now surfaces where it previously wouldn't).
+            3. npx expo export --platform web   (must succeed).
+            4. npx --yes serve -s dist -l 8080 &   then
+               node scripts/measure/screenshot.mjs http://localhost:8080 measure-artifacts/after.png
+               (prove the app still renders after the change).
+
+            THEN commit on a new branch and open a PR to `staging` titled
+            "fix(feed): per-group minItems so niche groups surface (QUALITY_AUDIT F5/2b)".
+            Do NOT merge and do NOT deploy — prod stays gated.
+
+            CONSTRAINTS: Tier 1–2 only. If the change would require touching
+            auth/RLS/schema, stop and explain in the PR body instead. If you run low
+            on turns, open the PR with whatever is green and note remaining work.
+          claude_args: >-
+            --model opus
+            --max-turns 60
+            --allowedTools "Read,Grep,Glob,Edit,Write,Bash"
+
+      - name: Record end + wall-clock
+        if: ${{ github.ref_name == 'measure/run' && always() }}
+        run: |
+          END=$(date +%s)
+          START=${MEASURE_START:-$END}
+          MINS=$(( (END - START) / 60 ))
+          mkdir -p measure-artifacts
+          echo "Builder measurement wall-clock: ${MINS} min" | tee measure-artifacts/wallclock.txt
+          echo "Read /status now for the pool delta; see run log for Claude usage/turns and the opened PR for the diff + iteration commits." >> measure-artifacts/wallclock.txt
