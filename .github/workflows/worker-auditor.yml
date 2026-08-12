@@ -1,0 +1,110 @@
+name: Chief · Auditor (weekly)
+
+# Phase A read-worker. Scores the catalog against the North Star (Level-1 item
+# gate + Level-2 per-category scorecard) and reports the week-over-week
+# curation-quality delta + "what to fix first" to #euda-chief. Report-only:
+# contents:read, no commits, no PRs.
+#
+# Runs on Kevin's Max SUBSCRIPTION via CLAUDE_CODE_OAUTH_TOKEN — never alongside
+# ANTHROPIC_API_KEY (which would shadow it into pay-per-token). Inert until both
+# CLAUDE_CODE_OAUTH_TOKEN and SLACK_CHIEF_WEBHOOK_URL exist. GitHub runs
+# scheduled workflows only from the default branch, so the weekly cron activates
+# once this is merged to main; use "Run workflow" (workflow_dispatch) to test.
+
+on:
+  schedule:
+    - cron: "0 12 * * 1" # Mondays 12:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: worker-auditor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  auditor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Heartbeat — start
+        env:
+          SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
+        run: node scripts/worker_slack.mjs start auditor "Weekly curation-quality audit"
+
+      - name: Gather health + curation scorecard (prod, read-only)
+        env:
+          REF: ${{ secrets.SUPABASE_PROD_PROJECT_REF }}
+          KEY: ${{ secrets.SUPABASE_PROD_SERVICE_ROLE_KEY }}
+        run: bash .github/scripts/gather_audit_inputs.sh
+
+      - name: Claude — write the chief audit report
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are Euda's weekly Quality Auditor — a read-only chief-engineer
+            worker. You do not change code or data; you produce one report.
+
+            READ FIRST:
+            - data_quality_north_star.md — the standard you score against
+              (Level-1 item gate: notability/completeness/accuracy; Level-2
+              per-category scorecard: coverage/ranking/presentation/depth).
+            - ./audit-inputs/*.json — already fetched for you:
+              audit-curation-quality.json holds the deterministic scorecard as
+              { current, previous } for a week-over-week delta; the monitor-*
+              and health-summary files add pipeline/budget/error signal. Some
+              files may be missing or hold an HTTP/error note (e.g.
+              audit-curation-quality 404s until the prod deploy lands) — say so
+              plainly; never invent numbers.
+
+            YOUR REPORT:
+            1. Top-line movement: card-ready %, completeness, event freshness,
+               notability confidence — current vs. previous snapshot (delta).
+            2. Worst categories per region (lowest scorecard_pct / biggest
+               regressions) with the specific weakness (missing images/hooks,
+               stale events, low confidence).
+            3. Notability sample (the part SQL can't do): judge ~5–8 items from
+               weak categories against the North Star local-recommendation test;
+               flag inventory-not-curation items and any stale/past events that
+               slipped through. Keep the sample small — mind the turn budget.
+            4. Fold in pipeline/budget/error signals a chief engineer should know.
+            5. "What to fix first" — a short ranked list of concrete, high-leverage
+               actions. These are recommendations for Kevin, not tasks you execute.
+
+            CONSTRAINTS:
+            - Report-only. The ONLY file you may write is ./chief-report.md. Do
+              not modify any other file, run a migration, or call any write endpoint.
+            - coverage_pct is intentionally null (Level-3 reference sets aren't
+              built yet) — note it as a known gap; don't try to compute it.
+            - If you run low on turns, write what you have to ./chief-report.md
+              and put "⚠️ hit turn cap — partial" at the top.
+
+            OUTPUT: write the final Markdown report to ./chief-report.md — that
+            file is what reaches Slack.
+          claude_args: >-
+            --model sonnet
+            --max-turns 30
+            --allowedTools "Read,Grep,Glob,Write,Bash(cat:*),Bash(ls:*)"
+
+      - name: Heartbeat — report or fail
+        if: ${{ always() }}
+        env:
+          SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
+        run: |
+          if [ -f chief-report.md ]; then
+            node scripts/worker_slack.mjs report auditor chief-report.md
+          else
+            node scripts/worker_slack.mjs fail auditor "No report produced — likely the weekly Max limit or an error. See the Actions run log; resumes next Monday."
+          fi

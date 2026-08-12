@@ -1,0 +1,97 @@
+name: Chief · Maintainer (weekly)
+
+# Phase A read-worker. Watches for aging / deprecated / vulnerable dependencies
+# across our real stack (Expo, RN, @rnmapbox/maps, supabase-js, provider APIs)
+# and reports "what to address first" (tagged by autonomy tier) to #euda-chief.
+# Report-only: contents:read, no commits, no PRs. Subscription auth via
+# CLAUDE_CODE_OAUTH_TOKEN (never with ANTHROPIC_API_KEY). Inert until the OAuth
+# token + SLACK_CHIEF_WEBHOOK_URL secrets exist; weekly cron activates on main.
+
+on:
+  schedule:
+    - cron: "0 12 * * 3" # Wednesdays 12:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: worker-maintainer
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  maintainer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Heartbeat — start
+        env:
+          SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
+        run: node scripts/worker_slack.mjs start maintainer "Weekly dependency & deprecation watch"
+
+      - name: Gather dependency + security signal
+        run: bash .github/scripts/gather_maintainer_inputs.sh
+
+      - name: Claude — write the maintainer report
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are Euda's weekly Maintainer — a read-only chief-engineer worker
+            watching for aging, deprecated, or vulnerable dependencies before
+            they bite. You change nothing; you produce one report.
+
+            INPUTS (already gathered): ./maint-inputs/outdated.json (npm outdated),
+            ./maint-inputs/audit.json (npm audit), ./maint-inputs/manifest.json
+            (key deps incl. expo + react-native), ./maint-inputs/expo-doctor.txt.
+            Some may be empty — note it rather than inventing findings.
+
+            YOUR REPORT:
+            1. Security: summarize npm-audit vulnerabilities by severity, and
+               call out the few that actually matter for a React Native / Expo
+               app (ignore dev-only transitive noise; flag anything reachable at
+               runtime).
+            2. Aging / deprecated deps on our REAL stack: Expo SDK, React Native,
+               @rnmapbox/maps, @supabase/supabase-js, expo-router, and our
+               provider integrations. Use WebSearch / WebFetch for newer releases
+               and their support windows, deprecation notices, and breaking-change
+               announcements (e.g. Google Places API, Sentry SDK).
+            3. For each upgrade, distinguish "safe patch/minor bump" (Tier 2) from
+               "major-version bump — breaking-change risk" (Tier 3, needs Kevin),
+               per docs/chief_engineer/autonomy_ladder.md.
+            4. "What to address first" — a short ranked list of concrete upgrade
+               actions, each tagged with its autonomy tier. Recommendations only;
+               you do not execute them.
+
+            CONSTRAINTS: report-only. The ONLY file you may write is
+            ./chief-report.md. Do not edit package.json, install anything beyond
+            what's gathered, or change any file. If low on turns, write partial +
+            "⚠️ hit turn cap" at the top.
+
+            OUTPUT: ./chief-report.md — that file is what reaches Slack.
+          claude_args: >-
+            --model sonnet
+            --max-turns 15
+            --allowedTools "Read,Grep,Glob,Write,WebSearch,WebFetch,Bash(cat:*),Bash(ls:*)"
+
+      - name: Heartbeat — report or fail
+        if: ${{ always() }}
+        env:
+          SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
+        run: |
+          if [ -f chief-report.md ]; then
+            node scripts/worker_slack.mjs report maintainer chief-report.md
+          else
+            node scripts/worker_slack.mjs fail maintainer "No report produced — likely the weekly Max limit or an error. See the Actions run log; resumes next Wednesday."
+          fi

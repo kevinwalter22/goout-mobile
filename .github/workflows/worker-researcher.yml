@@ -1,0 +1,89 @@
+name: Chief · Researcher (weekly)
+
+# Phase A read-worker. IDEAS ONLY: surfaces quick wins, improvement ideas, and
+# competitive/ecosystem notes to #euda-chief. Never changes the repo, never
+# opens PRs, never writes to any task queue — Kevin decides what becomes work.
+# Report-only: contents:read, and the Claude step has NO Bash/Edit tools, only
+# Read/Grep/Glob/Write(for the report)/WebSearch/WebFetch. Subscription auth via
+# CLAUDE_CODE_OAUTH_TOKEN (never with ANTHROPIC_API_KEY). Inert until the OAuth
+# token + SLACK_CHIEF_WEBHOOK_URL secrets exist; weekly cron activates on main.
+
+on:
+  schedule:
+    - cron: "0 12 * * 5" # Fridays 12:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: worker-researcher
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  researcher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Heartbeat — start
+        env:
+          SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
+        run: node scripts/worker_slack.mjs start researcher "Weekly ideas digest"
+
+      - name: Claude — write the ideas digest
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            You are Euda's weekly Researcher — a read-only, IDEAS-ONLY
+            chief-engineer worker. You never change the repo, never open PRs, and
+            never write to any task queue. You surface ideas; Kevin decides what
+            becomes work.
+
+            READ FIRST: PROJECT_STATE.md (current priorities, backlog, recent
+            decisions) and data_quality_north_star.md (the product standard).
+            Ground every idea in where Euda actually is.
+
+            PRODUCE a short, skimmable weekly ideas digest with three sections:
+            1. QUICK WINS — small, high-leverage improvements that fit the current
+               stack and roadmap (each: what, why it helps, rough effort).
+            2. IMPROVEMENT IDEAS — larger bets tied to the North Star (curation
+               quality, event freshness, the map/feed experience). Note tradeoffs.
+            3. COMPETITIVE / ECOSYSTEM NOTES — use WebSearch to note what
+               comparable event-discovery / local-guide apps, or the RN/Expo
+               ecosystem, are doing that's relevant. Facts + a one-line "why it
+               matters for Euda."
+
+            RULES:
+            - IDEAS ONLY. The single file you may write is ./chief-report.md. Do
+              not modify any other file, do not create issues or queue entries.
+            - Keep it tight — Kevin reads this in Slack. 3–6 items per section,
+              ranked by leverage.
+            - If low on turns, write what you have + "⚠️ hit turn cap" at the top.
+
+            OUTPUT: ./chief-report.md — that file is what reaches Slack.
+          claude_args: >-
+            --model sonnet
+            --max-turns 15
+            --allowedTools "Read,Grep,Glob,Write,WebSearch,WebFetch"
+
+      - name: Heartbeat — report or fail
+        if: ${{ always() }}
+        env:
+          SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
+        run: |
+          if [ -f chief-report.md ]; then
+            node scripts/worker_slack.mjs report researcher chief-report.md
+          else
+            node scripts/worker_slack.mjs fail researcher "No report produced — likely the weekly Max limit or an error. See the Actions run log; resumes next Friday."
+          fi
