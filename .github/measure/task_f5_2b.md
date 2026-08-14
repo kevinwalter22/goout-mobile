@@ -8,7 +8,8 @@ TASK (docs/QUALITY_AUDIT.md, Finding F5 / fix 2b): niche card groups need too ma
 SELF-TEST (run these; iterate until green):
 1. npm run typecheck
 2. npm test  (add/adjust a unit test for the grouping engine proving a niche group with 2 items now surfaces where it previously wouldn't)
-3. npx expo export --platform web   (must succeed)
-4. npx --yes serve -s dist -l 8080 &  then  node scripts/measure/screenshot.mjs http://localhost:8080 measure-artifacts/after.png   (prove the app still renders)
+3. npx expo export --platform web   (must succeed - this is the web build/render check)
+
+Do NOT start any long-running/background process (no `serve`, no dev server, no trailing `&`). The web-render check is already covered by step 3 and by the harness. When your self-test passes, STOP - do not do extra work.
 
 IMPORTANT: Do NOT commit, push, or open a PR. Leave your changes in the working tree - the harness captures the diff. Tier 1-2 only; if the change would require touching auth/RLS/schema, stop and write your reasoning to measure-artifacts/notes.md instead. If you run low on turns, stop and note remaining work in measure-artifacts/notes.md.

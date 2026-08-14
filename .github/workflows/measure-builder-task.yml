@@ -71,8 +71,11 @@ jobs:
           mkdir -p measure-artifacts
           npm i -g @anthropic-ai/claude-code >/dev/null 2>&1
           claude --version || { echo "claude CLI failed to install"; exit 1; }
+          # Trust the workspace so Claude Code honors .claude/settings.json (allow + deny)
+          # and does not stall on the trust dialog in headless mode.
+          node -e "const fs=require('fs'),os=require('os'),p=require('path');const f=p.join(os.homedir(),'.claude.json');let j={};try{j=JSON.parse(fs.readFileSync(f,'utf8'))}catch{};j.projects=j.projects||{};j.projects[process.cwd()]=Object.assign({},j.projects[process.cwd()],{hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true});fs.writeFileSync(f,JSON.stringify(j));console.log('trusted',process.cwd())"
           PROMPT="$(cat .github/measure/task_f5_2b.md)"
-          claude -p "$PROMPT" \
+          timeout 1500 claude -p "$PROMPT" \
             --model opus \
             --max-turns 60 \
             --allowedTools "Read,Grep,Glob,Edit,Write,Bash" \
@@ -82,36 +85,16 @@ jobs:
           echo "claude exit code: $?"
           git --no-pager diff --stat > measure-artifacts/diff-stat.txt 2>&1 || true
           git --no-pager diff        > measure-artifacts/full.diff     2>&1 || true
+          # Copy session transcripts so the report step can recover usage even if
+          # the final JSON was not emitted.
+          cp -r "$HOME/.claude/projects" measure-artifacts/claude-sessions 2>/dev/null || true
           echo "---- diff stat ----"; cat measure-artifacts/diff-stat.txt 2>/dev/null || true
 
       - name: Report measurement
         if: ${{ github.ref_name == 'measure/run' && always() }}
         run: |
           mkdir -p measure-artifacts
-          node -e '
-            const fs = require("fs");
-            const start = Number(process.env.MEASURE_START || 0);
-            const wall_clock_min = start ? Math.round((Date.now() / 1000 - start) / 60) : null;
-            let j = {};
-            try { j = JSON.parse(fs.readFileSync("measure-artifacts/claude-out.json", "utf8")); }
-            catch (e) { console.log("no/invalid claude-out.json:", e.message); }
-            const u = j.usage || {};
-            const out = {
-              wall_clock_min,
-              cost_usd: j.total_cost_usd ?? null,
-              num_turns: j.num_turns ?? null,
-              duration_ms: j.duration_ms ?? null,
-              input_tokens: u.input_tokens ?? null,
-              output_tokens: u.output_tokens ?? null,
-              cache_read_input_tokens: u.cache_read_input_tokens ?? null,
-              cache_creation_input_tokens: u.cache_creation_input_tokens ?? null,
-              is_error: j.is_error ?? null,
-              subtype: j.subtype ?? null,
-            };
-            console.log("=== B2 MEASUREMENT ===");
-            console.log(JSON.stringify(out, null, 2));
-            fs.writeFileSync("measure-artifacts/measurement.json", JSON.stringify(out, null, 2));
-          '
+          node .github/measure/report.mjs
 
       - name: Upload artifacts
         if: ${{ always() }}
