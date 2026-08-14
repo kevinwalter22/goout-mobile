@@ -502,6 +502,7 @@ export const GROUP_TAXONOMY: GroupDefinition[] = [
     diversityCategory: "audience",
     basePriority: 31,
     definingTags: ["date_night"],
+    minItems: 2, // niche group — surface with fewer items
   },
   {
     id: "solo_friendly",
@@ -593,6 +594,8 @@ export const GROUP_TAXONOMY: GroupDefinition[] = [
     kindEligibility: ["all", "event", "activity"],
     diversityCategory: "general",
     basePriority: 37,
+    definingTags: ["pet_friendly"],
+    minItems: 2, // niche group — surface with fewer items
   },
   {
     id: "seasonal",
@@ -626,5 +629,7 @@ export const GROUP_TAXONOMY: GroupDefinition[] = [
     kindEligibility: ["all", "event", "activity"],
     diversityCategory: "general",
     basePriority: 41,
+    definingTags: ["volunteer"],
+    minItems: 2, // niche group — surface with fewer items
   },
 ];
