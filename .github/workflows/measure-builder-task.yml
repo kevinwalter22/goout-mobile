@@ -4,14 +4,18 @@ name: Measure · Builder task (quota probe)
 # pool". Triggered by pushing a branch:
 #   * measure/smoke — proves the toolchain (Expo web export + Playwright
 #     screenshot) works in CI. Runs NO Claude → ZERO subscription quota.
-#   * measure/run   — the real measurement: Claude implements a representative
-#     Tier-1/2 fix (QUALITY_AUDIT F5/2b), self-tests (typecheck + unit + web
-#     export + Playwright screenshot), iterates, and opens a PR. Runs on the Max
-#     SUBSCRIPTION via CLAUDE_CODE_OAUTH_TOKEN — never ANTHROPIC_API_KEY.
+#   * measure/run   — the real measurement: the official Claude Code CLI
+#     (`claude -p`) implements a representative Tier-1/2 fix (QUALITY_AUDIT
+#     F5/2b) and self-tests (typecheck + unit + web export + Playwright
+#     screenshot). Runs on the Max SUBSCRIPTION via CLAUDE_CODE_OAUTH_TOKEN —
+#     never ANTHROPIC_API_KEY. `--output-format json` yields exact tokens / cost
+#     / turns, written to measure-artifacts/measurement.json.
 #
-# The pool-% number is read from Kevin's /status meter bracketing the measure/run
-# push. This harness reports wall-clock + the opened PR (visible iteration
-# commits) + whatever usage the action surfaces in the run log.
+# We use the CLI, not anthropics/claude-code-action, because that action rejects
+# `push` events ("Unsupported event type: push"); the CLI runs on any trigger and
+# is the same sanctioned subscription-auth path. The pool-% number is read from
+# Kevin's /status meter bracketing the push; this run reports tokens/cost/turns +
+# wall-clock + the diff.
 
 on:
   push:
@@ -22,9 +26,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
+  contents: read
 
 jobs:
   measure:
@@ -53,6 +55,64 @@ jobs:
         id: smoke
         run: bash .github/scripts/measure_smoke.sh
 
+      - name: Record start
+        if: ${{ github.ref_name == 'measure/run' && steps.smoke.outcome == 'success' }}
+        run: echo "MEASURE_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Claude — implement F5/2b + self-test (SUBSCRIPTION, headless CLI)
+        id: claude
+        if: ${{ github.ref_name == 'measure/run' && steps.smoke.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set +e
+          unset ANTHROPIC_API_KEY   # never let an API key shadow the subscription token
+          mkdir -p measure-artifacts
+          npm i -g @anthropic-ai/claude-code >/dev/null 2>&1
+          claude --version || { echo "claude CLI failed to install"; exit 1; }
+          PROMPT="$(cat .github/measure/task_f5_2b.md)"
+          claude -p "$PROMPT" \
+            --model opus \
+            --max-turns 60 \
+            --allowedTools "Read,Grep,Glob,Edit,Write,Bash" \
+            --dangerously-skip-permissions \
+            --output-format json \
+            > measure-artifacts/claude-out.json 2> measure-artifacts/claude-err.log
+          echo "claude exit code: $?"
+          git --no-pager diff --stat > measure-artifacts/diff-stat.txt 2>&1 || true
+          git --no-pager diff        > measure-artifacts/full.diff     2>&1 || true
+          echo "---- diff stat ----"; cat measure-artifacts/diff-stat.txt 2>/dev/null || true
+
+      - name: Report measurement
+        if: ${{ github.ref_name == 'measure/run' && always() }}
+        run: |
+          mkdir -p measure-artifacts
+          node -e '
+            const fs = require("fs");
+            const start = Number(process.env.MEASURE_START || 0);
+            const wall_clock_min = start ? Math.round((Date.now() / 1000 - start) / 60) : null;
+            let j = {};
+            try { j = JSON.parse(fs.readFileSync("measure-artifacts/claude-out.json", "utf8")); }
+            catch (e) { console.log("no/invalid claude-out.json:", e.message); }
+            const u = j.usage || {};
+            const out = {
+              wall_clock_min,
+              cost_usd: j.total_cost_usd ?? null,
+              num_turns: j.num_turns ?? null,
+              duration_ms: j.duration_ms ?? null,
+              input_tokens: u.input_tokens ?? null,
+              output_tokens: u.output_tokens ?? null,
+              cache_read_input_tokens: u.cache_read_input_tokens ?? null,
+              cache_creation_input_tokens: u.cache_creation_input_tokens ?? null,
+              is_error: j.is_error ?? null,
+              subtype: j.subtype ?? null,
+            };
+            console.log("=== B2 MEASUREMENT ===");
+            console.log(JSON.stringify(out, null, 2));
+            fs.writeFileSync("measure-artifacts/measurement.json", JSON.stringify(out, null, 2));
+          '
+
       - name: Upload artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -60,64 +120,3 @@ jobs:
           name: measure-${{ github.ref_name == 'measure/run' && 'run' || 'smoke' }}
           path: measure-artifacts/
           if-no-files-found: ignore
-
-      - name: Record start
-        if: ${{ github.ref_name == 'measure/run' && steps.smoke.outcome == 'success' }}
-        run: echo "MEASURE_START=$(date +%s)" >> "$GITHUB_ENV"
-
-      - name: Claude — implement + self-test + open PR (SUBSCRIPTION)
-        if: ${{ github.ref_name == 'measure/run' && steps.smoke.outcome == 'success' }}
-        continue-on-error: true
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          prompt: |
-            You are a Euda builder agent running a ONE-OFF, measured task. Implement
-            one real Tier 1–2 fix end to end, self-test it, and open a PR. Work like
-            the overnight builder would: implement, test, iterate, ship a PR.
-
-            TASK (docs/QUALITY_AUDIT.md, Finding F5 / fix 2b): niche card groups
-            need too many items to appear, so the grouped explore feed collapses to
-            a few broad groups and feels random. Add a per-group minimum-items
-            override so niche groups can surface with fewer items.
-            - Add an optional `minItems` field to the GroupDefinition type and honor
-              it in the grouping engine (fall back to the existing global minimum
-              when unset). Grep src/ for GroupDefinition / minItemsPerGroup /
-              groupingEngine / groupTaxonomy to find the exact files.
-            - Set `minItems: 2` for niche groups (e.g. date_night, pet_friendly,
-              volunteer) in the group taxonomy.
-            - Keep it minimal and behavior-preserving for groups without an
-              override. Presentation change only — do NOT touch auth, RLS, schema,
-              or the geo+time invariant.
-
-            SELF-TEST (run these; iterate until green):
-            1. npm run typecheck
-            2. npm test  (add/adjust a unit test for the grouping engine proving a
-               niche group with 2 items now surfaces where it previously wouldn't).
-            3. npx expo export --platform web   (must succeed).
-            4. npx --yes serve -s dist -l 8080 &   then
-               node scripts/measure/screenshot.mjs http://localhost:8080 measure-artifacts/after.png
-               (prove the app still renders after the change).
-
-            THEN commit on a new branch and open a PR to `staging` titled
-            "fix(feed): per-group minItems so niche groups surface (QUALITY_AUDIT F5/2b)".
-            Do NOT merge and do NOT deploy — prod stays gated.
-
-            CONSTRAINTS: Tier 1–2 only. If the change would require touching
-            auth/RLS/schema, stop and explain in the PR body instead. If you run low
-            on turns, open the PR with whatever is green and note remaining work.
-          claude_args: >-
-            --model opus
-            --max-turns 60
-            --allowedTools "Read,Grep,Glob,Edit,Write,Bash"
-
-      - name: Record end + wall-clock
-        if: ${{ github.ref_name == 'measure/run' && always() }}
-        run: |
-          END=$(date +%s)
-          START=${MEASURE_START:-$END}
-          MINS=$(( (END - START) / 60 ))
-          mkdir -p measure-artifacts
-          echo "Builder measurement wall-clock: ${MINS} min" | tee measure-artifacts/wallclock.txt
-          echo "Read /status now for the pool delta; see run log for Claude usage/turns and the opened PR for the diff + iteration commits." >> measure-artifacts/wallclock.txt
