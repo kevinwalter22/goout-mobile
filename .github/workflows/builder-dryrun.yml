@@ -1,0 +1,82 @@
+name: Builder dry-run — screenshot-loop proof
+
+# One-off proof that the overnight builder's browser-test loop works: run task T6
+# (event-tile time label) through implement → functional self-test → serve the web
+# build → log into staging → screenshot the feed → have Claude READ its own
+# screenshot and evaluate it against the acceptance criterion. NO PR is opened.
+# Runs on the Max SUBSCRIPTION via CLAUDE_CODE_OAUTH_TOKEN. Triggered by pushing
+# the dryrun/screenshot-proof branch.
+
+on:
+  push:
+    branches: [dryrun/screenshot-proof]
+
+concurrency:
+  group: builder-dryrun
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  dryrun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EXPO_PUBLIC_APP_ENV: staging
+      EXPO_PUBLIC_SUPABASE_URL: https://${{ secrets.SUPABASE_STAGING_PROJECT_REF }}.supabase.co
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_STAGING_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright chromium
+        run: |
+          npm i --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Claude — implement T6 + screenshot + self-evaluate (SUBSCRIPTION)
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          STAGING_EMAIL: ${{ secrets.USER_A_EMAIL }}
+          STAGING_PASSWORD: ${{ secrets.USER_A_PASSWORD }}
+        run: |
+          set +e
+          unset ANTHROPIC_API_KEY
+          mkdir -p dryrun-artifacts
+          npm i -g @anthropic-ai/claude-code >/dev/null 2>&1
+          claude --version || { echo "claude CLI failed to install"; exit 1; }
+          node -e "const fs=require('fs'),os=require('os'),p=require('path');const f=p.join(os.homedir(),'.claude.json');let j={};try{j=JSON.parse(fs.readFileSync(f,'utf8'))}catch{};j.projects=j.projects||{};j.projects[process.cwd()]=Object.assign({},j.projects[process.cwd()],{hasTrustDialogAccepted:true,hasCompletedProjectOnboarding:true});fs.writeFileSync(f,JSON.stringify(j))"
+          PROMPT="$(cat .github/measure/task_t6_dryrun.md)"
+          timeout 2400 claude -p "$PROMPT" \
+            --model opus --max-turns 80 \
+            --allowedTools "Read,Grep,Glob,Edit,Write,Bash" \
+            --dangerously-skip-permissions \
+            --output-format json \
+            > dryrun-artifacts/claude-out.json 2> dryrun-artifacts/claude-err.log
+          echo "claude exit code: $?"
+          cp -r "$HOME/.claude/projects" dryrun-artifacts/claude-sessions 2>/dev/null || true
+          git --no-pager diff > dryrun-artifacts/full.diff 2>&1 || true
+
+      - name: Collect proof
+        if: ${{ always() }}
+        run: |
+          mkdir -p dryrun-artifacts
+          [ -f evaluation.md ] && cp evaluation.md dryrun-artifacts/evaluation.md || true
+          # sweep any stray screenshots Claude wrote outside the artifacts dir
+          find . -maxdepth 3 -name "*.png" -not -path "./node_modules/*" -not -path "./dryrun-artifacts/*" -exec cp {} dryrun-artifacts/ \; 2>/dev/null || true
+          echo "== artifacts =="; ls -la dryrun-artifacts
+
+      - name: Upload proof
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dryrun-proof
+          path: dryrun-artifacts/
+          if-no-files-found: ignore
