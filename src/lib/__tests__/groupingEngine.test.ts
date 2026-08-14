@@ -295,6 +295,66 @@ describe("groupingEngine quality gating", () => {
 });
 
 // ============================================================================
+// Per-group minItems override (niche groups)
+// ============================================================================
+
+describe("niche group minItems override", () => {
+  it("surfaces a niche group (date_night) with only 2 items where the global min of 3 would reject it", () => {
+    // No user location → proximity groups (walkable/nearby) can't claim these
+    // items, so the only group they can form is date_night.
+    const ctx = makeContext({ userLocation: null });
+
+    // Exactly 2 date_night items — below the default minItemsPerGroup (3).
+    const dateNightItems = [
+      makeScoredItem({
+        id: "dn-1",
+        title: "Sunset Dinner Cruise",
+        category: "Miscellaneous",
+        tags: ["date_night"],
+        recommendScore: 0.72,
+      }),
+      makeScoredItem({
+        id: "dn-2",
+        title: "Rooftop Wine Tasting",
+        category: "Miscellaneous",
+        tags: ["date_night"],
+        recommendScore: 0.68,
+      }),
+    ];
+
+    // Control: 2 family_friendly items — this group has NO override, so with the
+    // global minimum of 3 it should NOT surface.
+    const familyItems = [
+      makeScoredItem({
+        id: "fam-1",
+        title: "Puppet Show",
+        category: "Miscellaneous",
+        tags: ["family_friendly"],
+        recommendScore: 0.71,
+      }),
+      makeScoredItem({
+        id: "fam-2",
+        title: "Kids Craft Fair",
+        category: "Miscellaneous",
+        tags: ["family_friendly"],
+        recommendScore: 0.67,
+      }),
+    ];
+
+    const result = groupItems([...dateNightItems, ...familyItems], [], ctx);
+
+    // date_night surfaces thanks to minItems: 2 override
+    const dateNight = result.groups.find((g) => g.id === "date_night");
+    expect(dateNight).toBeDefined();
+    expect(dateNight!.items.length).toBe(2);
+
+    // family_friendly (no override) stays below the global minimum of 3
+    const family = result.groups.find((g) => g.id === "family_friendly");
+    expect(family).toBeUndefined();
+  });
+});
+
+// ============================================================================
 // Distinctiveness Tests
 // ============================================================================
 
