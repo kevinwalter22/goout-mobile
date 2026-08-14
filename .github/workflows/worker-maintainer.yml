@@ -36,6 +36,7 @@ jobs:
       - name: Heartbeat — start
         env:
           SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: node scripts/worker_slack.mjs start maintainer "Weekly dependency & deprecation watch"
 
       - name: Gather dependency + security signal
@@ -89,6 +90,7 @@ jobs:
         if: ${{ always() }}
         env:
           SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           if [ -f chief-report.md ]; then
             node scripts/worker_slack.mjs report maintainer chief-report.md
