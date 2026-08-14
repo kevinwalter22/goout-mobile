@@ -11,9 +11,12 @@ import https from "node:https";
 import fs from "node:fs";
 
 const [, , mode = "", worker = "worker", arg = ""] = process.argv;
-const WEBHOOK = process.env.SLACK_CHIEF_WEBHOOK_URL || "";
+// Prefer the dedicated #euda-chief webhook; fall back to the existing
+// #euda-monitoring webhook (SLACK_WEBHOOK_URL) so the workers can report even
+// before a separate channel exists ("reuse monitoring").
+const WEBHOOK = process.env.SLACK_CHIEF_WEBHOOK_URL || process.env.SLACK_WEBHOOK_URL || "";
 if (!WEBHOOK) {
-  console.warn("SLACK_CHIEF_WEBHOOK_URL not set — skipping Slack post (inert).");
+  console.warn("No SLACK_CHIEF_WEBHOOK_URL or SLACK_WEBHOOK_URL set — skipping Slack post (inert).");
   process.exit(0);
 }
 
