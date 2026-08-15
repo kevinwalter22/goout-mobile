@@ -36,12 +36,25 @@ const SLACK = process.env.SLACK_CHIEF_WEBHOOK_URL || process.env.SLACK_WEBHOOK_U
 const BASE_BRANCH = "staging";
 const WORKER = `nightly-builder-${new Date().toISOString().slice(0, 10)}`;
 
-const req = (host, path, method, headers, body) => new Promise((res) => {
+const reqOnce = (host, path, method, headers, body) => new Promise((res) => {
   const b = body ? JSON.stringify(body) : null;
   const r = https.request({ hostname: host, path, method, headers: { ...headers, ...(b ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(b) } : {}) } },
     (x) => { let d = ""; x.on("data", (c) => (d += c)); x.on("end", () => { try { res({ status: x.statusCode, body: JSON.parse(d) }); } catch { res({ status: x.statusCode, body: d }); } }); });
   r.on("error", (e) => res({ status: 0, body: String(e) })); if (b) r.write(b); r.end();
 });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Retry transient network failures (EPIPE / ECONNRESET → status 0; 5xx). A transient
+// `write EPIPE` on both the PR-open AND the follow-up status write is exactly what
+// stranded night-one's T7 (stuck in_progress, no PR). 4xx/2xx are definitive → no retry.
+const req = async (host, path, method, headers, body) => {
+  let last;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    last = await reqOnce(host, path, method, headers, body);
+    if (last.status !== 0 && last.status < 500) return last;
+    if (attempt < 3) await sleep(attempt * 1500);
+  }
+  return last;
+};
 const pg = (path, method = "GET", body) =>
   req(`${REF}.supabase.co`, `/rest/v1/${path}`, method, { apikey: KEY, Authorization: `Bearer ${KEY}`, Prefer: "return=representation" }, body);
 const gh = (path, method = "GET", body) =>

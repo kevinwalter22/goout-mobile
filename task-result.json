@@ -1,9 +1,0 @@
-{
-  "status": "pass",
-  "functional_pass": true,
-  "visual": false,
-  "screenshot_captured": false,
-  "screenshot_path": "builder-artifacts/f2f94e99-2513-4a80-885a-c097e9d9944a.png",
-  "screenshot_verdict": null,
-  "note": "Removed 'social' from the sports_rec hasTag(...) predicate in src/config/groupTaxonomy.ts (~L477-479), leaving hasTag(item,'fitness') || hasCategory(item,'Sports & Recreation'). group_activities (~L519) left untouched, still includes 'social'. Added two tests to src/lib/__tests__/groupingEngine.test.ts: (1) full-pipeline test with 5 items tagged ['social','food','dining'] (Food & Drink category, no fitness) confirming none land in sports_rec; (2) a direct test of the sports_rec match predicate confirming a ['fitness']-tagged item still matches it, while a ['social']-only item does not. Note: I tested predicate #2 directly against GROUP_TAXONOMY rather than through the full groupItems() pipeline, because a fitness-tagged item also satisfies the unrelated pre-existing 'adventure' group, and the engine's max-1-group-per-item dedup makes which group actually forms in the pipeline depend on basePriority ordering between sports_rec and adventure, not on the sports_rec predicate itself -- that priority race is pre-existing and out of scope for this task. All checks green: npm run typecheck passes, npm test passes (518/518, including the 2 new cases), npx expo export --platform web completes and produces all 42 static routes with no errors. No screenshot needed -- this is a config predicate change with no visual surface (it only affects which items feed into the existing Sports & Recreation card grouping logic)."
-}
