@@ -37,6 +37,7 @@ import { captureError } from "../../src/lib/logger";
 import { friendlyMessage } from "../../src/lib/errorMessages";
 import { getFallbackImage } from "../../src/lib/categoryFallbackImages";
 import { formatOpeningHours } from "../../src/utils/formatOpeningHours";
+import { sanitizeTimeText } from "../../src/utils/formatTimeText";
 
 /** Returns true for any Google Maps URL — these should not appear as "MORE INFO" links
  *  because the detail screen already has a dedicated "Open in Google Maps" CTA. */
@@ -309,7 +310,7 @@ export default function EventDetail() {
       return dateStr;
     }
     if (item.time_text) {
-      return item.time_text;
+      return sanitizeTimeText(item.time_text);
     }
     if (item.schedule_text) {
       // Prefer the compact summary ("Open · Closes at 8 PM") over the raw
