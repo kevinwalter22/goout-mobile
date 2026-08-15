@@ -1,0 +1,70 @@
+name: Nightly builder
+
+# The overnight builder. Claims up to N ready tasks from build_tasks, implements +
+# self-tests each (functional + the screenshot-evaluate loop for visual tasks), and
+# opens a needs_kevin PR per success. NEVER merges; every task ends at a PR Kevin
+# approves. Gated by the build_queue_enabled kill-switch (OFF by default → no-op).
+# Runs on Kevin's Max SUBSCRIPTION via CLAUDE_CODE_OAUTH_TOKEN (the prod service-role
+# key stays in the orchestrator, never in the per-task Claude subprocess).
+#
+# Scheduled nightly, but does nothing until Kevin flips build_queue_enabled ON.
+# Use "Run workflow" (workflow_dispatch) for the first supervised night-one run.
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # 07:00 UTC nightly (no-op while kill-switch OFF)
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-builder
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      EXPO_PUBLIC_APP_ENV: staging
+      EXPO_PUBLIC_SUPABASE_URL: https://${{ secrets.SUPABASE_STAGING_PROJECT_REF }}.supabase.co
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_STAGING_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: staging
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Install Claude CLI + Playwright chromium
+        run: |
+          npm i -g @anthropic-ai/claude-code
+          npm i --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Run nightly builder
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          SUPABASE_PROD_PROJECT_REF: ${{ secrets.SUPABASE_PROD_PROJECT_REF }}
+          SUPABASE_PROD_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_PROD_SERVICE_ROLE_KEY }}
+          STAGING_EMAIL: ${{ secrets.USER_A_EMAIL }}
+          STAGING_PASSWORD: ${{ secrets.USER_A_PASSWORD }}
+          SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/builder/run_night.mjs
+
+      - name: Upload builder artifacts (screenshots, self-tests)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-builder
+          path: builder-artifacts/
+          if-no-files-found: ignore
