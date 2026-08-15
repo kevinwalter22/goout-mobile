@@ -83,7 +83,7 @@ jobs:
             OUTPUT: ./chief-report.md — that file is what reaches Slack.
           claude_args: >-
             --model sonnet
-            --max-turns 40
+            --max-turns 50
             --allowedTools "Read,Grep,Glob,Write,WebSearch,WebFetch,Bash(cat:*),Bash(ls:*)"
 
       - name: Heartbeat — report or fail
