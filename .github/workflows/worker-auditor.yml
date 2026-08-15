@@ -105,8 +105,23 @@ jobs:
           SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
+          # Make the report-vs-fail branch and the report size visible in the run
+          # log — the claude step is continue-on-error, so a green run alone never
+          # proves it produced output.
           if [ -f chief-report.md ]; then
+            echo "::notice::auditor report produced ($(wc -c < chief-report.md) chars) — posting to Slack."
             node scripts/worker_slack.mjs report auditor chief-report.md
           else
+            echo "::warning::auditor produced NO chief-report.md — posting the fallback notice (no real output)."
             node scripts/worker_slack.mjs fail auditor "No report produced — likely the weekly Max limit or an error. See the Actions run log; resumes next Monday."
           fi
+
+      # Keep the produced report as a downloadable artifact — an audit trail so
+      # "did it actually produce output?" is always answerable after the fact.
+      - name: Upload report (audit trail)
+        if: ${{ always() && hashFiles('chief-report.md') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: auditor-report
+          path: chief-report.md
+          if-no-files-found: warn

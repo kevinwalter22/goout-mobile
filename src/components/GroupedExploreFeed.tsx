@@ -25,6 +25,8 @@ import { GroupCard } from "./GroupCard";
 import type { GroupingResult, ResolvedGroup } from "../lib/groupingEngine";
 import type { ScoredItem } from "../lib/scoring";
 import { formatOpeningHours } from "../utils/formatOpeningHours";
+import { formatRecurrence } from "../utils/formatRecurrence";
+import { sanitizeTimeText } from "../utils/formatTimeText";
 import { getCategoryPlaceholder } from "../utils/categoryPlaceholder";
 import type { ExploreItem } from "../types/database";
 
@@ -54,7 +56,7 @@ function formatItemDateTime(item: ExploreItem) {
       minute: "2-digit",
     });
   }
-  if (item.time_text) return item.time_text;
+  if (item.time_text) return sanitizeTimeText(item.time_text);
   if (item.schedule_text) {
     const { summaryLine } = formatOpeningHours(item.schedule_text);
     if (summaryLine) return summaryLine;
@@ -139,7 +141,7 @@ function OverflowItem({
               {item.category}
             </Text>
           )}
-          {item.recurrence && !["none", ""].includes(item.recurrence) && (
+          {formatRecurrence(item.recurrence) && (
             <View
               style={{
                 flexDirection: "row",
@@ -153,7 +155,7 @@ function OverflowItem({
             >
               <Ionicons name="repeat" size={11} color={colors.textSecondary} />
               <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textSecondary }}>
-                {item.recurrence === "weekly" ? "Weekly" : "Monthly"}
+                {formatRecurrence(item.recurrence)}
               </Text>
             </View>
           )}

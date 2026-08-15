@@ -14,6 +14,11 @@ on:
   schedule:
     - cron: "0 7 * * *" # 07:00 UTC nightly (no-op while kill-switch OFF)
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch/ref to check out + run the builder from (default: staging)"
+        required: false
+        default: staging
 
 concurrency:
   group: nightly-builder
@@ -34,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: staging
+          ref: ${{ github.event.inputs.ref || 'staging' }}
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -55,9 +60,12 @@ jobs:
           SUPABASE_PROD_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_PROD_SERVICE_ROLE_KEY }}
           STAGING_EMAIL: ${{ secrets.USER_A_EMAIL }}
           STAGING_PASSWORD: ${{ secrets.USER_A_PASSWORD }}
-          SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A real PAT (fine-grained: this repo, contents+pull-requests write) so the
+          # builder's PRs trigger CI automatically. Without it the orchestrator falls
+          # back to GITHUB_TOKEN and PRs land without CI (blocked on required checks).
+          BUILDER_PR_TOKEN: ${{ secrets.BUILDER_PR_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node scripts/builder/run_night.mjs
 

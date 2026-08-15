@@ -32,10 +32,27 @@ the acceptance criterion.
    merge mess.
 
 ## Guardrails (`build_queue_guardrails` flag config)
-`max_tasks_per_night` (4) · `max_turns_per_task` (40) · `max_wallclock_min_per_task`
-(30) · `max_cost_usd_per_task` (8) · `max_cost_usd_per_night` (25) · `model` (sonnet)
-· `lease_minutes` (30). A task over its per-task cost/turn/wall cap → `blocked`; the
-night stops at the per-night cost cap.
+`max_tasks_per_night` (4) · `max_cost_usd_per_task` (8) · `max_cost_usd_per_night`
+(25) · `model` (sonnet) · `lease_minutes` (30).
+
+Turn/wall caps are **split by task type**, because the visual screenshot loop is far
+more turn-hungry than non-visual work (a measured known-good visual task took ~61
+tool-rounds / ~13 min to complete; a non-visual one ~13 turns):
+- **non-visual:** `max_turns_per_task` (40) · `max_wallclock_min_per_task` (30)
+- **visual:** `max_turns_visual` (120) · `max_wallclock_min_visual` (45)
+
+A task that hits a turn/wall cap or crashes but **left changes in the working tree**
+is committed and opened as a **DRAFT PR** ("PARTIAL — hit cap, needs continuation"),
+so near-complete work is never lost to a hard kill. Only a genuinely empty tree →
+`blocked`. The night stops at the per-night cost cap.
+
+## Batch composition (learned night one)
+Night one ran 4 tasks: the 1 non-visual **passed**, all 3 visual **failed** (turn
+cap, serve-hang, turn cap). Non-visual work is cheap (~13 turns, ~$0.15) and reliable;
+visual work is expensive (~61 turns, ~$1+) and fragile (screenshot loop + login +
+virtualized scroll). So a night should be **mostly non-visual with at most 1–2 visual**,
+and those visual tasks **must be independent** (not `stack_on` each other) so one
+failure can't block another. Never stack 4 visual tasks in one night.
 
 ## Safety
 - **Kill-switch:** `build_queue_enabled` (OFF by default). While OFF, `claim_build_task`
@@ -45,6 +62,30 @@ night stops at the per-night cost cap.
   `claude -p` subprocess runs with a scrubbed env (no prod keys, no `ANTHROPIC_API_KEY`,
   no `GITHUB_TOKEN`) — subscription OAuth only.
 - Auth: `CLAUDE_CODE_OAUTH_TOKEN` (Max subscription; never alongside `ANTHROPIC_API_KEY`).
+
+## Kevin's default review flow (standing)
+The builder always stops at `needs_kevin` PRs — **never auto-merges; Kevin is always
+the yes.** But Kevin's *default* review is **visual, not diff-by-diff**:
+
+1. Each morning the chief engineer shows the night's PRs **+ the screenshots** the
+   self-test captured.
+2. Kevin says **"merge them"** (or **"hold #X, it looks off"**) — his explicit
+   go-ahead, **per batch, every time** (never standing pre-approval for future nights).
+3. On that go-ahead, merge the approved PRs to `staging`, **refresh the staging build**
+   (OTA `eas update --branch staging`, or a new build if native changed — mind the
+   [[ota-env-contamination]] guard), and tell Kevin **exactly when his phone will show
+   the changes**.
+4. Kevin verifies **visually in the app** — does the intended thing actually show up —
+   instead of reading diffs.
+
+**Guardrails that hold regardless of this default:**
+- Kevin approves **each** merge; "merge to staging" is his call per batch, not a
+  standing pre-approval for all future PRs.
+- **needs_device / native / anything touching auth, schema, or prod** does NOT go in
+  the fast-merge batch — flag it separately for real (not just visual) review.
+- Anything whose **screenshot self-test was inconclusive** is flagged, not fast-merged.
+- **Prod promotion is unchanged** — always Kevin's gate, always deliberate (the gated
+  `main` → Production pipeline; never a fast-merge).
 
 ## Running night one
 1. Confirm the `ready` tasks are seeded (`build_tasks` where `status='ready'`).
@@ -56,6 +97,12 @@ night stops at the per-night cost cap.
    included) did its job. Merge the good ones; comment/close/reopen-as-`ready` the rest.
 6. Turn the cap up as trust builds. Flip the kill-switch OFF anytime to pause.
 
-Note: builder PRs are opened with the default `GITHUB_TOKEN`, so the PR's own CI
-gate does not auto-run (GitHub suppresses it) — the builder's self-test is the
-pre-merge check; the full test gate runs when the PR is merged to `staging`.
+Note: creating PRs from Actions requires the repo setting **Settings → Actions →
+General → "Allow GitHub Actions to create and approve pull requests"** to be ON
+(enabled 2026-08-15 — without it the builder's `pulls` POST 403s and leaves the branch
+pushed-but-PR-less, which is what stranded night-one's T1). PRs are opened with the
+default `GITHUB_TOKEN`, so the PR's own CI gate does not auto-run (GitHub suppresses
+workflow-triggered workflows) — the builder's self-test is the pre-merge check; the
+full test gate runs on merge to `staging`. If auto-open ever fails again, the
+orchestrator now leaves the branch pushed and flags it (`blocked` + Slack) rather than
+faking a `needs_kevin` with no PR.
