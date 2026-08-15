@@ -36,7 +36,7 @@ jobs:
           [ -n "$EXPO_TOKEN" ] || { echo "::error::EXPO_TOKEN not set"; exit 1; }
           [ -n "$ASC_API_KEY_P8_BASE64" ] || { echo "::error::ASC_API_KEY_P8_BASE64 not set"; exit 1; }
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
