@@ -45,29 +45,32 @@ jobs:
           # the mobile client changed (gates the EAS build below).
           fetch-depth: 0
 
-      # Only build a new staging app when the merged changes touch the mobile
-      # client (UI / client code that has to be visible in the app to test).
-      # Server-only or doc-only merges (edge functions, migrations, scripts,
-      # docs, CI) skip the EAS build entirely. constants/ and hooks/ are included
-      # because they are bundled client code — a missed build is worse than an
-      # extra one.
-      - name: Detect mobile client changes
-        id: client
+      # Classify the merge to pick the cheapest correct client refresh:
+      #   - bundle=false  → server/docs/CI only (edge functions, migrations,
+      #                     scripts, docs). No OTA, no build.
+      #   - bundle=true   → the app bundle changed. The OTA step below then decides
+      #                     OTA-only (JS/display) vs a full EAS build (native/deps/
+      #                     config that moves the fingerprint), so JS-only nights
+      #                     cost ZERO EAS builds.
+      # constants/ and hooks/ are bundled client code — a missed refresh is worse
+      # than an extra one.
+      - name: Classify change (does the app bundle change?)
+        id: classify
         run: |
           BEFORE="${{ github.event.before }}"
           if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            echo "No reliable base ref (dispatch / first push) — building to be safe."
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "No reliable base ref (dispatch / first push) — treat as a bundle change."
+            echo "bundle=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           FILES=$(git diff --name-only "$BEFORE" "${{ github.sha }}")
           echo "::group::Changed files"; echo "$FILES"; echo "::endgroup::"
-          if echo "$FILES" | grep -qE '^(app/|src/|components/|constants/|hooks/|assets/|app\.json$|app\.config\.(js|ts)$|eas\.json$|package\.json$)'; then
-            echo "Mobile client changed → EAS build will run."
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+          if echo "$FILES" | grep -qE '^(app/|src/|components/|constants/|hooks/|lib/|assets/|plugins/|app\.json$|app\.config\.(js|ts)$|eas\.json$|package(-lock)?\.json$|patches/|babel\.config|metro\.config)'; then
+            echo "App bundle changed → OTA (and a build only if the fingerprint moved)."
+            echo "bundle=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No mobile client changes → EAS build will be skipped."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Server/docs-only merge → no OTA, no build."
+            echo "bundle=false" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: supabase/setup-cli@v1
@@ -119,33 +122,74 @@ jobs:
           printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 -d > secrets/asc-api-key.p8
           echo "wrote secrets/asc-api-key.p8 ($(wc -c < secrets/asc-api-key.p8) bytes)"
 
-      # With the ASC key present: build + auto-submit to TestFlight (server-side,
-      # so --no-wait is fine — EAS runs the submit after the build completes).
-      # Only when the mobile client actually changed.
+      # --- Client refresh: OTA-first, build ONLY when the fingerprint moves ---
+      # JS/display changes (most builder output) ride an OTA to the staging channel
+      # → no EAS build, so a normal JS-only night costs ZERO builds. A full build
+      # fires ONLY when the runtime fingerprint changed (native code / deps / config),
+      # detected by "no finished staging build exists for the OTA's runtime yet."
+      - name: Publish OTA to staging + decide if a build is needed
+        id: ota
+        if: ${{ env.EXPO_TOKEN != '' && steps.classify.outputs.bundle == 'true' }}
+        env:
+          EXPO_PUBLIC_MAPBOX_TOKEN: ${{ secrets.EXPO_PUBLIC_MAPBOX_TOKEN }}
+        run: |
+          # Bundle with the SAME staging client env the EAS build uses
+          # (eas.json build.staging.env) + Mapbox from the secret, so eas update's
+          # fingerprint matches the staging build's runtime and the OTA actually
+          # reaches installed builds. Clean CI env — no local .env, no contamination.
+          eval "$(node -e 'const e=require("./eas.json").build.staging.env||{};for(const[k,v]of Object.entries(e))console.log("export "+k+"="+JSON.stringify(String(v)))')"
+          case "$EXPO_PUBLIC_SUPABASE_URL" in
+            *"$STAGING_REF"*) echo "OTA env = staging supabase ✓";;
+            *) echo "::error::OTA env is not staging ($EXPO_PUBLIC_SUPABASE_URL) — refusing to publish"; exit 1;;
+          esac
+          MSG=$(git log -1 --format='%s' | head -c 120)
+          if ! npx eas-cli@latest update --branch staging --platform ios --message "$MSG" --non-interactive --json > /tmp/ota.json 2> /tmp/ota.err; then
+            echo "::error::eas update failed"; cat /tmp/ota.err; cat /tmp/ota.json; exit 1
+          fi
+          RT=$(node -e 'let j=require("/tmp/ota.json");const a=Array.isArray(j)?j:[j];const u=a.find(x=>x.platform==="ios"||x.runtimeVersion)||a[0];console.log((u&&u.runtimeVersion)||"")')
+          echo "OTA published to staging — iOS runtime: ${RT:-<unknown>}"
+          # Need a build if we can't determine the runtime (safe default) OR no
+          # finished staging build exists for it yet (fingerprint moved).
+          if [ -z "$RT" ]; then
+            echo "::warning::could not read OTA runtime — building to be safe."
+            echo "need_build=true" >> "$GITHUB_OUTPUT"
+          else
+            HAS=$(npx eas-cli@latest build:list --platform ios --status finished --limit 30 --non-interactive --json 2>/dev/null | node -e 'let d="";const rt=process.argv[1];process.stdin.on("data",c=>d+=c).on("end",()=>{try{const b=JSON.parse(d);console.log(b.some(x=>x.buildProfile==="staging"&&(((x.runtime&&x.runtime.version)===rt)||x.runtimeVersion===rt))?"yes":"no")}catch{console.log("no")}})' "$RT")
+            if [ "$HAS" = "yes" ]; then
+              echo "::notice::JS/display change — OTA only, NO EAS build (runtime $RT already has a staging build)."
+              echo "need_build=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::Fingerprint changed (native/deps/config) — no staging build on runtime $RT → building."
+              echo "need_build=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      # Full build ONLY when the fingerprint moved. With the ASC key: build +
+      # auto-submit to TestFlight (server-side; --no-wait is fine).
       - name: Trigger EAS staging build + TestFlight submit
-        if: ${{ env.EXPO_TOKEN != '' && env.ASC_API_KEY_P8_BASE64 != '' && steps.client.outputs.changed == 'true' }}
+        if: ${{ env.EXPO_TOKEN != '' && env.ASC_API_KEY_P8_BASE64 != '' && steps.ota.outputs.need_build == 'true' }}
         run: npx eas-cli@latest build --platform ios --profile staging --auto-submit --non-interactive --no-wait
 
-      # Fallback: ASC key not configured — build only (old behavior).
+      # Fallback: ASC key not configured — build only.
       - name: Trigger EAS staging build (build only — no ASC key)
-        if: ${{ env.EXPO_TOKEN != '' && env.ASC_API_KEY_P8_BASE64 == '' && steps.client.outputs.changed == 'true' }}
+        if: ${{ env.EXPO_TOKEN != '' && env.ASC_API_KEY_P8_BASE64 == '' && steps.ota.outputs.need_build == 'true' }}
         run: npx eas-cli@latest build --platform ios --profile staging --non-interactive --no-wait
 
       - name: Skip EAS (no token)
         if: ${{ env.EXPO_TOKEN == '' }}
-        run: echo "::warning::EXPO_TOKEN not set — skipped EAS staging build."
+        run: echo "::warning::EXPO_TOKEN not set — skipped EAS staging refresh."
 
-      # Server-only / doc-only merge: skip the build and tell Kevin in Slack so a
-      # missing build never reads as "something went wrong."
-      - name: Skip EAS (no client changes) + Slack note
-        if: ${{ env.EXPO_TOKEN != '' && steps.client.outputs.changed != 'true' }}
+      # Server-only / doc-only merge: no client refresh at all. Tell Kevin so a
+      # missing OTA/build never reads as "something went wrong."
+      - name: No client refresh (server/docs-only) + Slack note
+        if: ${{ env.EXPO_TOKEN != '' && steps.classify.outputs.bundle != 'true' }}
         run: |
-          echo "::notice::No mobile client changes — EAS staging build skipped (server/docs-only merge)."
+          echo "::notice::Server/docs-only merge — no OTA, no build. Migrations + edge functions deployed normally."
           if [ -n "$SLACK_WEBHOOK_URL" ]; then
             RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             curl -sf -X POST -H 'Content-Type: application/json' "$SLACK_WEBHOOK_URL" -d @- <<JSON
-          {"text":":information_source: *Staging: EAS build skipped*","attachments":[{"color":"#999999","blocks":[
-            {"type":"section","text":{"type":"mrkdwn","text":"Server/docs-only merge — no mobile client change, so no new staging build. Migrations + edge functions deployed normally. Nothing went wrong."}},
+          {"text":":information_source: *Staging: no client refresh*","attachments":[{"color":"#999999","blocks":[
+            {"type":"section","text":{"type":"mrkdwn","text":"Server/docs-only merge — no app bundle change, so no OTA and no build. Migrations + edge functions deployed normally. Nothing went wrong."}},
             {"type":"section","fields":[
               {"type":"mrkdwn","text":"*Commit:*\n\`${{ github.sha }}\`"},
               {"type":"mrkdwn","text":"*By:*\n${{ github.actor }}"}
@@ -159,10 +203,12 @@ jobs:
         if: ${{ success() && env.SLACK_WEBHOOK_URL != '' }}
         run: |
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          if [ "${{ steps.client.outputs.changed }}" = "true" ]; then
-            SHIPPED="migrations + edge functions + EAS build"
+          if [ "${{ steps.classify.outputs.bundle }}" != "true" ]; then
+            SHIPPED="migrations + edge functions (no client change — no OTA/build)"
+          elif [ "${{ steps.ota.outputs.need_build }}" = "true" ]; then
+            SHIPPED="migrations + edge functions + OTA + EAS build (fingerprint changed)"
           else
-            SHIPPED="migrations + edge functions (EAS skipped — no client change)"
+            SHIPPED="migrations + edge functions + OTA (JS-only — no build)"
           fi
           curl -sf -X POST -H 'Content-Type: application/json' "$SLACK_WEBHOOK_URL" -d @- <<JSON
           {"text":":rocket: *Staging deploy succeeded*","attachments":[{"color":"#36a64f","blocks":[
