@@ -58,6 +58,10 @@ async function config() {
 
 async function claim(lease) {
   const r = await pg("rpc/claim_build_task", "POST", { p_worker: WORKER, p_lease_minutes: lease });
+  // Fail loudly on an RPC error — do NOT silently treat it as "no ready tasks".
+  if (r.status >= 400 || (r.body && r.body.message)) {
+    throw new Error("claim_build_task RPC failed: " + JSON.stringify(r.body).slice(0, 300));
+  }
   return Array.isArray(r.body) && r.body[0] ? r.body[0] : null;
 }
 
