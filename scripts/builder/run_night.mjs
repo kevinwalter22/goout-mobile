@@ -25,6 +25,13 @@ const KEY = process.env.SUPABASE_PROD_SERVICE_ROLE_KEY;
 const OAUTH = process.env.CLAUDE_CODE_OAUTH_TOKEN;
 const REPO = process.env.GITHUB_REPOSITORY || "kevinwalter22/goout-mobile";
 const GH_TOKEN = process.env.GITHUB_TOKEN;
+// PR-open MUST use a real PAT, not the Actions GITHUB_TOKEN: PRs opened by the
+// Actions token are suppressed from triggering workflows, so test.yml never runs
+// and the PR lands unmergeable (blocked on required checks) — which is what forced
+// the manual CI-forcing + T8 re-creation on night one. A PAT opens the PR as a real
+// user → CI fires automatically. Falls back to GITHUB_TOKEN if unset (PR opens, but
+// without auto-CI — the pre-PAT behavior).
+const PR_TOKEN = process.env.BUILDER_PR_TOKEN || process.env.GITHUB_TOKEN;
 const SLACK = process.env.SLACK_CHIEF_WEBHOOK_URL || process.env.SLACK_WEBHOOK_URL || "";
 const BASE_BRANCH = "staging";
 const WORKER = `nightly-builder-${new Date().toISOString().slice(0, 10)}`;
@@ -38,7 +45,7 @@ const req = (host, path, method, headers, body) => new Promise((res) => {
 const pg = (path, method = "GET", body) =>
   req(`${REF}.supabase.co`, `/rest/v1/${path}`, method, { apikey: KEY, Authorization: `Bearer ${KEY}`, Prefer: "return=representation" }, body);
 const gh = (path, method = "GET", body) =>
-  req("api.github.com", `/repos/${REPO}/${path}`, method, { "User-Agent": "euda-builder", Authorization: `Bearer ${GH_TOKEN}`, Accept: "application/vnd.github+json" }, body);
+  req("api.github.com", `/repos/${REPO}/${path}`, method, { "User-Agent": "euda-builder", Authorization: `Bearer ${PR_TOKEN}`, Accept: "application/vnd.github+json" }, body);
 async function slack(text) { if (!SLACK) return; const u = new URL(SLACK); await req(u.hostname, u.pathname + u.search, "POST", {}, { blocks: [{ type: "section", text: { type: "mrkdwn", text } }] }); }
 const sh = (cmd, opts = {}) => execSync(cmd, { stdio: "pipe", encoding: "utf8", ...opts });
 const shOk = (cmd) => { try { sh(cmd); return true; } catch { return false; } };
@@ -115,7 +122,7 @@ function runClaude(t, model, maxTurns, maxWallMin) {
   // scrubbed env: no prod keys, no API key
   const env = { ...process.env };
   delete env.SUPABASE_PROD_SERVICE_ROLE_KEY; delete env.SUPABASE_PROD_PROJECT_REF;
-  delete env.ANTHROPIC_API_KEY; delete env.SUPABASE_SERVICE_ROLE_KEY; delete env.GITHUB_TOKEN;
+  delete env.ANTHROPIC_API_KEY; delete env.SUPABASE_SERVICE_ROLE_KEY; delete env.GITHUB_TOKEN; delete env.BUILDER_PR_TOKEN;
   env.CLAUDE_CODE_OAUTH_TOKEN = OAUTH;
   const out = `builder-artifacts/${t.id}-claude.json`;
   const r = spawnSync("bash", ["-lc",
