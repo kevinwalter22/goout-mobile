@@ -1,6 +1,6 @@
 import { groupItems, computeGroupDistinctiveness, type GroupingConfig } from "../groupingEngine";
 import type { ScoredItem, ScoreBreakdown } from "../scoring";
-import type { GroupDefinition, GroupingContext } from "../../config/groupTaxonomy";
+import { GROUP_TAXONOMY, type GroupDefinition, type GroupingContext } from "../../config/groupTaxonomy";
 
 // ============================================================================
 // Test Helpers
@@ -408,6 +408,70 @@ describe("group distinctiveness", () => {
     // At minimum, winter_activities should form as a group
     // since we provided enough items
     expect(winterGroup).toBeDefined();
+  });
+});
+
+// ============================================================================
+// Sports & Recreation Tag Tests
+// ============================================================================
+
+describe("sports_rec group matching", () => {
+  it("does not match items tagged only 'social' (no fitness, non-Sports & Recreation category)", () => {
+    const items: ScoredItem[] = [];
+    for (let i = 0; i < 5; i++) {
+      items.push(
+        makeScoredItem({
+          id: `social-${i}`,
+          title: `Social Spot ${i}`,
+          category: "Food & Drink",
+          sub_category: "restaurant",
+          tags: ["social", "food", "dining"],
+          recommendScore: 0.8 - i * 0.02,
+        })
+      );
+    }
+
+    const ctx = makeContext();
+    const result = groupItems(items, [], ctx);
+
+    const sportsGroup = result.groups.find((g) => g.id === "sports_rec");
+    expect(sportsGroup).toBeUndefined();
+
+    const inSportsRec = new Set<string>();
+    for (const group of result.groups) {
+      if (group.id === "sports_rec") {
+        for (const item of group.items) inSportsRec.add(item.id);
+      }
+    }
+    expect(inSportsRec.size).toBe(0);
+  });
+
+  it("sports_rec match predicate still matches items tagged 'fitness'", () => {
+    // Verified directly against the taxonomy predicate (rather than the full
+    // grouping pipeline) because a fitness-tagged item can also satisfy the
+    // unrelated "adventure" group, and max-1-group-per-item dedup would make
+    // pipeline-level group formation depend on that group's priority ordering
+    // rather than on the sports_rec predicate itself.
+    const def = GROUP_TAXONOMY.find((g) => g.id === "sports_rec")!;
+    const ctx = makeContext();
+
+    const fitnessItem = makeScoredItem({
+      id: "fitness-1",
+      title: "Fitness Spot",
+      category: "Sports & Recreation",
+      sub_category: "gym",
+      tags: ["fitness"],
+    });
+    expect(def.match(fitnessItem, ctx)).toBe(true);
+
+    const socialOnlyItem = makeScoredItem({
+      id: "social-only-1",
+      title: "Social Spot",
+      category: "Food & Drink",
+      sub_category: "restaurant",
+      tags: ["social", "food", "dining"],
+    });
+    expect(def.match(socialOnlyItem, ctx)).toBe(false);
   });
 });
 

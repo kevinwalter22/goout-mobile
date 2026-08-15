@@ -475,8 +475,7 @@ export const GROUP_TAXONOMY: GroupDefinition[] = [
     title: "Sports & Recreation",
     subtitle: "Stay active",
     match: (item) =>
-      hasTag(item, "fitness", "social") ||
-      hasCategory(item, "Sports & Recreation"),
+      hasTag(item, "fitness") || hasCategory(item, "Sports & Recreation"),
     kindEligibility: ["all", "event", "activity"],
     diversityCategory: "outdoor",
     basePriority: 38,
