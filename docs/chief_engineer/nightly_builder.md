@@ -63,6 +63,30 @@ failure can't block another. Never stack 4 visual tasks in one night.
   no `GITHUB_TOKEN`) — subscription OAuth only.
 - Auth: `CLAUDE_CODE_OAUTH_TOKEN` (Max subscription; never alongside `ANTHROPIC_API_KEY`).
 
+## Kevin's default review flow (standing)
+The builder always stops at `needs_kevin` PRs — **never auto-merges; Kevin is always
+the yes.** But Kevin's *default* review is **visual, not diff-by-diff**:
+
+1. Each morning the chief engineer shows the night's PRs **+ the screenshots** the
+   self-test captured.
+2. Kevin says **"merge them"** (or **"hold #X, it looks off"**) — his explicit
+   go-ahead, **per batch, every time** (never standing pre-approval for future nights).
+3. On that go-ahead, merge the approved PRs to `staging`, **refresh the staging build**
+   (OTA `eas update --branch staging`, or a new build if native changed — mind the
+   [[ota-env-contamination]] guard), and tell Kevin **exactly when his phone will show
+   the changes**.
+4. Kevin verifies **visually in the app** — does the intended thing actually show up —
+   instead of reading diffs.
+
+**Guardrails that hold regardless of this default:**
+- Kevin approves **each** merge; "merge to staging" is his call per batch, not a
+  standing pre-approval for all future PRs.
+- **needs_device / native / anything touching auth, schema, or prod** does NOT go in
+  the fast-merge batch — flag it separately for real (not just visual) review.
+- Anything whose **screenshot self-test was inconclusive** is flagged, not fast-merged.
+- **Prod promotion is unchanged** — always Kevin's gate, always deliberate (the gated
+  `main` → Production pipeline; never a fast-merge).
+
 ## Running night one
 1. Confirm the `ready` tasks are seeded (`build_tasks` where `status='ready'`).
 2. Flip the kill-switch: `UPDATE feature_flags SET is_enabled=true WHERE flag_name='build_queue_enabled'`.
