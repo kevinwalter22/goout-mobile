@@ -12,6 +12,7 @@ import { Colors } from "../config/theme";
 import type { ScoredItem } from "../lib/scoring";
 import { getDistanceInMiles } from "../utils/location";
 import { getCategoryPlaceholder } from "../utils/categoryPlaceholder";
+import { formatTileWhen } from "../utils/formatTileWhen";
 
 interface GroupCarouselTileProps {
   item: ScoredItem;
@@ -35,6 +36,7 @@ function GroupCarouselTileInner({
 
   const isOpen = item.scoreBreakdown.openNow >= 0.9;
   const tags = (item.tags || []).slice(0, 2);
+  const whenText = useMemo(() => formatTileWhen(item), [item.kind, item.starts_at, item.ends_at]);
 
   return (
     <Pressable
@@ -86,6 +88,19 @@ function GroupCarouselTileInner({
         >
           {item.title}
         </Text>
+
+        {/* When (events only) */}
+        {whenText && (
+          <Text
+            style={{
+              fontSize: 11,
+              fontWeight: "600",
+              color: Colors.primary,
+            }}
+          >
+            {whenText}
+          </Text>
+        )}
 
         {/* Distance + Open Now */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
