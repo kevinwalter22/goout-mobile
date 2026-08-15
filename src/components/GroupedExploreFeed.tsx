@@ -25,6 +25,7 @@ import { GroupCard } from "./GroupCard";
 import type { GroupingResult, ResolvedGroup } from "../lib/groupingEngine";
 import type { ScoredItem } from "../lib/scoring";
 import { formatOpeningHours } from "../utils/formatOpeningHours";
+import { formatRecurrence } from "../utils/formatRecurrence";
 import { getCategoryPlaceholder } from "../utils/categoryPlaceholder";
 import type { ExploreItem } from "../types/database";
 
@@ -139,7 +140,7 @@ function OverflowItem({
               {item.category}
             </Text>
           )}
-          {item.recurrence && !["none", ""].includes(item.recurrence) && (
+          {formatRecurrence(item.recurrence) && (
             <View
               style={{
                 flexDirection: "row",
@@ -153,7 +154,7 @@ function OverflowItem({
             >
               <Ionicons name="repeat" size={11} color={colors.textSecondary} />
               <Text style={{ fontSize: 12, fontWeight: "600", color: colors.textSecondary }}>
-                {item.recurrence === "weekly" ? "Weekly" : "Monthly"}
+                {formatRecurrence(item.recurrence)}
               </Text>
             </View>
           )}
