@@ -56,7 +56,7 @@ jobs:
       EAS_PROJECT_ID: 4c8f3119-7056-4a82-a35a-c0f05b161d8a
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
       - name: Check recent EAS builds for failures
