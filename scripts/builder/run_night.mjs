@@ -52,7 +52,12 @@ async function config() {
   const enabled = !!(k.body && k.body[0] && k.body[0].is_enabled);
   return { enabled,
     maxTasks: g.max_tasks_per_night ?? 4, maxTurns: g.max_turns_per_task ?? 40,
-    maxWall: g.max_wallclock_min_per_task ?? 30, maxCostTask: g.max_cost_usd_per_task ?? 8,
+    maxWall: g.max_wallclock_min_per_task ?? 30,
+    // Visual tasks run the screenshot-evaluate loop (login + navigate + scroll +
+    // screenshot + read + judge), which a measured known-good run took ~61 turns /
+    // ~13 min to complete. Give them ~2x headroom; cost caps are the real backstop.
+    maxTurnsVisual: g.max_turns_visual ?? 120, maxWallVisual: g.max_wallclock_min_visual ?? 45,
+    maxCostTask: g.max_cost_usd_per_task ?? 8,
     maxCostNight: g.max_cost_usd_per_night ?? 25, model: g.model || "sonnet", lease: g.lease_minutes ?? 30 };
 }
 
@@ -83,11 +88,12 @@ FUNCTIONAL SELF-TEST — run and iterate until all pass:
 ${(a.checks || []).map((c, i) => `${i + 1}. ${c}`).join("\n")}
 
 ${visual ? `VISUAL SELF-TEST — MANDATORY (never claim the fix works without SEEING it):
-- After 'npx expo export --platform web' succeeds: serve it (\`npx --yes serve -s dist -l 8080 &\`, wait ~5s), then capture the feed:
+- Run 'npx expo export --platform web' (produces ./dist). Do NOT start a web server yourself.
+- Capture the feed with the helper (it serves ./dist internally AND shuts the server down itself):
   \`TARGET_RE='<a text pattern your change produces>' OUT=builder-artifacts/${t.id}.png STAGING_EMAIL=$STAGING_EMAIL STAGING_PASSWORD=$STAGING_PASSWORD node scripts/builder/feed_screenshot.mjs\`
-  (that helper logs into staging, opens the grouped Cards view, and scrolls to your change. Extend it if your surface is the event-detail screen.)
+  (it spawns 'serve -s dist', logs into staging, opens the grouped Cards view, scrolls to your change, screenshots, and always kills its server. Extend it if your surface is the event-detail screen.)
 - READ builder-artifacts/${t.id}.png with the Read tool and JUDGE it against: ${a.done_when || ""}
-- Then kill the server: \`pkill -f "serve -s dist" || true\`.
+- NEVER run 'npx serve &' or leave any process backgrounded — a lingering server hangs your exit and the whole run gets killed (exit 143).
 ` : ""}
 WRITE ./task-result.json:
 { "status": "pass" | "fail" | "needs_device",
@@ -166,37 +172,57 @@ async function main() {
     sh(`git checkout ${base} && git pull --ff-only origin ${base} 2>/dev/null || git checkout ${base}`);
     shOk(`git checkout -B ${branch}`);
 
-    const { exit, usage, result } = runClaude(t, cfg.model, cfg.maxTurns, cfg.maxWall);
+    // Visual tasks get the higher turn/wall caps (the screenshot loop is turn-heavy).
+    const isVisual = !!t.spec?.visual;
+    const { exit, usage, result } = runClaude(t, cfg.model, isVisual ? cfg.maxTurnsVisual : cfg.maxTurns, isVisual ? cfg.maxWallVisual : cfg.maxWall);
     nightCost += usage.cost || 0;
     console.log(`task ${t.title}: exit=${exit} cost=${usage.cost} turns=${usage.turns} result=${JSON.stringify(result)?.slice(0, 200)}`);
 
-    // guardrail: per-task cost
-    const guardrailHit = (usage.cost || 0) > cfg.maxCostTask;
+    // ── Outcome ─────────────────────────────────────────────────────────
     const st = result?.status;
-    const visualUnseen = t.spec?.visual && (st !== "pass" || !result?.screenshot_captured || result?.screenshot_verdict !== "yes");
+    const guardrailHit = (usage.cost || 0) > cfg.maxCostTask;
+    const capOrCrash = !result && exit !== 0; // killed by --max-turns / wall timeout / crash before writing a result
+    const hasChanges = sh("git status --porcelain").trim().length > 0; // builder scratch is gitignored → real source only
+    const visualUnseen = isVisual && (st !== "pass" || !result?.screenshot_captured || result?.screenshot_verdict !== "yes");
 
-    if (guardrailHit || st === "fail" || (!result && exit !== 0)) {
-      await updateTask(t.id, { status: "blocked", blocked_reason: guardrailHit ? `cost $${usage.cost} > cap $${cfg.maxCostTask}` : (result?.note || "self-test failed / no result").slice(0, 400) });
-      await slack(`🔴 *${t.title}* — blocked (${guardrailHit ? "cost cap" : "self-test failed"}). $${usage.cost ?? "?"} / ${usage.turns ?? "?"} turns.`);
+    // Nothing salvageable in the working tree → block (no PR).
+    if (!hasChanges) {
+      const why = st === "fail" ? (result?.note || "self-test failed")
+        : capOrCrash ? `no result (exit ${exit}${usage.turns ? `, ${usage.turns} turns` : ""}) — likely hit ${isVisual ? "turn/time cap" : "cap"} — and no changes`
+        : "no changes produced";
+      await updateTask(t.id, { status: "blocked", blocked_reason: why.slice(0, 400) });
+      await slack(`🔴 *${t.title}* — blocked (${why.slice(0, 140)}). $${usage.cost ?? "?"} / ${usage.turns ?? "?"} turns.`);
       continue;
     }
-    // Rule 1: visual must be seen
-    const draft = st === "needs_device" || visualUnseen;
-    const noChanges = !shOk("git diff --quiet --exit-code") ? false : true; // shOk true = clean tree = no changes
-    if (noChanges) {
-      await updateTask(t.id, { status: "blocked", blocked_reason: "no changes produced" });
-      await slack(`🔴 *${t.title}* — blocked (no changes produced).`); continue;
-    }
-    sh(`git add -A && git commit -q -m ${JSON.stringify(`feat(builder): ${t.title}\n\n${result?.note || ""}\n\nAutonomous overnight builder — task ${t.id}. ${draft ? "DRAFT: needs on-device visual verification." : "Self-tested (functional" + (t.spec?.visual ? " + screenshot" : "") + ")."}\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`)}`);
-    if (!shOk(`git push -u origin ${branch}`)) { await updateTask(t.id, { status: "blocked", blocked_reason: "push failed" }); continue; }
+
+    // There ARE changes — preserve them. A clean pass is merge-ready; anything else
+    // (cap-hit partial, over-cost, self-declared fail, unseen visual) is a DRAFT so a
+    // near-complete task never vanishes to a hard kill.
+    const cleanPass = st === "pass" && !guardrailHit && !visualUnseen;
+    const draft = !cleanPass;
+    const partialReason = guardrailHit ? `over cost cap ($${usage.cost} > $${cfg.maxCostTask})`
+      : capOrCrash ? `PARTIAL — hit ${isVisual ? "turn/time" : ""} cap at ${usage.turns ?? "?"} turns, needs continuation`
+      : st === "fail" ? `self-test failed but left changes: ${(result?.note || "").slice(0, 120)}`
+      : st === "needs_device" ? "needs on-device visual verification"
+      : visualUnseen ? "visual change could not be self-verified in-run"
+      : "";
+
+    sh(`git add -A && git commit -q -m ${JSON.stringify(`feat(builder): ${t.title}\n\n${result?.note || partialReason}\n\nAutonomous overnight builder — task ${t.id}. ${draft ? `DRAFT: ${partialReason}.` : `Self-tested (functional${isVisual ? " + screenshot" : ""}).`}\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`)}`);
+    if (!shOk(`git push -u origin ${branch}`)) { await updateTask(t.id, { status: "blocked", blocked_reason: "push failed" }); await slack(`🔴 *${t.title}* — push failed.`); continue; }
     branchOf[t.id] = branch;
 
-    const body = `Autonomous overnight builder — task \`${t.id}\`.\n\n**Self-test:** ${result?.note || ""}\n\n${t.spec?.visual ? (draft ? "⚠️ **Visual result could not be self-verified — DRAFT, needs on-device check before merge.**" : "✅ Screenshot self-test confirmed the change (see builder-artifacts).") : "Functional self-test only (non-visual)."}\n\nTier ${t.tier} · ${draft ? "needs_device" : "review + merge"}. 🤖 overnight builder`;
-    const pr = await gh("pulls", "POST", { title: `${draft ? "[needs-device] " : ""}${t.title}`, head: branch, base: stackParent ? (branchOf[stackParent] || BASE_BRANCH) : BASE_BRANCH, body, draft });
+    const body = `Autonomous overnight builder — task \`${t.id}\`.\n\n**Self-test:** ${result?.note || "_(no result file — task was cut off before it could self-report)_"}\n\n${draft ? `⚠️ **DRAFT — ${partialReason}. Do not merge as-is.**` : (isVisual ? "✅ Screenshot self-test confirmed the change (see the run's nightly-builder artifact)." : "✅ Functional self-test passed (non-visual).")}\n\nTier ${t.tier} · ${draft ? "needs Kevin" : "review + merge"}. 🤖 overnight builder`;
+    const pr = await gh("pulls", "POST", { title: `${draft ? "[draft] " : ""}${t.title}`, head: branch, base: stackParent ? (branchOf[stackParent] || BASE_BRANCH) : BASE_BRANCH, body, draft });
     const url = pr.body?.html_url || null;
-    if (draft) await updateTask(t.id, { status: "needs_kevin", needs_device: true, pr_url: url, result: (result?.note || "").slice(0, 500) });
-    else await updateTask(t.id, { status: "needs_kevin", pr_url: url, result: (result?.note || "").slice(0, 500) });
-    await slack(`${draft ? "🟠" : "✅"} *${t.title}* → ${draft ? "DRAFT PR (needs device)" : "PR (needs review)"} ${url || ""} · $${usage.cost ?? "?"} / ${usage.turns ?? "?"} turns.`);
+    if (!url) {
+      // PR auto-open failed — the branch IS pushed, so work is safe; flag loudly, don't fake needs_kevin.
+      console.error("PR open failed:", JSON.stringify(pr).slice(0, 400));
+      await updateTask(t.id, { status: "blocked", blocked_reason: `PR auto-open failed (branch ${branch} pushed — open manually): ${JSON.stringify(pr.body).slice(0, 180)}`, result: (result?.note || partialReason).slice(0, 500) });
+      await slack(`🟠 *${t.title}* — implemented + pushed \`${branch}\` but PR auto-open FAILED. Open it manually. $${usage.cost ?? "?"} / ${usage.turns ?? "?"} turns.`);
+      continue;
+    }
+    await updateTask(t.id, { status: "needs_kevin", needs_device: st === "needs_device" || visualUnseen, pr_url: url, result: (result?.note || partialReason).slice(0, 500) });
+    await slack(`${cleanPass ? "✅" : "🟠"} *${t.title}* → ${cleanPass ? "PR (review + merge)" : `DRAFT PR (${partialReason.slice(0, 60)})`} ${url} · $${usage.cost ?? "?"} / ${usage.turns ?? "?"} turns.`);
   }
   await slack(`🌙 Nightly builder done — ${scheduled.length} worked, ${deferred.length} deferred, ~$${nightCost.toFixed(2)} total.`);
 }

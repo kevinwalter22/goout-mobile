@@ -78,6 +78,7 @@ Every future task is measured against these two. Keep both here forever.
 Until trust is built, bias `ready` tasks toward:
 - **Browser-testable** (`needs_device:false`) — the builder can fully self-verify, so Kevin reviews clean self-tested work, not device-flagged half-work.
 - **Bounded** — target the F5/2b size (few files, a clear change), not big ones.
+- **Mostly non-visual** — night one proved `spec.visual` tasks (the screenshot loop) are ~5× costlier (~61 turns vs ~13) and far more fragile than non-visual: a night should be **mostly non-visual with at most 1–2 visual**, and those independent (not `stack_on` each other) so one failure can't block another. Never stack 4 visual tasks. See `nightly_builder.md` → Batch composition.
 - **Genuinely valuable** — real fixes Kevin wants, never filler to exercise the system.
 
 `needs_device` tasks (map/camera/native) are legitimate queue tasks, but the builder implements + flags them for Kevin's device review and **never merges** — keep them out of the first batches.
