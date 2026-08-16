@@ -103,6 +103,12 @@ Items map to **one or more** intents. Intent is a flexible layer over items, not
 4. An item's presence in an intent is gated by the North Star Level-1 item gate (notable + complete + accurate) — non-notable items don't pollute any intent.
 5. Time-of-day and seasonal relevance functions re-rank and can hide items within an intent at resolution time (a beach is in "get outside" year-round in the data but hidden from the resolved winter list).
 
+**Known deferred-residue cases (decided 08/16/2026) — awaiting the novelty / "try something new" layer.** Three classes of items map to NO base intent today (they stay invisible in carousels) but are *not* true inventory — they're notable places a local might send you to, and they should be rescued by the **novelty/notability filter**, NOT by one-off per-category rules:
+- **Notable bookstores** (e.g. Bull Moose, Print, Green Hand) — a beloved indie is a real destination; a generic bookstore is not. Only notability separates them → novelty-layer job.
+- **Notable libraries & historic churches/cathedrals** — a landmark library or cathedral is a "see something" sight; a functional branch library or parish church is not. Again notability-gated.
+- **Bookstore-cafés** (Elements Books Coffee Beer, ANT Bookstore & Cafe) — primary identity is *bookstore*; the coffee/beer is secondary, so they stay out of the drink carousel. If notable, same novelty-layer rescue.
+When the novelty layer is built, revisit these classes first. Until then they are correctly residue.
+
 ---
 
 ## 5. What "dynamic resolution" means in practice (the runtime behavior)
