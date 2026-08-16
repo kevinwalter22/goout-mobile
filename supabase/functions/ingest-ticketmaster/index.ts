@@ -70,6 +70,29 @@ function formatDateForApi(date: Date): string {
   return date.toISOString().split(".")[0] + "Z";
 }
 
+// Notability gate — the event-layer version of inventory-vs-curation. Only
+// anchor-tier events surface: a real named act (at ANY venue), sports (local/pro
+// teams), or an event at a recognized venue. Tribute/cover acts are the mid-tier
+// filler a knowledgeable local wouldn't call notable → dropped. Judged on the ACT,
+// not a venue whitelist alone (a real touring act at a small venue passes; a tribute
+// at a big venue does not). Verified against the Portland dry-run: drops the 2
+// tribute acts, keeps the 4 real touring acts at un-whitelisted venues.
+const TM_TRIBUTE =
+  /\btribute\b|a tribute to|: a tribute|\btribute$|grateful drag|the music of\b|\bcover band\b|performs the music/i;
+const TM_ANCHOR_VENUES =
+  /state theatre|thompson.?s point|cross insurance|hadlock|merrill aud|aura|maine savings|portland house of music/i;
+function isNotableTicketmasterEvent(event: any): boolean {
+  const name: string = event?.name || "";
+  const attraction: string = event?._embedded?.attractions?.[0]?.name || "";
+  const segment: string = event?.classifications?.[0]?.segment?.name || "";
+  const venue: string = event?._embedded?.venues?.[0]?.name || "";
+  if (TM_TRIBUTE.test(name) || TM_TRIBUTE.test(attraction)) return false; // filler
+  if (segment === "Sports") return true;            // local/pro teams = anchor
+  if (attraction) return true;                       // a real named act, at any venue
+  if (TM_ANCHOR_VENUES.test(venue)) return true;     // recognized-venue fallback
+  return false;                                      // no act + obscure venue → skip
+}
+
 Deno.serve(async (req) => {
   const preflight = handleCorsPreflightIfNeeded(req);
   if (preflight) return preflight;
@@ -161,6 +184,7 @@ Deno.serve(async (req) => {
 
     const results: IngestResult[] = [];
     let totalFetched = 0;
+    let skippedNotability = 0;
     let page = 0;
 
     // Fetch pages of events
@@ -203,6 +227,12 @@ Deno.serve(async (req) => {
 
       // Process each event
       for (const event of events) {
+        // Notability gate: skip filler (tribute/cover acts, obscure) before it
+        // ever enters the pipeline — keeps the anchor tier from being diluted.
+        if (!isNotableTicketmasterEvent(event)) {
+          skippedNotability++;
+          continue;
+        }
         const externalId = event.id;
         const rawHash = await hashJson(event);
 
@@ -306,6 +336,7 @@ Deno.serve(async (req) => {
         success: true,
         summary: {
           total_fetched: totalFetched,
+          skipped_notability: skippedNotability,
           pages_processed: page + 1,
           inserted,
           updated,
