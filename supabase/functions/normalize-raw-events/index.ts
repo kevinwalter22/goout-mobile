@@ -503,12 +503,23 @@ Deno.serve(async (req) => {
           console.log(`  Queued for LLM enrichment`);
         }
 
-        // Complete the job
-        await supabase.rpc("complete_normalization_job", {
+        // Complete the job. Check the RPC error explicitly — swallowing it is how a
+        // broken complete_normalization_job (enum-cast bug, migration 157) left every
+        // job stuck 'running' unnoticed for ~2 months. A failure here is non-fatal
+        // (the row is already normalized + upserted), but it must be LOUD so it can't
+        // hide again; reset_stale_normalization_jobs is the safety-net that finalizes it.
+        const { error: completeErr } = await supabase.rpc("complete_normalization_job", {
           p_job_id: job.job_id,
           p_success: true,
           p_error: null,
         });
+        if (completeErr) {
+          console.error(`  ✗ complete_normalization_job failed for job ${job.job_id}: ${completeErr.message}`);
+          await captureEdgeException(
+            new Error(`complete_normalization_job failed: ${completeErr.message}`),
+            { function: "normalize-raw-events", job_id: job.job_id },
+          );
+        }
 
         results.push({
           job_id: job.job_id,
