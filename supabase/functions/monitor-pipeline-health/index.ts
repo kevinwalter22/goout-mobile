@@ -78,37 +78,59 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Per-SOURCE freshness. The stage check above stays green as long as the
-    // ingest stage has ANY activity (web_collector), so it can't see an individual
-    // API source going dark — which is exactly how Ticketmaster/PredictHQ stayed
-    // frozen for ~2 months unnoticed. fetch_partitions is a small curated set (not
-    // the 75+ web-collector venues), so paging on it is low-noise. An ENABLED
-    // partition (with an ENABLED source) that hasn't fetched in >3 days = a live
-    // source has gone dark. Brand-new partitions (<1 day old) are skipped.
-    const STALE_SOURCE_DAYS = 3;
-    const { data: parts, error: pErr } = await supabase
+    // SOURCE-LIVENESS — the durable fix for silent source-death. The stage check
+    // above stays green as long as ingest has ANY activity (web_collector), so it
+    // can't see an individual source going dark — how Ticketmaster/PredictHQ stayed
+    // frozen ~2 months unnoticed. This measures OUTPUT (rows in event_ingest_raw),
+    // not fetch attempts — so it also catches a source that "fetches" but writes
+    // nothing (a stub / broken adapter, e.g. two headline sources empty forever).
+    // N is per-source-type cadence so a genuinely low-frequency source doesn't
+    // false-alarm on a normal gap; brand-new sources (<1d) get a grace period.
+    const STALE_DAYS_BY_TYPE: Record<string, number> = {
+      api_ticketmaster: 3, api_predicthq: 3, api_google_places: 3,
+      api_eventbrite: 4, api_yelp: 4, web_collector: 4, web_community_calendar: 7,
+    };
+    // Only sources ACTIVELY configured to fetch (an enabled partition, or an enabled
+    // collector target) are checked — so an intentionally-paused source (Google
+    // Places' enumeration is pulled back; a source whose partitions are all off) is
+    // never false-flagged. A source that IS configured to fetch but produces no rows
+    // is the real death signal.
+    const active = new Map<string, any>();
+    const { data: aParts } = await supabase
       .from("fetch_partitions")
-      .select("partition_label, last_fetched_at, created_at, event_sources!inner(name, is_enabled)")
+      .select("source_id, event_sources!inner(id, name, type, is_enabled)")
       .eq("is_enabled", true)
       .eq("event_sources.is_enabled", true);
-    if (pErr) throw pErr;
-    const darkSources = (parts ?? [])
-      .filter((p: any) => {
-        if ((now - new Date(p.created_at).getTime()) / 8.64e7 < 1) return false;
-        if (!p.last_fetched_at) return true;
-        return (now - new Date(p.last_fetched_at).getTime()) / 8.64e7 > STALE_SOURCE_DAYS;
-      })
-      .map((p: any) => {
-        const age = p.last_fetched_at
-          ? `${Math.round((now - new Date(p.last_fetched_at).getTime()) / 8.64e7)}d`
-          : "never";
-        return `${p.event_sources.name} / ${p.partition_label} (${age})`;
-      });
+    for (const p of (aParts ?? []) as any[]) active.set(p.source_id, p.event_sources);
+    const { data: wcSrcs } = await supabase
+      .from("event_sources").select("id, name, type").eq("is_enabled", true)
+      .in("type", ["web_collector", "web_community_calendar"]);
+    for (const s of (wcSrcs ?? []) as any[]) {
+      const { count } = await supabase
+        .from("collector_targets").select("id", { count: "exact", head: true })
+        .eq("source_id", s.id).eq("is_enabled", true);
+      if ((count ?? 0) > 0) active.set(s.id, s);
+    }
+    const darkSources: string[] = [];
+    for (const [sid, s] of active) {
+      const { data: last } = await supabase
+        .from("event_ingest_raw")
+        .select("created_at")
+        .eq("source_id", sid)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const lastAt = last?.[0]?.created_at;
+      const nDays = STALE_DAYS_BY_TYPE[s.type] ?? 3;
+      const ageDays = lastAt ? (now - new Date(lastAt).getTime()) / 8.64e7 : Infinity;
+      if (ageDays > nDays) {
+        darkSources.push(`${s.name} — ${lastAt ? Math.round(ageDays) + "d silent" : "0 rows ever"} (N=${nDays}d)`);
+      }
+    }
 
     if (darkSources.length) {
-      await notify("critical", `Ingestion source(s) dark >${STALE_SOURCE_DAYS}d`, {
+      await notify("critical", "Ingestion source(s) producing 0 rows", {
         text: darkSources.map((s) => `• ${s}`).join("\n"),
-        context: "monitor-pipeline-health · source-freshness",
+        context: "monitor-pipeline-health · source-liveness",
       });
     }
 
