@@ -52,10 +52,10 @@ These exist in every market because they map to basic human wants. They are the 
 - *Time-of-day:* the definition of time-sensitive. "Tonight" in the evening, "this weekend" Thu–Fri, "happening now" for live events. Rolling window, never stale.
 - *Seasonal:* festival season, seasonal markets, holiday events, sports seasons (baseball summer, hockey winter). Heavily seasonal.
 
-**TRY SOMETHING NEW** — the underground / local-secret / novel tier. The spots and experiences a plugged-in local sends you to that aren't obvious.
-- *Time-of-day / seasonal:* inherits from whatever it surfaces; this is more a *notability/novelty filter* over the other intents than a time-bound one.
+**TRY SOMETHING NEW** *(deferred — a cross-cutting FILTER, not a carousel; see the scope note below)* — the underground / local-secret / novel tier. The spots and experiences a plugged-in local sends you to that aren't obvious.
+- *Time-of-day / seasonal:* inherits from whatever it surfaces; this is a *notability/novelty filter* over the other intents, not a time-bound bucket of its own.
 
-**Design note on the universal set:** six is the right number — enough to cover the real wants, few enough to be a learnable navigation bar. They map cleanly to the two big questions Euda answers: "what should I do?" (get a bite, grab a drink, get outside, see something, try something new) and "what's happening?" (the event intent). Resist adding more universals; new wants should first be tested as place-specific intents and only promoted to universal if they recur across many cities.
+**Design note on the universal set — 5 concrete intents + 1 deferred filter (decided 08/16/2026).** The foundation ships **five concrete universal intents**: *get a bite, grab a drink, get outside, see something, what's happening.* Each is a coherent bucket of like things. **"Try something new" is deliberately NOT a sixth carousel** — it is a novelty/notability **filter that layers over the other five**, and it is **deferred to a later phase**. Making it its own bucket would recreate the exact incoherence Layer 2 exists to fix: a hidden-gem restaurant next to an obscure hike next to an underground venue have *nothing in common* as a row — the only thing they share is "novel," which is a lens, not a category. So it lands later as a filter/rank layer, never a bucket. The five map cleanly to the two questions Euda answers: "what should I do?" (get a bite, grab a drink, get outside, see something) and "what's happening?" (the event intent). Resist adding more universals; new wants should first be tested as place-specific intents and only promoted to universal if they recur across many cities.
 
 ---
 
@@ -93,6 +93,7 @@ Items map to **one or more** intents. Intent is a flexible layer over items, not
 - A lobster shack → **get a bite** + **on the water / working waterfront** (place-specific, seasonal).
 
 **Mapping rules (what the builder implements):**
+0. **Primary + conservative secondaries (decided 08/16/2026).** Every item gets exactly **one PRIMARY intent** it maps to confidently, plus **secondary intents only on a strong signal** — not merely because a venue *could* host something. A brewery is *grab a drink* (primary); it becomes *what's happening* only when it has an **actual event**, not just because it's an event-capable venue. Start tight: bloated, repetitive carousels (the same place in three rows) are worse than an item missing from a weak secondary. We loosen the secondary threshold later once the app is felt with real data.
 1. Every item resolves its base intents from its type/tags/category (a brewery is inherently "grab a drink").
 2. Event-bearing venues additionally surface under "what's happening" *during their event windows* (requires the recurrence system — Phase 2 dependency).
 3. Place-specific intents are assigned by the discovery loop / notability signals (this item is one of the region's notable lighthouses → tag it to the lighthouse intent).
@@ -117,7 +118,7 @@ When the app opens, it knows: **region** (GPS/last-known/picker), **current time
 ## 6. Data model implications (for the build)
 
 - **`intents` table** — each intent is a record: id, name, scope (universal | place-specific), region_id (null for universal), season_rule (null = year-round, or a date-range / seasonal predicate), time_of_day_profile (how it re-ranks by clock), active flag.
-- **`item_intents`** — many-to-many: an item maps to multiple intents, each mapping optionally carrying a relevance weight.
+- **`item_intents`** — many-to-many: an item maps to one or more intents. Each mapping carries `is_primary` (exactly one primary per item, enforced by a partial unique index), a relevance `weight`, and a `source` (`base` = type/tags rules, `discovery` = place-specific loop, `manual`). Primary is the confident base intent; secondaries are added only on strong signal (§4.0).
 - **Resolution happens at query/render time** against (region, time, season) — not baked into stored rows, so the same item surfaces correctly as context changes.
 - **Region-scoped:** intents resolve within the user's region (hard boundary — the cross-metro rule from the region model).
 - **Seasonal predicates** must support: year-round (the DEFAULT), date-range (May 1–Nov 15), and rolling/relative (foliage season, which shifts). Critically, the predicate is **region-scoped** — the same intent can be year-round in San Diego and summer-only in Portland. Season rules are never global; they attach per region (or per item within a region). Default to year-round and only add a restriction when the region's climate/data justifies it. This is what makes the model translate to year-round-climate and inverted-season regions (see §1) without a Northeast calendar leaking in as the assumed baseline.
@@ -127,11 +128,13 @@ When the app opens, it knows: **region** (GPS/last-known/picker), **current time
 
 ## 7. How this specs into nightly builder work (Layer 2 build)
 
+> **FOUNDATION SCOPE (in progress, 08/16/2026): tasks 1–3 only, static grouping.** Build the 5-intent schema + seed (task 1, Kevin-reviewed migration), base mapping with primary/secondary (task 2), and intent carousels replacing the category UI via expand-not-replace (task 3). **NOT in the foundation:** time-of-day resolution (task 4), seasonal resolution (task 5), intent ordering (task 6), place-specific generation (task 7), and "what's happening" ↔ recurrence (task 8) — those are later batches once the foundation is proven in the app. "Try something new" is deferred entirely (a filter, not a bucket — see §2). Seasonality stays year-round-default, per-region (§1); the schema supports it but nothing populates it yet.
+
 The taxonomy above is the design. The build breaks into bounded, browser-testable tasks — the shape the overnight builder is good at. Rough decomposition (each becomes a spec'd queue task):
 
-1. **The `intents` + `item_intents` schema** + the universal intent seed (the 6). *(migration — Kevin-reviewed, touches data model.)*
-2. **Base intent mapping** — assign every existing catalog item to its base universal intents from type/tags. *(builder, browser-testable: do items land in sane intents.)*
-3. **Replace the taxonomy category UI with intent carousels** — the card view groups by resolved intent, not "Dining"/"Sports." *(builder, visual, screenshot-testable — this is the direct fix for the "categories feel random" complaint.)*
+1. **The `intents` + `item_intents` schema** + the universal intent seed (**the 5 concrete intents**; "try something new" is deferred, see §2). *(migration — Kevin-reviewed, touches data model.)* `item_intents` carries a **primary/secondary** distinction (rule §4.0).
+2. **Base intent mapping** — assign every existing catalog item to its base universal intents from type/tags (primary + conservative secondaries). *(builder, browser-testable: do items land in sane intents.)*
+3. **Replace the taxonomy category UI with intent carousels** — the card view groups by resolved intent, not "Dining"/"Sports." **Expand-not-replace:** the existing `group_key`/GROUP_TAXONOMY grouping stays working as the fallback so nothing breaks mid-migration. *(builder, visual, screenshot-testable — this is the direct fix for the "categories feel random" complaint.)*
 4. **Time-of-day resolution** — the relevance functions that re-rank/hide by clock. *(builder + Kevin review of the behavior.)*
 5. **Seasonal resolution** — season predicates, seasonal show/hide. *(builder.)*
 6. **Intent ordering** — which intents lead based on moment. *(builder + Kevin taste review.)*
