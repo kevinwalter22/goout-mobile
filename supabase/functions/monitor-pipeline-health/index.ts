@@ -78,12 +78,69 @@ Deno.serve(async (req) => {
       });
     }
 
+    // SOURCE-LIVENESS — the durable fix for silent source-death. The stage check
+    // above stays green as long as ingest has ANY activity (web_collector), so it
+    // can't see an individual source going dark — how Ticketmaster/PredictHQ stayed
+    // frozen ~2 months unnoticed. This measures OUTPUT (rows in event_ingest_raw),
+    // not fetch attempts — so it also catches a source that "fetches" but writes
+    // nothing (a stub / broken adapter, e.g. two headline sources empty forever).
+    // N is per-source-type cadence so a genuinely low-frequency source doesn't
+    // false-alarm on a normal gap; brand-new sources (<1d) get a grace period.
+    const STALE_DAYS_BY_TYPE: Record<string, number> = {
+      api_ticketmaster: 3, api_predicthq: 3, api_google_places: 3,
+      api_eventbrite: 4, api_yelp: 4, web_collector: 4, web_community_calendar: 7,
+    };
+    // Only sources ACTIVELY configured to fetch (an enabled partition, or an enabled
+    // collector target) are checked — so an intentionally-paused source (Google
+    // Places' enumeration is pulled back; a source whose partitions are all off) is
+    // never false-flagged. A source that IS configured to fetch but produces no rows
+    // is the real death signal.
+    const active = new Map<string, any>();
+    const { data: aParts } = await supabase
+      .from("fetch_partitions")
+      .select("source_id, event_sources!inner(id, name, type, is_enabled)")
+      .eq("is_enabled", true)
+      .eq("event_sources.is_enabled", true);
+    for (const p of (aParts ?? []) as any[]) active.set(p.source_id, p.event_sources);
+    const { data: wcSrcs } = await supabase
+      .from("event_sources").select("id, name, type").eq("is_enabled", true)
+      .in("type", ["web_collector", "web_community_calendar"]);
+    for (const s of (wcSrcs ?? []) as any[]) {
+      const { count } = await supabase
+        .from("collector_targets").select("id", { count: "exact", head: true })
+        .eq("source_id", s.id).eq("is_enabled", true);
+      if ((count ?? 0) > 0) active.set(s.id, s);
+    }
+    const darkSources: string[] = [];
+    for (const [sid, s] of active) {
+      const { data: last } = await supabase
+        .from("event_ingest_raw")
+        .select("created_at")
+        .eq("source_id", sid)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const lastAt = last?.[0]?.created_at;
+      const nDays = STALE_DAYS_BY_TYPE[s.type] ?? 3;
+      const ageDays = lastAt ? (now - new Date(lastAt).getTime()) / 8.64e7 : Infinity;
+      if (ageDays > nDays) {
+        darkSources.push(`${s.name} — ${lastAt ? Math.round(ageDays) + "d silent" : "0 rows ever"} (N=${nDays}d)`);
+      }
+    }
+
+    if (darkSources.length) {
+      await notify("critical", "Ingestion source(s) producing 0 rows", {
+        text: darkSources.map((s) => `• ${s}`).join("\n"),
+        context: "monitor-pipeline-health · source-liveness",
+      });
+    }
+
     return new Response(
       JSON.stringify({
         ok: true,
         stages: EXPECTED_STAGES.length,
         warnings: warnings.length,
         criticals: criticals.length,
+        dark_sources: darkSources.length,
         last_seen: fields,
       }),
       { headers: { ...cors, "Content-Type": "application/json" } },
