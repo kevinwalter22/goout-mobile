@@ -78,12 +78,47 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Per-SOURCE freshness. The stage check above stays green as long as the
+    // ingest stage has ANY activity (web_collector), so it can't see an individual
+    // API source going dark — which is exactly how Ticketmaster/PredictHQ stayed
+    // frozen for ~2 months unnoticed. fetch_partitions is a small curated set (not
+    // the 75+ web-collector venues), so paging on it is low-noise. An ENABLED
+    // partition (with an ENABLED source) that hasn't fetched in >3 days = a live
+    // source has gone dark. Brand-new partitions (<1 day old) are skipped.
+    const STALE_SOURCE_DAYS = 3;
+    const { data: parts, error: pErr } = await supabase
+      .from("fetch_partitions")
+      .select("partition_label, last_fetched_at, created_at, event_sources!inner(name, is_enabled)")
+      .eq("is_enabled", true)
+      .eq("event_sources.is_enabled", true);
+    if (pErr) throw pErr;
+    const darkSources = (parts ?? [])
+      .filter((p: any) => {
+        if ((now - new Date(p.created_at).getTime()) / 8.64e7 < 1) return false;
+        if (!p.last_fetched_at) return true;
+        return (now - new Date(p.last_fetched_at).getTime()) / 8.64e7 > STALE_SOURCE_DAYS;
+      })
+      .map((p: any) => {
+        const age = p.last_fetched_at
+          ? `${Math.round((now - new Date(p.last_fetched_at).getTime()) / 8.64e7)}d`
+          : "never";
+        return `${p.event_sources.name} / ${p.partition_label} (${age})`;
+      });
+
+    if (darkSources.length) {
+      await notify("critical", `Ingestion source(s) dark >${STALE_SOURCE_DAYS}d`, {
+        text: darkSources.map((s) => `• ${s}`).join("\n"),
+        context: "monitor-pipeline-health · source-freshness",
+      });
+    }
+
     return new Response(
       JSON.stringify({
         ok: true,
         stages: EXPECTED_STAGES.length,
         warnings: warnings.length,
         criticals: criticals.length,
+        dark_sources: darkSources.length,
         last_seen: fields,
       }),
       { headers: { ...cors, "Content-Type": "application/json" } },
