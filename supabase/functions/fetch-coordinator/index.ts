@@ -159,6 +159,13 @@ Deno.serve(async (req) => {
           functionName,
           {
             body: partition.config_json,
+            // The ingest functions guard with requireServiceRole. functions.invoke()
+            // does NOT forward the service-role token by default, so pass it
+            // explicitly — otherwise every ingest call 401s "Missing authorization".
+            // (This is the second half of the mid-June ingestion break: the guard was
+            // added while the overflow bug had the coordinator frozen, so it was never
+            // exercised until the overflow was fixed.)
+            headers: { Authorization: `Bearer ${supabaseServiceKey}` },
           }
         );
 
