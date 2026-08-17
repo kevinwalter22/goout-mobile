@@ -57,6 +57,9 @@ prim AS (
       WHEN generic_bucket AND outside_tag THEN 'get_outside'
       -- ANTI-INVENTORY: true residue (fitness/services/errands) never maps
       WHEN residue_sub THEN NULL
+      -- Farmers/flea markets are outdoor community markets, NOT places to eat — keep
+      -- them out of Get a Bite (a future What's-Happening/recurrence home; Get Outside now).
+      WHEN sc = ANY(ARRAY['farmers market','flea market','public market']) THEN 'get_outside'
       WHEN category IN ('Food & Drink','Nightlife') THEN
         CASE
           WHEN brew_name THEN 'grab_a_drink'              -- #1 fix
