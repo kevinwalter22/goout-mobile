@@ -184,27 +184,24 @@ function isOverflowEligible(item: ScoredItem, groupedItemIds: Set<string>): bool
  */
 export function groupItemsByIntent(items: ScoredItem[]): ResolvedGroup[] {
   const byIntent = new Map<string, ScoredItem[]>();
-  const appearances = new Map<string, number>();
 
-  const addTo = (slug: string, item: ScoredItem) => {
-    const list = byIntent.get(slug) || [];
-    list.push(item);
-    byIntent.set(slug, list);
-    appearances.set(item.id, (appearances.get(item.id) || 0) + 1);
-  };
+  // Dedupe the input by id: the scored list can carry the same item twice (e.g. the
+  // postable-now merge), which otherwise duplicates it WITHIN its carousel.
+  const seen = new Set<string>();
+  const uniqueItems = items.filter((i) =>
+    seen.has(i.id) ? false : (seen.add(i.id), true)
+  );
 
-  for (const item of items) {
+  // ONE carousel per item — its PRIMARY intent ONLY. No secondaries: an item is
+  // never repeated across carousels (more variety; a café shows only under Get a
+  // Bite, not also under Grab a Drink).
+  for (const item of uniqueItems) {
     const primary = item.intents?.find((i) => i.is_primary);
     if (primary && INTENT_TAXONOMY.some((d) => d.slug === primary.slug)) {
-      addTo(primary.slug, item);
+      const list = byIntent.get(primary.slug) || [];
+      list.push(item);
+      byIntent.set(primary.slug, list);
     }
-  }
-  for (const item of items) {
-    if ((appearances.get(item.id) || 0) >= 2) continue;
-    const secondary = item.intents?.find(
-      (i) => !i.is_primary && INTENT_TAXONOMY.some((d) => d.slug === i.slug)
-    );
-    if (secondary) addTo(secondary.slug, item);
   }
 
   const groups: ResolvedGroup[] = [];
@@ -335,17 +332,13 @@ export function groupItems(
     const intentGroups = groupItemsByIntent(cardEligibleItems);
     groups.push(...intentGroups);
 
-    const groupedItemIds = new Set<string>();
-    for (const group of intentGroups) {
-      for (const item of group.items) groupedItemIds.add(item.id);
-    }
-    const overflow = items
-      .filter((item) => isOverflowEligible(item, groupedItemIds))
-      .sort((a, b) => b.recommendScore - a.recommendScore);
+    // Residue (zero-intent items) is invisible EVERYWHERE in intent mode — no
+    // "More to explore" leak (a fitness gym must not resurface below the carousels).
+    const overflow: ScoredItem[] = [];
 
     if (__DEV__) {
       console.log(
-        `\n[GroupEngine:intent] Carousels: ${intentGroups.length} | Overflow: ${overflow.length}`
+        `\n[GroupEngine:intent] Carousels: ${intentGroups.length} | Overflow: 0 (residue hidden)`
       );
     }
 

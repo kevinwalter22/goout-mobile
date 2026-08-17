@@ -637,16 +637,29 @@ describe("intent grouping (docs/intent_taxonomy.md §4/§7 task 3)", () => {
     expect(seeGroup!.items.map((i) => i.id)).toEqual(["museum-1"]);
   });
 
-  it("adds an item to at most one secondary carousel (primary + 1 secondary cap)", () => {
+  it("places each item in its PRIMARY carousel ONLY — no secondaries", () => {
     const result = groupItems([barA, barB, museum, gym], [], makeContext());
 
+    // museum-1 carries a get_outside SECONDARY, but secondaries are dropped: it
+    // appears ONLY under its primary (See Something), never repeated in Get Outside.
     const outsideGroup = result.groups.find((g) => g.id === "intent_get_outside");
-    expect(outsideGroup!.items.map((i) => i.id)).toEqual(["museum-1"]);
+    expect(
+      outsideGroup === undefined ||
+        !outsideGroup.items.some((i) => i.id === "museum-1")
+    ).toBe(true);
 
     const appearances = result.groups.filter((g) =>
       g.items.some((i) => i.id === "museum-1")
     ).length;
-    expect(appearances).toBe(2);
+    expect(appearances).toBe(1);
+  });
+
+  it("de-duplicates an item that appears twice in the input (no within-carousel dupes)", () => {
+    // The scored list can carry the same item twice (the postable-now merge); it
+    // must still appear only ONCE in its carousel.
+    const result = groupItemsByIntent([barA, barA, barB]);
+    const drinkGroup = result.find((g) => g.id === "intent_grab_a_drink");
+    expect(drinkGroup!.items.map((i) => i.id)).toEqual(["bar-a", "bar-b"]);
   });
 
   it("excludes items with no item_intents rows from every carousel", () => {
@@ -683,9 +696,10 @@ describe("intent grouping (docs/intent_taxonomy.md §4/§7 task 3)", () => {
   it("orders carousels by intents.sort_order", () => {
     const result = groupItemsByIntent([barA, barB, museum]);
     const ids = result.map((g) => g.id);
+    // museum's get_outside is a SECONDARY (now dropped) — only the two primary
+    // carousels exist, ordered by sort_order (grab_a_drink=20 before see_something=40).
     expect(ids).toEqual([
       "intent_grab_a_drink",
-      "intent_get_outside",
       "intent_see_something",
     ]);
   });
