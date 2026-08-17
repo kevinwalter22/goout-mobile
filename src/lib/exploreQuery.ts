@@ -222,6 +222,53 @@ export async function queryExploreItems(
   userId?: string,
   regionId?: string | null
 ): Promise<QueryResult<any>> {
+  const result = await queryExploreItemsRaw(supabase, filters, userLocation, userId, regionId);
+  if (result.error || result.data.length === 0) return result;
+  return { ...result, data: await attachItemIntents(supabase, result.data) };
+}
+
+/**
+ * Fetches each returned item's intents (slug, name, is_primary) from
+ * item_intents so the grouping engine can build intent carousels
+ * (docs/intent_taxonomy.md §4/§6). Failure here degrades to no intents
+ * rather than breaking the underlying explore query.
+ */
+async function attachItemIntents(
+  supabase: SupabaseClient,
+  items: any[]
+): Promise<any[]> {
+  if (items.length === 0) return items;
+  try {
+    const { data: rows, error } = await supabase
+      .from("item_intents")
+      .select("item_id, is_primary, intents(slug, name)")
+      .in(
+        "item_id",
+        items.map((i) => i.id)
+      );
+    if (error || !rows) return items.map((item) => ({ ...item, intents: [] }));
+
+    const byItem = new Map<string, { slug: string; name: string; is_primary: boolean }[]>();
+    for (const row of rows as any[]) {
+      const intent = row.intents;
+      if (!intent) continue;
+      const list = byItem.get(row.item_id) || [];
+      list.push({ slug: intent.slug, name: intent.name, is_primary: row.is_primary });
+      byItem.set(row.item_id, list);
+    }
+    return items.map((item) => ({ ...item, intents: byItem.get(item.id) || [] }));
+  } catch {
+    return items.map((item) => ({ ...item, intents: [] }));
+  }
+}
+
+async function queryExploreItemsRaw(
+  supabase: SupabaseClient,
+  filters: ExploreFilterState,
+  userLocation?: { lat: number; lng: number } | null,
+  userId?: string,
+  regionId?: string | null
+): Promise<QueryResult<any>> {
   try {
     // Debug: Log filter state
     console.log("[ExploreQuery] Starting query with filters:", {

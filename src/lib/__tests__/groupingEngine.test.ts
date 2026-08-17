@@ -1,6 +1,18 @@
-import { groupItems, computeGroupDistinctiveness, type GroupingConfig } from "../groupingEngine";
+import {
+  groupItems,
+  groupItemsByIntent,
+  computeGroupDistinctiveness,
+  DEFAULT_CONFIG,
+  type GroupingConfig,
+} from "../groupingEngine";
 import type { ScoredItem, ScoreBreakdown } from "../scoring";
 import { GROUP_TAXONOMY, type GroupDefinition, type GroupingContext } from "../../config/groupTaxonomy";
+
+// These pre-existing tests exercise the legacy GROUP_TAXONOMY predicate-matching
+// path (docs/intent_taxonomy.md §7 task 3 expand-not-replace fallback). None of
+// their fixture items carry `intents`, so they must opt out of the new
+// intent-grouping default explicitly rather than silently landing in overflow.
+const TAXONOMY_CONFIG: GroupingConfig = { ...DEFAULT_CONFIG, useIntentGrouping: false };
 
 // ============================================================================
 // Test Helpers
@@ -109,7 +121,7 @@ describe("groupingEngine quality gating", () => {
 
     const items = [hotelItem, motelItem, storageItem, goodRestaurant];
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // Collect all item IDs from all groups
     const groupedIds = new Set<string>();
@@ -147,7 +159,7 @@ describe("groupingEngine quality gating", () => {
 
     const items = [suppressed, normal];
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     const allIds = new Set<string>();
     for (const g of result.groups) {
@@ -182,7 +194,7 @@ describe("groupingEngine quality gating", () => {
 
     const items = [tier0, tier1, tier2];
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // tier 0 should not appear anywhere
     const allIds = new Set<string>();
@@ -223,7 +235,7 @@ describe("groupingEngine quality gating", () => {
     }
 
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // Count appearances per item across all groups
     const appearances = new Map<string, number>();
@@ -282,7 +294,7 @@ describe("groupingEngine quality gating", () => {
     }
 
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // Count food_drink groups
     const foodGroups = result.groups.filter(
@@ -389,7 +401,7 @@ describe("group distinctiveness", () => {
 
     const items = [...distinctiveItems, ...genericItems];
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // Find winter_activities and family_friendly groups
     const winterGroup = result.groups.find((g) => g.id === "winter_activities");
@@ -432,7 +444,7 @@ describe("sports_rec group matching", () => {
     }
 
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     const sportsGroup = result.groups.find((g) => g.id === "sports_rec");
     expect(sportsGroup).toBeUndefined();
@@ -521,7 +533,7 @@ describe("event visibility rule", () => {
 
     const items = [event1, event2, ...activities];
     const ctx = makeContext({ now });
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // At least one group should contain the events
     const eventGroups = result.groups.filter((g) =>
@@ -567,7 +579,7 @@ describe("event visibility rule", () => {
     }
 
     const ctx = makeContext({ now });
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // The live_music group has minItems=2 on its definition,
     // so it should form with just 2 events
@@ -581,5 +593,100 @@ describe("event visibility rule", () => {
       g.items.some((item) => item.kind === "event")
     );
     expect(eventInGroup).toBe(true);
+  });
+});
+
+describe("intent grouping (docs/intent_taxonomy.md §4/§7 task 3)", () => {
+  const barA = makeScoredItem({
+    id: "bar-a",
+    title: "The Thirsty Pig",
+    notability_score: 4.5,
+    intents: [{ slug: "grab_a_drink", name: "Grab a Drink", is_primary: true }],
+  });
+  const barB = makeScoredItem({
+    id: "bar-b",
+    title: "Corner Tap",
+    notability_score: 3.0,
+    intents: [{ slug: "grab_a_drink", name: "Grab a Drink", is_primary: true }],
+  });
+  const museum = makeScoredItem({
+    id: "museum-1",
+    title: "Portland Museum of Art",
+    notability_score: 4.0,
+    intents: [
+      { slug: "see_something", name: "See Something", is_primary: true },
+      { slug: "get_outside", name: "Get Outside", is_primary: false },
+    ],
+  });
+  const gym = makeScoredItem({
+    id: "gym-1",
+    title: "Anytime Fitness",
+    sub_category: "gym",
+    notability_score: 5.0,
+    // No item_intents rows — must not surface in any carousel.
+  });
+
+  it("groups items into their primary carousel, ranked by notability_score DESC", () => {
+    const result = groupItems([barA, barB, museum, gym], [], makeContext());
+
+    const drinkGroup = result.groups.find((g) => g.id === "intent_grab_a_drink");
+    expect(drinkGroup).toBeDefined();
+    expect(drinkGroup!.items.map((i) => i.id)).toEqual(["bar-a", "bar-b"]);
+
+    const seeGroup = result.groups.find((g) => g.id === "intent_see_something");
+    expect(seeGroup!.items.map((i) => i.id)).toEqual(["museum-1"]);
+  });
+
+  it("adds an item to at most one secondary carousel (primary + 1 secondary cap)", () => {
+    const result = groupItems([barA, barB, museum, gym], [], makeContext());
+
+    const outsideGroup = result.groups.find((g) => g.id === "intent_get_outside");
+    expect(outsideGroup!.items.map((i) => i.id)).toEqual(["museum-1"]);
+
+    const appearances = result.groups.filter((g) =>
+      g.items.some((i) => i.id === "museum-1")
+    ).length;
+    expect(appearances).toBe(2);
+  });
+
+  it("excludes items with no item_intents rows from every carousel", () => {
+    const result = groupItems([barA, barB, museum, gym], [], makeContext());
+
+    for (const group of result.groups) {
+      expect(group.items.some((i) => i.id === "gym-1")).toBe(false);
+    }
+  });
+
+  it("ranks What's Happening by soonest starts_at ASC, not notability", () => {
+    const laterEvent = makeScoredItem({
+      id: "evt-later",
+      title: "Later Show",
+      kind: "event",
+      starts_at: new Date(2026, 1, 25).toISOString(),
+      notability_score: 4.9,
+      intents: [{ slug: "whats_happening", name: "What's Happening", is_primary: true }],
+    });
+    const soonerEvent = makeScoredItem({
+      id: "evt-sooner",
+      title: "Sooner Show",
+      kind: "event",
+      starts_at: new Date(2026, 1, 21).toISOString(),
+      notability_score: 2.5,
+      intents: [{ slug: "whats_happening", name: "What's Happening", is_primary: true }],
+    });
+
+    const result = groupItemsByIntent([laterEvent, soonerEvent]);
+    const happeningGroup = result.find((g) => g.id === "intent_whats_happening");
+    expect(happeningGroup!.items.map((i) => i.id)).toEqual(["evt-sooner", "evt-later"]);
+  });
+
+  it("orders carousels by intents.sort_order", () => {
+    const result = groupItemsByIntent([barA, barB, museum]);
+    const ids = result.map((g) => g.id);
+    expect(ids).toEqual([
+      "intent_grab_a_drink",
+      "intent_get_outside",
+      "intent_see_something",
+    ]);
   });
 });

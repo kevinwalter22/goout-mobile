@@ -9,6 +9,8 @@ import type { ScoredItem } from "./scoring";
 import {
   GROUP_TAXONOMY,
   DIVERSITY_CAPS,
+  INTENT_TAXONOMY,
+  INTENT_GROUPING_ENABLED,
   type CardType,
   type DiversityCategory,
   type GroupDefinition,
@@ -40,13 +42,16 @@ export interface GroupingConfig {
   maxItemsPerGroup: number;
   maxGroupsPerItem: number;
   maxTotalGroups: number;
+  /** Expand-not-replace switch: intent carousels (default) vs. legacy GROUP_TAXONOMY. */
+  useIntentGrouping: boolean;
 }
 
-const DEFAULT_CONFIG: GroupingConfig = {
+export const DEFAULT_CONFIG: GroupingConfig = {
   minItemsPerGroup: 3,
   maxItemsPerGroup: 10,
   maxGroupsPerItem: 1,
   maxTotalGroups: 15,
+  useIntentGrouping: INTENT_GROUPING_ENABLED,
 };
 
 // ============================================================================
@@ -159,6 +164,76 @@ const BLOCKED_SUB_CATEGORIES = new Set([
   "clothing store", "florist", "pet store",
 ]);
 
+/** Overflow gate shared by both grouping paths: tier 1+, not suppressed, not blocked. */
+function isOverflowEligible(item: ScoredItem, groupedItemIds: Set<string>): boolean {
+  if (groupedItemIds.has(item.id)) return false;
+  const tier = (item as any).relevance_tier as number | null | undefined;
+  if (tier != null && tier < 1) return false;
+  if ((item as any).is_admin_suppressed) return false;
+  const sub = ((item as any).sub_category as string || "").toLowerCase();
+  if (sub && BLOCKED_SUB_CATEGORIES.has(sub)) return false;
+  return true;
+}
+
+/**
+ * Intent grouping (docs/intent_taxonomy.md §4/§7 task 3): each item's PRIMARY
+ * intent is its home carousel, plus up to ONE secondary — capping total
+ * carousel appearances at 2. Items with no item_intents rows appear nowhere.
+ * Carousels are ordered by intents.sort_order; within a carousel, items rank
+ * by notability_score DESC (soonest starts_at ASC for What's Happening).
+ */
+export function groupItemsByIntent(items: ScoredItem[]): ResolvedGroup[] {
+  const byIntent = new Map<string, ScoredItem[]>();
+  const appearances = new Map<string, number>();
+
+  const addTo = (slug: string, item: ScoredItem) => {
+    const list = byIntent.get(slug) || [];
+    list.push(item);
+    byIntent.set(slug, list);
+    appearances.set(item.id, (appearances.get(item.id) || 0) + 1);
+  };
+
+  for (const item of items) {
+    const primary = item.intents?.find((i) => i.is_primary);
+    if (primary && INTENT_TAXONOMY.some((d) => d.slug === primary.slug)) {
+      addTo(primary.slug, item);
+    }
+  }
+  for (const item of items) {
+    if ((appearances.get(item.id) || 0) >= 2) continue;
+    const secondary = item.intents?.find(
+      (i) => !i.is_primary && INTENT_TAXONOMY.some((d) => d.slug === i.slug)
+    );
+    if (secondary) addTo(secondary.slug, item);
+  }
+
+  const groups: ResolvedGroup[] = [];
+  for (const def of [...INTENT_TAXONOMY].sort((a, b) => a.sortOrder - b.sortOrder)) {
+    const groupItemsForIntent = byIntent.get(def.slug);
+    if (!groupItemsForIntent || groupItemsForIntent.length === 0) continue;
+
+    const sorted = [...groupItemsForIntent].sort((a, b) => {
+      if (def.rankBy === "soonest") {
+        const aTime = a.starts_at ? new Date(a.starts_at).getTime() : Infinity;
+        const bTime = b.starts_at ? new Date(b.starts_at).getTime() : Infinity;
+        return aTime - bTime;
+      }
+      return (b.notability_score ?? 0) - (a.notability_score ?? 0);
+    });
+
+    groups.push({
+      id: `intent_${def.slug}`,
+      cardType: "standard",
+      title: def.title,
+      subtitle: def.subtitle,
+      items: sorted,
+      avgTop3Score: computeAvgTop3(sorted),
+      diversityCategory: "general",
+    });
+  }
+  return groups;
+}
+
 function resolveSubtitle(
   def: GroupDefinition,
   ctx: GroupingContext
@@ -253,6 +328,29 @@ export function groupItems(
     if (sub && BLOCKED_SUB_CATEGORIES.has(sub)) return false;
     return true;
   });
+
+  // 2a. Intent grouping path (default) — expand-not-replace: the GROUP_TAXONOMY
+  // path below stays as the fallback behind config.useIntentGrouping.
+  if (config.useIntentGrouping) {
+    const intentGroups = groupItemsByIntent(cardEligibleItems);
+    groups.push(...intentGroups);
+
+    const groupedItemIds = new Set<string>();
+    for (const group of intentGroups) {
+      for (const item of group.items) groupedItemIds.add(item.id);
+    }
+    const overflow = items
+      .filter((item) => isOverflowEligible(item, groupedItemIds))
+      .sort((a, b) => b.recommendScore - a.recommendScore);
+
+    if (__DEV__) {
+      console.log(
+        `\n[GroupEngine:intent] Carousels: ${intentGroups.length} | Overflow: ${overflow.length}`
+      );
+    }
+
+    return { groups, overflow, totalProcessed: items.length };
+  }
 
   // 2b. Build tag prevalence map for distinctiveness scoring
   const tagDf = buildTagDf(cardEligibleItems);
@@ -439,15 +537,7 @@ export function groupItems(
   }
 
   const overflow = items
-    .filter((item) => {
-      if (groupedItemIds.has(item.id)) return false;
-      const tier = (item as any).relevance_tier as number | null | undefined;
-      if (tier != null && tier < 1) return false;
-      if ((item as any).is_admin_suppressed) return false;
-      const sub = ((item as any).sub_category as string || "").toLowerCase();
-      if (sub && BLOCKED_SUB_CATEGORIES.has(sub)) return false;
-      return true;
-    })
+    .filter((item) => isOverflowEligible(item, groupedItemIds))
     .sort((a, b) => b.recommendScore - a.recommendScore);
 
   // 8. Dev-only diagnostics
