@@ -185,6 +185,38 @@ export function isWeatherAppropriate(
 }
 
 // ============================================================================
+// Intent Taxonomy — the 6 universal-intent carousels (docs/intent_taxonomy.md)
+// ============================================================================
+
+/** A carousel resolved from the item_intents mapping rather than a predicate. */
+export interface IntentDefinition {
+  /** Matches intents.slug (migrations 158/159). */
+  slug: string;
+  title: string;
+  subtitle: string;
+  /** Matches intents.sort_order — display order of the carousels. */
+  sortOrder: number;
+  /** Within-carousel sort key: most-notable-first, except events (soonest-first). */
+  rankBy: "notability" | "soonest";
+}
+
+export const INTENT_TAXONOMY: IntentDefinition[] = [
+  { slug: "get_a_bite", title: "Get a Bite", subtitle: "Where to eat", sortOrder: 10, rankBy: "notability" },
+  { slug: "grab_a_drink", title: "Grab a Drink", subtitle: "Coffee, bars & breweries", sortOrder: 20, rankBy: "notability" },
+  { slug: "get_outside", title: "Get Outside", subtitle: "Parks, trails & the outdoors", sortOrder: 30, rankBy: "notability" },
+  { slug: "see_something", title: "See Something", subtitle: "Museums, galleries & sights", sortOrder: 40, rankBy: "notability" },
+  { slug: "whats_happening", title: "What's Happening", subtitle: "Events, music & markets", sortOrder: 50, rankBy: "soonest" },
+  { slug: "go_play", title: "Go Play", subtitle: "Bowling, arcades, mini golf & more", sortOrder: 60, rankBy: "notability" },
+];
+
+/**
+ * Expand-not-replace (docs/intent_taxonomy.md §7 task 3): intent carousels are
+ * the default card-view grouping; the 37-group GROUP_TAXONOMY below stays as
+ * the fallback path so nothing breaks mid-migration.
+ */
+export const INTENT_GROUPING_ENABLED = true;
+
+// ============================================================================
 // Diversity Caps
 // ============================================================================
 
