@@ -704,3 +704,90 @@ describe("intent grouping (docs/intent_taxonomy.md §4/§7 task 3)", () => {
     ]);
   });
 });
+
+describe("two-surface carousel curation (docs/intent_taxonomy.md §9)", () => {
+  const foreStreet = makeScoredItem({
+    id: "bite-fore-street",
+    title: "Fore Street",
+    notability_score: 3.0, // deliberately lower than the ineligible chain below
+    is_carousel_eligible: true,
+    blended_notability: 4.9,
+    intents: [{ slug: "get_a_bite", name: "Get a Bite", is_primary: true }],
+  } as any);
+  const centralProvisions = makeScoredItem({
+    id: "bite-central-provisions",
+    title: "Central Provisions",
+    notability_score: 2.5,
+    is_carousel_eligible: true,
+    blended_notability: 4.6,
+    intents: [{ slug: "get_a_bite", name: "Get a Bite", is_primary: true }],
+  } as any);
+  const isaBistro = makeScoredItem({
+    id: "bite-isa-bistro",
+    title: "Isa Bistro",
+    notability_score: 4.8, // high raw notability but curated OUT
+    is_carousel_eligible: false,
+    blended_notability: 3.9,
+    intents: [{ slug: "get_a_bite", name: "Get a Bite", is_primary: true }],
+  } as any);
+  const eventide = makeScoredItem({
+    id: "drink-eventide",
+    title: "Eventide Oyster Co.",
+    notability_score: 3.0,
+    is_carousel_eligible: true,
+    blended_notability: 4.8,
+    intents: [{ slug: "grab_a_drink", name: "Grab a Drink", is_primary: true }],
+  } as any);
+  const crumbl = makeScoredItem({
+    id: "drink-crumbl",
+    title: "Crumbl",
+    notability_score: 4.5,
+    is_carousel_eligible: false,
+    blended_notability: 2.0,
+    intents: [{ slug: "grab_a_drink", name: "Grab a Drink", is_primary: true }],
+  } as any);
+  // Other region/intent: is_carousel_eligible NULL — unchanged, ranked by notability_score.
+  const trailhead = makeScoredItem({
+    id: "outside-trailhead",
+    title: "Some Trailhead",
+    notability_score: 4.0,
+    intents: [{ slug: "get_outside", name: "Get Outside", is_primary: true }],
+  });
+
+  it("excludes is_carousel_eligible=false items from the browse carousel", () => {
+    const result = groupItemsByIntent([foreStreet, centralProvisions, isaBistro]);
+    const biteGroup = result.find((g) => g.id === "intent_get_a_bite");
+    expect(biteGroup!.items.map((i) => i.id)).not.toContain("bite-isa-bistro");
+  });
+
+  it("ranks eligible items by blended_notability DESC, not raw notability_score", () => {
+    const result = groupItemsByIntent([foreStreet, centralProvisions, isaBistro]);
+    const biteGroup = result.find((g) => g.id === "intent_get_a_bite");
+    // foreStreet has the lower notability_score but the higher blended_notability.
+    expect(biteGroup!.items.map((i) => i.id)).toEqual([
+      "bite-fore-street",
+      "bite-central-provisions",
+    ]);
+  });
+
+  it("keeps restaurants and low-blend chains out of Grab a Drink", () => {
+    const result = groupItemsByIntent([eventide, crumbl]);
+    const drinkGroup = result.find((g) => g.id === "intent_grab_a_drink");
+    expect(drinkGroup!.items.map((i) => i.id)).toEqual(["drink-eventide"]);
+  });
+
+  it("leaves is_carousel_eligible=NULL intents/regions ranked by notability_score as before", () => {
+    const other = makeScoredItem({
+      id: "outside-other",
+      title: "Another Spot",
+      notability_score: 2.0,
+      intents: [{ slug: "get_outside", name: "Get Outside", is_primary: true }],
+    });
+    const result = groupItemsByIntent([trailhead, other]);
+    const outsideGroup = result.find((g) => g.id === "intent_get_outside");
+    expect(outsideGroup!.items.map((i) => i.id)).toEqual([
+      "outside-trailhead",
+      "outside-other",
+    ]);
+  });
+});
