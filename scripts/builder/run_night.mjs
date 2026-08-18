@@ -90,7 +90,12 @@ async function claim(lease) {
   return Array.isArray(r.body) && r.body[0] ? r.body[0] : null;
 }
 
-const filesOf = (t) => (t.spec?.files || []).map((f) => String(f).split(/[ (]/)[0].trim()).filter((f) => f.includes("/"));
+// Spec fields authored as a single string instead of an array must NOT crash the whole
+// night. A malformed spec field should at most degrade its own task — never throw during
+// scheduling and strand every claimed task (which is exactly what a string `files`/`context`
+// did: `"...".map` / `"...".join` → TypeError before any task ran). Coerce defensively.
+const asArr = (x) => (Array.isArray(x) ? x : x == null || x === "" ? [] : [x]);
+const filesOf = (t) => asArr(t.spec?.files).map((f) => String(f).split(/[ (]/)[0].trim()).filter((f) => f.includes("/"));
 
 function buildPrompt(t) {
   const s = t.spec || {}, a = t.acceptance || {};
@@ -99,9 +104,9 @@ function buildPrompt(t) {
 
 TASK: ${t.title}
 WHY: ${s.why || ""}
-FILES TO CHANGE: ${(s.files || []).join(" | ")}
+FILES TO CHANGE: ${asArr(s.files).join(" | ")}
 THE CHANGE: ${s.change || ""}
-CONTEXT (read these to understand HOW): ${(s.context || []).join(" | ")}
+CONTEXT (read these to understand HOW): ${asArr(s.context).join(" | ")}
 OUT OF SCOPE: ${s.out_of_scope || ""}
 
 FUNCTIONAL SELF-TEST — run and iterate until all pass:
