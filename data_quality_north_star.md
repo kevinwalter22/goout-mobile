@@ -188,6 +188,24 @@ For each intent in each area, a **reference set** is the target: *if a knowledge
 
 The North Star, restated in terms of the model: *every shown item passes the Level 1 gate; every category approaches its Level 3 reference as measured by the Level 2 scorecard.*
 
+### Two surfaces: curated browse vs. broad posting-search (decided 08/17/2026)
+
+The Level-1 gate is not one bar — it's **two surfaces with opposite requirements**, and conflating them is what created the inventory-vs-curation tension:
+
+- **Browse (carousels) — curated, tight, region-relative.** The high bar. "What should I do." Only the notable places a local recommends surface here.
+- **Posting-search — broad, "is it a real place."** Exists so the geo+time-verified post (the core action) never fails for lack of a location. Queried by name/location at post time, never rendered as a feed — a search index, so breadth doesn't cost browse performance. An underground spot is findable-to-post without being carousel-worthy; genuinely notable items get pulled up into browse.
+
+Only the **absolute-never errand tier** (gas, banks, ATMs, car washes, chain pharmacies) is out of both. Everything else is at least postable. Services (salons, fitness gyms) fall out of browse by *not mapping to a browse intent*, not by a blocklist — a climbing gym maps (Go Play) and browses; a fitness gym is posting-only. **UGC long-tail:** a place not yet in the catalog gets added by someone posting there (geo+time verified), so the catalog never needs every place; posting-search anticipates "not found → add via verified post" (Phase 3). **The browse bar is region-relative, not global** — top `clamp(pool×PCT, FLOOR, CEILING)` per intent per region — so a small town isn't starved and a dense city isn't flooded ("the notable bars *in this place*").
+
+### Notability as an agreement-weighted blend (refines §5 L1 + §8 guardrail 2)
+
+Notability that decides browse membership is a **blend of three signals**, not Google stars alone (which cluster too tightly to rank the notable-vs-fine middle):
+- **Model knowledge** — primary discriminator (which places a knowledgeable local recommends); comprehensive, scales to every city.
+- **Editorial mentions** — corroboration + freshness (best-of lists confirm the model and catch staleness; facts only, Feist-safe).
+- **Google** — existence / operating verification.
+
+**Combination rule (the hallucination guard, non-negotiable):** a place reaches a carousel only when signals *agree* — model-notable **and** corroborated (editorial or solid Google). Model-notable but **uncorroborated → flagged and held out** until verified; that flagged list is the model's likely-error set and is surfaced for review. Editorial-notable-but-model-silent still counts (lists are ground truth). This operationalizes §8's "cross-source verification for notability" as the concrete gate for the curated surface — and it's *why* Google clustering alone can't be the browse ranker.
+
 ---
 
 ## 6. Build sequencing (so we don't over-build ahead of proof)
