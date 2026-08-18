@@ -154,4 +154,37 @@ Once intents exist, the auditor scores each intent per region: coverage (do we h
 
 ---
 
+## 9. Two surfaces, region-relative curation & blended notability (decided 08/17/2026)
+
+The refinement that resolves the inventory-vs-curation tension: **one catalog was being asked to serve two needs with opposite requirements.** Split them.
+
+**The two surfaces.**
+- **Browse / carousels — curated and tight.** A high, *region-relative* notability bar. The notable places a local recommends, not everything. This is "what should I do" — nobody scrolls 2,000 restaurants.
+- **Searchable posting catalog — broad.** Low bar ("is it a real place"). Exists so a user physically at a spot can find it to *post* (the geo+time-verified core action), even if it's underground and not carousel-worthy. Queried by name/location at post time, **never browsed in a feed** — a search index, not a render list, so breadth costs index rows, not browse performance.
+
+**Membership rule.**
+- `is_carousel_eligible` = maps to an experiential intent **AND** ranks in the region-relative top slice (below).
+- Every real place is in posting-search regardless of notability (a chain gym: IN posting-search — someone might post a workout — OUT of carousels).
+- Notable-but-uncategorized (a notable bookstore, record shop) → **More to Explore** (a carousel for notable experiential residue).
+- **Tiny blocklist — out of BOTH surfaces:** only the truly-never-a-logged-experience errand tier (gas stations, banks, ATMs, car washes, chain pharmacies-as-errands). Small by design — notability does the rest. (Already filtered at ingestion; the blocklist is a forward-looking safety net.)
+- Services need no blocklist: a nail salon or fitness gym simply doesn't map to a browse intent, so it's searchable-not-browsed. A climbing gym *does* map (Go Play) and browses. Type draws the line; the two surfaces stop forcing one bar to serve both.
+- **UGC long-tail (endgame):** a place not yet in the catalog is ADDED by someone posting there (geo+time verified), so the catalog never needs every place. Posting-search anticipates "not found → add via verified post" (Phase 3 social; architecture ready before the UI).
+
+**Region-relative carousel cutoff (the hybrid).** Within each (region × intent), rank by notability and take `N = clamp(round(pool × PCT), FLOOR, CEILING)` — config values `PCT=0.25, FLOOR=5, CEILING=30`, per-region tunable. The percentile keeps mid-size regions proportional; the floor stops a small town (8 bars) starving to 2; the ceiling stops a dense city (Portland, 100 bars) flooding to 300. **No global notability threshold** — a small town shows its top 5–6 even if they'd score below Portland's cut ("the notable bars *in this place*"). Portland lands ~23 Get-a-Bite / ~25 Grab-a-Drink / ~30 Get-Outside at 25%.
+
+**Blended notability — the signal that decides carousel membership.** Google rating×reviews alone clusters too tightly at the carousel boundary (~10 items within ±0.05 of the Portland Get-a-Bite cut — ordering and cut become a coin flip). The fix is an **agreement-weighted blend of three signals, each with a distinct job:**
+- **Model knowledge = primary discriminator.** "Of these catalog places, which are genuinely notable / locally beloved?" — the clean notable-vs-fine separation Google stars can't make. Scales to every city immediately.
+- **Editorial mentions = corroboration + freshness.** Best-of lists (Press Herald, Infatuation, …) confirm the model isn't hallucinating and catch staleness (closed spots, newer arrivals). Facts only (Feist-safe: name + list + year, link out — never prose).
+- **Google data = existence / operating verification.** Real place, currently operating.
+
+**Combination rule (hallucination-resistant):**
+- Model-notable **AND** corroborated (editorial OR solid Google) → confidently notable → carousel-eligible.
+- Model-notable **AND nothing corroborates** (no editorial, thin/absent Google, looks closed) → **FLAGGED, held out of carousels until verified.** The **hallucination guard** — the model's claim alone never earns a carousel spot.
+- Editorial-notable but model silent → still counts (real lists are ground truth).
+- **Corroboration across signals earns the spot, not any single signal alone.**
+
+Why the blend: Google's clustering ceiling + the model's comprehensiveness + editorial's real-world verification, together. The guard is non-negotiable and built from the first run; the "model-rated-high-but-uncorroborated" list is surfaced to Kevin on every rescore as the likely-error set to eyeball.
+
+---
+
 *The one-line summary: intents are dynamic resolvers, not static folders. Universal intents are the shared backbone across every city; place-specific intents are the local character derived per region; and every intent re-resolves by location, time of day, and season so the app behaves like a knowledgeable local for this moment, not a database that shows everything always.*
