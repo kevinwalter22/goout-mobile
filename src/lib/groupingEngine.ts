@@ -176,11 +176,33 @@ function isOverflowEligible(item: ScoredItem, groupedItemIds: Set<string>): bool
 }
 
 /**
+ * Two-surface carousel eligibility (docs/intent_taxonomy.md §9): non-null
+ * `is_carousel_eligible` means the item has been through the blended-notability
+ * curation pass (Portland bite+drink today) — `false` is excluded from browse
+ * carousels outright, and ranking prefers `blended_notability` over the raw
+ * `notability_score`. Items with a null flag (every other intent/region) are
+ * unaffected — the old behavior.
+ */
+function isCarouselExcluded(item: ScoredItem): boolean {
+  return (item as any).is_carousel_eligible === false;
+}
+
+function carouselRankValue(item: ScoredItem): number {
+  const eligibility = (item as any).is_carousel_eligible;
+  if (eligibility !== null && eligibility !== undefined) {
+    const blended = (item as any).blended_notability;
+    return typeof blended === "number" ? blended : -Infinity;
+  }
+  return item.notability_score ?? 0;
+}
+
+/**
  * Intent grouping (docs/intent_taxonomy.md §4/§7 task 3): each item's PRIMARY
  * intent is its home carousel, plus up to ONE secondary — capping total
  * carousel appearances at 2. Items with no item_intents rows appear nowhere.
  * Carousels are ordered by intents.sort_order; within a carousel, items rank
- * by notability_score DESC (soonest starts_at ASC for What's Happening).
+ * by blended notability where curated (§9) else notability_score DESC
+ * (soonest starts_at ASC for What's Happening).
  */
 export function groupItemsByIntent(items: ScoredItem[]): ResolvedGroup[] {
   const byIntent = new Map<string, ScoredItem[]>();
@@ -206,7 +228,7 @@ export function groupItemsByIntent(items: ScoredItem[]): ResolvedGroup[] {
 
   const groups: ResolvedGroup[] = [];
   for (const def of [...INTENT_TAXONOMY].sort((a, b) => a.sortOrder - b.sortOrder)) {
-    const groupItemsForIntent = byIntent.get(def.slug);
+    const groupItemsForIntent = byIntent.get(def.slug)?.filter((item) => !isCarouselExcluded(item));
     if (!groupItemsForIntent || groupItemsForIntent.length === 0) continue;
 
     const sorted = [...groupItemsForIntent].sort((a, b) => {
@@ -215,7 +237,7 @@ export function groupItemsByIntent(items: ScoredItem[]): ResolvedGroup[] {
         const bTime = b.starts_at ? new Date(b.starts_at).getTime() : Infinity;
         return aTime - bTime;
       }
-      return (b.notability_score ?? 0) - (a.notability_score ?? 0);
+      return carouselRankValue(b) - carouselRankValue(a);
     });
 
     groups.push({

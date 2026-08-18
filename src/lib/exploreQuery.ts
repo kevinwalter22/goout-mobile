@@ -223,8 +223,70 @@ export async function queryExploreItems(
   regionId?: string | null
 ): Promise<QueryResult<any>> {
   const result = await queryExploreItemsRaw(supabase, filters, userLocation, userId, regionId);
-  if (result.error || result.data.length === 0) return result;
-  return { ...result, data: await attachItemIntents(supabase, result.data) };
+  if (result.error) return result;
+  const withEligible = await ensureCarouselEligibleItems(supabase, result.data, filters, regionId);
+  if (withEligible.length === 0) return { ...result, data: withEligible };
+  const withIntents = await attachItemIntents(supabase, withEligible);
+  return { ...result, data: withIntents.map(attachCarouselCuration) };
+}
+
+/**
+ * The cards view's single large-page fetch (see app/(tabs)/explore.tsx's
+ * `pageSizeOverride: 200`) sorts "soonest" with no tiebreaker among the many
+ * null-`starts_at` activities that share a `starts_at` value — hundreds of
+ * Portland activities compete for the tail of that window, so the curated
+ * `is_carousel_eligible` set (docs/intent_taxonomy.md §9, the exact items the
+ * browse carousels are supposed to show) isn't guaranteed to land inside it.
+ * Backfill any curated items missing from the fetched page so
+ * groupItemsByIntent (groupingEngine.ts) always has the full curated pool to
+ * filter/rank from. Gated to large-page fetches (>=100) — list view's small,
+ * exact-count pages keep their existing pagination contract untouched.
+ */
+async function ensureCarouselEligibleItems(
+  supabase: SupabaseClient,
+  items: any[],
+  filters: ExploreFilterState,
+  regionId?: string | null
+): Promise<any[]> {
+  if (!regionId || filters.pageSize < 100 || filters.kindFilter === "event") return items;
+  try {
+    const existingIds = new Set(items.map((i) => i.id));
+    const { data, error } = await supabase
+      .from("explore_items")
+      .select("*")
+      .eq("region_id", regionId)
+      .eq("is_carousel_eligible", true)
+      .is("deleted_at", null)
+      .eq("is_admin_suppressed", false)
+      .eq("is_duplicate", false);
+    if (error || !data) return items;
+    const missing = data.filter((row: any) => !existingIds.has(row.id));
+    return missing.length > 0 ? [...items, ...missing] : items;
+  } catch {
+    return items;
+  }
+}
+
+/**
+ * Two-surface curation columns (docs/intent_taxonomy.md §9): `is_carousel_eligible`
+ * + `blended_notability`, persisted on explore_items and already returned by both
+ * query paths below (`select("*")` / the RPC's `SELECT e.*`). supabase.ts codegen
+ * is stale and doesn't declare these columns yet, so they're read off the raw row
+ * via an unknown cast rather than blocking on a schema regen — the grouping engine
+ * (groupingEngine.ts) uses them to filter/rank the browse carousels.
+ */
+interface CarouselCuration {
+  is_carousel_eligible: boolean | null;
+  blended_notability: number | null;
+}
+
+function attachCarouselCuration(item: any): any {
+  const row = item as unknown as CarouselCuration;
+  return {
+    ...item,
+    is_carousel_eligible: row.is_carousel_eligible ?? null,
+    blended_notability: row.blended_notability ?? null,
+  };
 }
 
 /**
