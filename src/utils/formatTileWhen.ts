@@ -1,10 +1,17 @@
 /**
- * formatTileWhen — short relative time label for an event tile
- * (e.g. "Happening now", "Tonight", "Tomorrow", "Sat 7pm", "In 90m").
+ * formatTileWhen — short time label for an event tile, scaled by distance:
+ * the further out an event, the more ABSOLUTE its label.
+ *   - now/today/tomorrow → relative words ("Happening now", "Tonight", "Tomorrow", "In 90m")
+ *   - this week/weekend   → day + time ("Thu 7pm")
+ *   - beyond a week ("Later") → absolute date ("Aug 27, 7pm") so a bare weekday
+ *     can't be ambiguous ("which Thursday?").
  * Activities (and events with no starts_at) get no label.
  */
 
 const DAY_ABBREV = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_ABBREV = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
 
 type TileWhenItem = {
   kind: "event" | "activity";
@@ -56,6 +63,14 @@ export function formatTileWhen(item: TileWhenItem, now: Date = new Date()): stri
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
   if (isSameCalendarDay(startsAt, tomorrow)) return "Tomorrow";
+
+  // Beyond a week out (the "Later" window) a bare weekday is ambiguous — give the
+  // absolute date. Boundary matches the windowing's This Week ≤ 7 days.
+  const weekOut = new Date(now);
+  weekOut.setDate(weekOut.getDate() + 7);
+  if (startsAt > weekOut) {
+    return `${MONTH_ABBREV[startsAt.getMonth()]} ${startsAt.getDate()}, ${formatClockTime(startsAt)}`;
+  }
 
   return `${DAY_ABBREV[startsAt.getDay()]} ${formatClockTime(startsAt)}`;
 }

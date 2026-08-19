@@ -101,3 +101,24 @@ describe("formatTileWhen — recurring market regression", () => {
     expect(formatTileWhen(asActivity, TUE_NOON)).toBeNull();
   });
 });
+
+// Distance-scaled labels: the further out, the more absolute (so "Later" events
+// aren't an ambiguous bare weekday).
+describe("formatTileWhen — Later events get an absolute date", () => {
+  const NOW = new Date(2026, 7, 18, 12, 0, 0); // Tue Aug 18 2026
+
+  it("within a week → day + time", () => {
+    const e = makeItem("event", new Date(2026, 7, 20, 17, 0, 0).toISOString()); // Thu, 2 days
+    expect(formatTileWhen(e, NOW)).toBe("Thu 5pm");
+  });
+
+  it("beyond a week → absolute date + time", () => {
+    const e = makeItem("event", new Date(2026, 7, 27, 17, 0, 0).toISOString()); // +9 days
+    expect(formatTileWhen(e, NOW)).toBe("Aug 27, 5pm");
+  });
+
+  it("weeks out → absolute date + time", () => {
+    const e = makeItem("event", new Date(2026, 8, 15, 19, 0, 0).toISOString()); // Sep 15
+    expect(formatTileWhen(e, NOW)).toBe("Sep 15, 7pm");
+  });
+});
