@@ -671,11 +671,12 @@ describe("intent grouping (docs/intent_taxonomy.md §4/§7 task 3)", () => {
   });
 
   it("ranks What's Happening by soonest starts_at ASC, not notability", () => {
+    const now = new Date(2026, 1, 1, 12, 0); // Feb 1 2026 — fixed so windowing is deterministic
     const laterEvent = makeScoredItem({
       id: "evt-later",
       title: "Later Show",
       kind: "event",
-      starts_at: new Date(2026, 1, 25).toISOString(),
+      starts_at: new Date(2026, 1, 25).toISOString(), // +24d → "Later" window
       notability_score: 4.9,
       intents: [{ slug: "whats_happening", name: "What's Happening", is_primary: true }],
     });
@@ -683,14 +684,32 @@ describe("intent grouping (docs/intent_taxonomy.md §4/§7 task 3)", () => {
       id: "evt-sooner",
       title: "Sooner Show",
       kind: "event",
-      starts_at: new Date(2026, 1, 21).toISOString(),
+      starts_at: new Date(2026, 1, 21).toISOString(), // +20d → "Later" window too
       notability_score: 2.5,
       intents: [{ slug: "whats_happening", name: "What's Happening", is_primary: true }],
     });
 
-    const result = groupItemsByIntent([laterEvent, soonerEvent]);
-    const happeningGroup = result.find((g) => g.id === "intent_whats_happening");
-    expect(happeningGroup!.items.map((i) => i.id)).toEqual(["evt-sooner", "evt-later"]);
+    const result = groupItemsByIntent([laterEvent, soonerEvent], now);
+    // What's Happening now splits into time windows; both fall in "Later", soonest-first.
+    const laterGroup = result.find((g) => g.id === "intent_whats_happening_later");
+    expect(laterGroup!.items.map((i) => i.id)).toEqual(["evt-sooner", "evt-later"]);
+  });
+
+  it("splits What's Happening into ordered, non-empty time-window carousels", () => {
+    const now = new Date(2026, 1, 17, 12, 0); // Tue Feb 17 2026
+    const tonight = makeScoredItem({
+      id: "evt-tonight", title: "Tonight Show", kind: "event",
+      starts_at: new Date(2026, 1, 17, 20, 0).toISOString(),
+      intents: [{ slug: "whats_happening", name: "What's Happening", is_primary: true }],
+    });
+    const weekend = makeScoredItem({
+      id: "evt-weekend", title: "Weekend Show", kind: "event",
+      starts_at: new Date(2026, 1, 21, 19, 0).toISOString(), // Sat Feb 21
+      intents: [{ slug: "whats_happening", name: "What's Happening", is_primary: true }],
+    });
+    const result = groupItemsByIntent([weekend, tonight], now);
+    const whIds = result.filter((g) => g.id.startsWith("intent_whats_happening_")).map((g) => g.id);
+    expect(whIds).toEqual(["intent_whats_happening_tonight", "intent_whats_happening_this_weekend"]);
   });
 
   it("orders carousels by intents.sort_order", () => {

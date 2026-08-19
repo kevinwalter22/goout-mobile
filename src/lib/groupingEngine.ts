@@ -16,6 +16,7 @@ import {
   type GroupDefinition,
   type GroupingContext,
 } from "../config/groupTaxonomy";
+import { windowWhatsHappening } from "./whatsHappeningWindows";
 
 // ============================================================================
 // Types
@@ -204,7 +205,10 @@ function carouselRankValue(item: ScoredItem): number {
  * by blended notability where curated (§9) else notability_score DESC
  * (soonest starts_at ASC for What's Happening).
  */
-export function groupItemsByIntent(items: ScoredItem[]): ResolvedGroup[] {
+export function groupItemsByIntent(
+  items: ScoredItem[],
+  now: Date = new Date()
+): ResolvedGroup[] {
   const byIntent = new Map<string, ScoredItem[]>();
 
   // Dedupe the input by id: the scored list can carry the same item twice (e.g. the
@@ -239,6 +243,24 @@ export function groupItemsByIntent(items: ScoredItem[]): ResolvedGroup[] {
       }
       return carouselRankValue(b) - carouselRankValue(a);
     });
+
+    if (def.slug === "whats_happening") {
+      // Split the (soonest-sorted) event feed into ordered, series-collapsed time
+      // windows; each non-empty window renders as its own carousel row. Empty
+      // windows are omitted (see whatsHappeningWindows).
+      for (const w of windowWhatsHappening(sorted, now)) {
+        groups.push({
+          id: `intent_whats_happening_${w.key}`,
+          cardType: "standard",
+          title: w.title,
+          subtitle: def.subtitle,
+          items: w.items,
+          avgTop3Score: computeAvgTop3(w.items),
+          diversityCategory: "general",
+        });
+      }
+      continue;
+    }
 
     groups.push({
       id: `intent_${def.slug}`,
@@ -351,7 +373,7 @@ export function groupItems(
   // 2a. Intent grouping path (default) — expand-not-replace: the GROUP_TAXONOMY
   // path below stays as the fallback behind config.useIntentGrouping.
   if (config.useIntentGrouping) {
-    const intentGroups = groupItemsByIntent(cardEligibleItems);
+    const intentGroups = groupItemsByIntent(cardEligibleItems, ctx.now);
     groups.push(...intentGroups);
 
     // Residue (zero-intent items) is invisible EVERYWHERE in intent mode — no
