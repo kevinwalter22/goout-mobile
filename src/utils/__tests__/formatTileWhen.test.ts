@@ -60,3 +60,44 @@ describe("formatTileWhen", () => {
     expect(formatTileWhen(item, NOW)).toBeNull();
   });
 });
+
+// Regression: What's Happening farmers'/flea markets were stored as kind='activity'
+// (with a starts_at but no ends_at), so they rendered NO purple "when" label and vanished
+// under the Events filter. resolve_market_next_occurrence now graduates them to kind='event'
+// with a real start + end. These lock that contract so a market can never silently regress
+// to a label-less activity again.
+describe("formatTileWhen — recurring market regression", () => {
+  const TUE_NOON = new Date(2026, 7, 18, 12, 0, 0); // Tue Aug 18 2026, noon
+
+  it("labels a Wed 7am–1pm market as 'Tomorrow' the day before", () => {
+    const market = makeItem(
+      "event",
+      new Date(2026, 7, 19, 7, 0, 0).toISOString(),
+      new Date(2026, 7, 19, 13, 0, 0).toISOString()
+    );
+    expect(formatTileWhen(market, TUE_NOON)).toBe("Tomorrow");
+  });
+
+  it("reads 'Happening now' while the market is open", () => {
+    const market = makeItem(
+      "event",
+      new Date(2026, 7, 18, 10, 0, 0).toISOString(),
+      new Date(2026, 7, 18, 14, 0, 0).toISOString()
+    );
+    expect(formatTileWhen(market, TUE_NOON)).toBe("Happening now");
+  });
+
+  it("shows day + time for a market several days out", () => {
+    const market = makeItem(
+      "event",
+      new Date(2026, 7, 21, 10, 0, 0).toISOString(), // Fri
+      new Date(2026, 7, 21, 18, 0, 0).toISOString()
+    );
+    expect(formatTileWhen(market, TUE_NOON)).toBe("Fri 10am");
+  });
+
+  it("REGRESSION: the same market as an activity renders no label (the original bug)", () => {
+    const asActivity = makeItem("activity", new Date(2026, 7, 19, 7, 0, 0).toISOString(), null);
+    expect(formatTileWhen(asActivity, TUE_NOON)).toBeNull();
+  });
+});
