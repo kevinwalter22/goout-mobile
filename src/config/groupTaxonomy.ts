@@ -201,12 +201,18 @@ export interface IntentDefinition {
 }
 
 export const INTENT_TAXONOMY: IntentDefinition[] = [
-  { slug: "get_a_bite", title: "Get a Bite", subtitle: "Where to eat", sortOrder: 10, rankBy: "notability" },
-  { slug: "grab_a_drink", title: "Grab a Drink", subtitle: "Coffee, bars & breweries", sortOrder: 20, rankBy: "notability" },
-  { slug: "get_outside", title: "Get Outside", subtitle: "Parks, trails & the outdoors", sortOrder: 30, rankBy: "notability" },
-  { slug: "see_something", title: "See Something", subtitle: "Museums, galleries & sights", sortOrder: 40, rankBy: "notability" },
-  { slug: "whats_happening", title: "What's Happening", subtitle: "Events, music & markets", sortOrder: 50, rankBy: "soonest" },
-  { slug: "go_play", title: "Go Play", subtitle: "Bowling, arcades, mini golf & more", sortOrder: 60, rankBy: "notability" },
+  // v1 STATIC carousel order (sortOrder is the config knob; carousels render in this
+  // order). Principle: perishable + actionable + social ranks first, evergreen + planned
+  // last — so events lead. Empty intents/windows are dropped entirely (never sit empty
+  // near the top). This order is intended to become DYNAMIC later (resolved by time of
+  // day / day / context, same engine as within-carousel ordering — intent_taxonomy §5/§11);
+  // keep it a constant so a resolver can override cleanly.
+  { slug: "whats_happening", title: "What's Happening", subtitle: "Events, music & markets", sortOrder: 10, rankBy: "soonest" },
+  { slug: "get_a_bite", title: "Get a Bite", subtitle: "Where to eat", sortOrder: 20, rankBy: "notability" },
+  { slug: "grab_a_drink", title: "Grab a Drink", subtitle: "Coffee, bars & breweries", sortOrder: 30, rankBy: "notability" },
+  { slug: "go_play", title: "Go Play", subtitle: "Bowling, arcades, mini golf & more", sortOrder: 40, rankBy: "notability" },
+  { slug: "get_outside", title: "Get Outside", subtitle: "Parks, trails & the outdoors", sortOrder: 50, rankBy: "notability" },
+  { slug: "see_something", title: "See Something", subtitle: "Museums, galleries & sights", sortOrder: 60, rankBy: "notability" },
 ];
 
 /**

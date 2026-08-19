@@ -4,6 +4,10 @@
 -- re-runnable per-region FUNCTION that writes is_carousel_eligible + blended_notability
 -- onto explore_items (was a staging-direct script into a temp table).
 --
+-- ROLLBACK (copy-paste):
+--   drop function if exists public.refresh_carousel_eligibility(text);
+--   -- (the is_carousel_eligible / blended_notability columns are dropped by 162's rollback)
+--
 -- REPRODUCIBLE CORE = model + Google. editorial_signal is optional: when empty,
 -- corroboration falls back to a solid operating Google presence, and the blended
 -- score's editorial terms are simply 0 — the guard still holds (model-notable-but-

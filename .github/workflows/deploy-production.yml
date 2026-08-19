@@ -72,6 +72,42 @@ jobs:
           done
           echo "::error::functions deploy failed after 3 attempts"; exit 1
 
+      - name: Bootstrap curation — prod lands FULLY-SCORED (atomic with the deploy)
+        # Runs the notability generator over the whole prod catalog + the blend INSIDE
+        # the gated deploy, so prod launches fully-scored instead of schema-with-empty-
+        # scores filling in via the hourly cron. Idempotent + cheap on re-deploys:
+        # score-notability is source_signature-cached (already-scored items => scored=0
+        # => the loop breaks on the first pass, ~no LLM spend). Prereqs verified present
+        # on prod: app_config.service_role_key + ANTHROPIC_API_KEY.
+        run: |
+          PROD_URL="https://${PROD_REF}.supabase.co"
+          # Service-role key from prod app_config (same key the score cron uses). Masked; never logged.
+          KEY=$(curl -s -X POST "https://api.supabase.com/v1/projects/${PROD_REF}/database/query" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H "Content-Type: application/json" \
+            -d "{\"query\":\"select value from app_config where key = 'service_role_key'\"}" \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{process.stdout.write(JSON.parse(d)[0].value)}catch{process.exit(1)}})")
+          if [ -z "$KEY" ]; then echo "::error::could not read service_role_key from prod app_config"; exit 1; fi
+          echo "::add-mask::$KEY"
+          # 1. Score the full catalog (cached; loop until nothing left to score).
+          for i in $(seq 1 30); do
+            resp=$(curl -s -X POST "$PROD_URL/functions/v1/score-notability" \
+              -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{"limit":300}')
+            scored=$(echo "$resp" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{process.stdout.write(String(JSON.parse(d).scored))}catch{process.stdout.write('ERR')}})")
+            echo "score-notability pass $i: scored=$scored"
+            if [ "$scored" = "ERR" ] || [ -z "$scored" ]; then echo "::error::score-notability failed: $resp"; exit 1; fi
+            [ "$scored" = "0" ] && break
+            sleep 2
+          done
+          # 2. Run the blend per launched region so carousels populate.
+          for region in portland-me; do
+            code=$(curl -s -X POST "$PROD_URL/rest/v1/rpc/refresh_carousel_eligibility" \
+              -H "Authorization: Bearer $KEY" -H "apikey: $KEY" -H "Content-Type: application/json" \
+              -d "{\"p_region_slug\":\"$region\"}" -o /dev/null -w "%{http_code}")
+            echo "blend $region: HTTP $code"
+            [ "$code" -ge 400 ] && { echo "::error::blend failed for $region"; exit 1; } || true
+          done
+          echo "✅ Prod curation bootstrapped: catalog scored + carousels blended."
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
