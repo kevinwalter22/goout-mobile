@@ -510,14 +510,18 @@ async function queryExploreItemsRaw(
           : "review_status.is.null,review_status.in.(auto_approved,approved)"
       ); // Quarantine gate (include creator's own items)
 
-    // Past-event filter — trust starts_at only. Don't use ends_at because some
-    // sources (Potsdam Chamber JSON-LD, others) emit listing-expiry dates that
-    // masquerade as event-end dates. Multi-day festivals will drop out of the
-    // upcoming feed after their day-1 grace window. See migration 134.
+    // Upcoming-only filter (two independent gates, ANDed):
+    //  (1) inclusion by starts_at — keep null-start activities + a 3h grace for just-started /
+    //      in-progress events (multi-day festivals still drop after day-1, per migration 134);
+    //  (2) exclusion by ends_at — anything that has ENDED (ends_at < now) never appears.
+    // We only EXCLUDE on ends_at, never INCLUDE on it, so a bad far-future "listing-expiry" end
+    // date can't resurrect a past event (the starts_at grace still bounds inclusion). This is what
+    // stops a just-ended event from floating to the top of What's Happening under soonest-first.
+    const now = new Date().toISOString();
     const pastCutoff = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
-    query = query.or(
-      `starts_at.is.null,starts_at.gte.${pastCutoff}`
-    );
+    query = query
+      .or(`starts_at.is.null,starts_at.gte.${pastCutoff}`)
+      .or(`ends_at.is.null,ends_at.gte.${now}`);
 
     // Apply time filter (simple version - includes all activities)
     if (dateRange) {
