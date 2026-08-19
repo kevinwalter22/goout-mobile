@@ -7,6 +7,10 @@
 -- (café split) + the optional type-correction override (empty => generic rules apply).
 --
 -- Idempotent: DELETE source='base' then re-INSERT. Backfilled at the end.
+--
+-- ROLLBACK (copy-paste):
+--   delete from public.item_intents where source = 'base';
+--   drop function if exists public.refresh_base_intent_mappings();
 
 create or replace function public.refresh_base_intent_mappings()
 returns integer

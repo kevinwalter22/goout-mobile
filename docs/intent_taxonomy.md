@@ -200,4 +200,12 @@ This supersedes both the earlier blanket "café → Bite" and "café → Drink" 
 
 ---
 
+## 11. Carousel ORDER — static v1, dynamic later (decided 08/19/2026)
+
+**v1 static order (shipped):** *What's Happening → Get a Bite → Grab a Drink → Go Play → Get Outside → See Something.* Events lead. Principle: **perishable + actionable + social ranks first, evergreen + planned last** — tonight's show is gone next week (a restaurant isn't), it's time-sensitive, it's social, and it's the most differentiated from "just Google it," so it's highest-urgency and most on-thesis. Empty carousels (an intent, or a What's-Happening window, with no items) are dropped entirely — they never sit empty near the top. Implemented as a config constant (`INTENT_TAXONOMY.sortOrder` in `src/config/groupTaxonomy.ts`) so a resolver can override it cleanly.
+
+**Known future enhancement — DYNAMIC carousel ordering.** Carousel order should eventually be *resolved* by time of day / day of week / context, the **same resolution engine** that orders items *within* a carousel (§5) — not a fixed list. Examples: Fri 6pm → What's Happening + Grab a Drink lead; Sat 10am → Get a Bite + Get Outside; a rainy afternoon → Go Play + See Something rise. The static order above is v1; dynamic carousel-ordering is a later phase (depends on the time-of-day/seasonal resolution functions, §7 tasks 4–6).
+
+---
+
 *The one-line summary: intents are dynamic resolvers, not static folders. Universal intents are the shared backbone across every city; place-specific intents are the local character derived per region; and every intent re-resolves by location, time of day, and season so the app behaves like a knowledgeable local for this moment, not a database that shows everything always.*

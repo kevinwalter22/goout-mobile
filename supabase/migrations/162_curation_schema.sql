@@ -5,6 +5,13 @@
 -- read/write. The DATA in editorial_mentions / type_corrections is OPTIONAL — both
 -- the mapping and the blend degrade gracefully when they're empty (model + Google
 -- is the reproducible core). model_notability itself is created by migration 161.
+--
+-- ROLLBACK (copy-paste):
+--   alter table public.explore_items drop column if exists is_carousel_eligible,
+--                                    drop column if exists blended_notability;
+--   drop table if exists public.editorial_signal;
+--   drop table if exists public.editorial_mentions;
+--   drop table if exists public.type_corrections;
 
 -- Editorial mentions (optional booster: name-based best-of guide mentions; re-matches
 -- to the catalog by normalized name, so it is catalog-portable if seeded).

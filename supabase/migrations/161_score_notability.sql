@@ -9,6 +9,12 @@
 --
 -- Idempotent: the table already exists on staging (created direct during the
 -- MVP); this migration makes it a versioned, prod-reproducible object.
+--
+-- ROLLBACK (copy-paste):
+--   select cron.unschedule('score-notability-run');
+--   drop function if exists public.find_items_needing_notability(text,integer,boolean);
+--   drop function if exists public.notability_signature(text,text);
+--   drop table if exists public.model_notability;   -- drops generated scores (regenerable)
 
 -- 1. The table (model's raw per-item judgment; feeds the downstream blend).
 create table if not exists public.model_notability (
