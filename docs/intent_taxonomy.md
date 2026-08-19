@@ -187,4 +187,17 @@ Why the blend: Google's clustering ceiling + the model's comprehensiveness + edi
 
 ---
 
+## 10. Café split, event-nature routing & the Google-type-correction layer (decided 08/18/2026)
+
+**The café rule — unambiguous.** Cafés split by *what the place fundamentally is* (the same principle as Ocotillo):
+- **Coffee-first** (roasters, coffee shops, "X Coffee" — Bard Coffee, Tandem, Coffee By Design) → **Grab a Drink**; grabbing a coffee is the act.
+- **Food-café / brunch** (sit-down cafés you go to eat — Nom Cafe, Bayside American Cafe) → **Get a Bite**.
+This supersedes both the earlier blanket "café → Bite" and "café → Drink" — neither was right; it's the split. Signal: a coffee-first NAME (coffee/espresso/roaster) or a coffee-shop/tea-house type → Drink; a plain café type without a coffee name → Bite.
+
+**Event-nature → What's Happening (never a static intent).** Anything fundamentally time-bound — markets, flea markets, fairs, festivals, and music/event/concert/performance **venues** — is an event or event-venue and must NOT be sorted into a static intent (bite/drink/outside/see) by its food/outdoor/venue tags. A single `is_event_nature` detector routes the whole class **before any static logic: dated → What's Happening; undated → held as a flagged data-gap** (out of the static carousels and out of browse, still postable) until date-resolution + What's-Happening windowing surface it. This makes **See Something** = things you go to *look at* (museums, galleries, landmarks, monuments), not venues where events happen — with a **landmark override**: a genuine architectural/historic landmark (a historic theater people know as a *building*) stays in See Something even though events happen there.
+
+**Google's `sub_category` is unreliable — model-knowledge is the correction layer.** Google's type is flat wrong often enough to be a recurring problem (~71 mistypes across just 6 name-patterns: breweries typed "tourist attraction", coffee shops typed a food type, a nonprofit typed "performing arts theater"). Durable fix: the **model-knowledge type-correction layer** — the notability pass also emits a corrected intent when Google's type is clearly wrong; a *confident* model correction overrides the type-based mapping, gated by the existence/corroboration guard (it can never invent a place into an intent), with every override logged for review. Until it ships, confirmed mistypes live as a per-item patch list at the top of the base mapping.
+
+---
+
 *The one-line summary: intents are dynamic resolvers, not static folders. Universal intents are the shared backbone across every city; place-specific intents are the local character derived per region; and every intent re-resolves by location, time of day, and season so the app behaves like a knowledgeable local for this moment, not a database that shows everything always.*
