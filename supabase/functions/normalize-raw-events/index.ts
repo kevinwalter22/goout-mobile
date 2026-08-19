@@ -22,6 +22,7 @@ import {
   type NormalizedEvent,
 } from "../_shared/source-adapters/index.ts";
 import { normalizeFields } from "../_shared/normalize-fields.ts";
+import { decodeHtmlEntities } from "../_shared/text-normalize.ts";
 import { logPipelineHealth } from "../_shared/health-log.ts";
 import { getCorsHeaders, handleCorsPreflightIfNeeded } from "../_shared/cors.ts";
 import { captureEdgeException } from "../_shared/sentry.ts";
@@ -350,6 +351,11 @@ Deno.serve(async (req) => {
           town: fieldNorm.town,
           normalized_confidence: fieldNorm.normalized_confidence,
         };
+
+        // Decode HTML entities so raw source markup (&#8211; &amp; &hellip; …) never
+        // reaches the DB or the display layer. Applies to every source (final step).
+        normalized.title = decodeHtmlEntities(normalized.title);
+        normalized.description = decodeHtmlEntities(normalized.description);
 
         // Track review status counters (web collector items only)
         if (normalized.review_status === "quarantined") quarantinedCount++;
