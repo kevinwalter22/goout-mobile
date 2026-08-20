@@ -135,8 +135,10 @@ jobs:
       - name: Propose tasks from audit findings (keyed — not Claude)
         if: ${{ always() && hashFiles('proposed-tasks.json') != '' }}
         env:
-          STG_URL: ${{ secrets.STG_URL }}
-          STG_KEY: ${{ secrets.STG_KEY }}
+          # Staging queue = where build_tasks lives. Derive the URL from the staging
+          # ref; key is the staging service-role key. (Both secrets confirmed present.)
+          STG_URL: https://${{ secrets.SUPABASE_STAGING_PROJECT_REF }}.supabase.co
+          STG_KEY: ${{ secrets.SUPABASE_STAGING_SERVICE_ROLE_KEY }}
           SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           PROPOSE_CAP: "3"
