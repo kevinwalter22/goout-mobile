@@ -156,7 +156,7 @@ jobs:
       # "did it actually produce output?" is always answerable after the fact.
       - name: Upload report (audit trail)
         if: ${{ always() && hashFiles('chief-report.md') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: auditor-report
           path: chief-report.md
