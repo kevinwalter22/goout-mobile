@@ -73,20 +73,39 @@ jobs:
             YOUR REPORT:
             1. Top-line movement: card-ready %, completeness, event freshness,
                notability confidence — current vs. previous snapshot (delta).
-            2. Worst categories per region (lowest scorecard_pct / biggest
-               regressions) with the specific weakness (missing images/hooks,
-               stale events, low confidence).
+            2. Worst INTENTS per region. The scorecard is keyed to the 6 intents
+               (get a bite / grab a drink / get outside / see something / what's
+               happening / go play), scored against the LIVE system (carousel
+               eligibility + blended notability + model_notability). Call out the
+               lowest scorecard_pct / biggest regressions with the specific
+               weakness: low eligible_pct, high pct_unscored (items the model
+               never scored), weak notability distribution (notable/fine/unsure),
+               low completeness, stale events, or a high `residue` (unmapped)
+               count for the region.
             3. Notability sample (the part SQL can't do): judge ~5–8 items from
                weak categories against the North Star local-recommendation test;
                flag inventory-not-curation items and any stale/past events that
                slipped through. Keep the sample small — mind the turn budget.
             4. Fold in pipeline/budget/error signals a chief engineer should know.
             5. "What to fix first" — a short ranked list of concrete, high-leverage
-               actions. These are recommendations for Kevin, not tasks you execute.
+               actions (these live in the report).
+            6. PROPOSE TASKS (the self-maintaining loop): for your TOP 1–3
+               highest-leverage, well-scoped fixes, ALSO draft them as build
+               tasks to ./proposed-tasks.json — a JSON array of:
+                 { "title", "tier" (1-3), "priority" (1-100),
+                   "spec": { "why", "change", "files":[...], "context":[...], "out_of_scope":[...] },
+                   "acceptance": { "checks":[...] } }
+               These enter a 'proposed' queue for KEVIN to approve into 'ready' —
+               you NEVER queue ready work, and you cannot run the builder. Propose
+               ONLY tasks that clear the spec bar (specific why/change/files/
+               acceptance — no vague "improve the data"); skip the rest. Max 3.
+               If nothing is concrete enough, write [] or omit the file.
 
             CONSTRAINTS:
-            - Report-only. The ONLY file you may write is ./chief-report.md. Do
-              not modify any other file, run a migration, or call any write endpoint.
+            - Report-only on code/data. The ONLY files you may write are
+              ./chief-report.md and ./proposed-tasks.json. Do not modify any other
+              file, run a migration, or call any write endpoint — a separate keyed
+              step turns proposed-tasks.json into 'proposed' rows (never 'ready').
             - coverage_pct is intentionally null (Level-3 reference sets aren't
               built yet) — note it as a known gap; don't try to compute it.
             - If you run low on turns, write what you have to ./chief-report.md
@@ -115,6 +134,23 @@ jobs:
             echo "::warning::auditor produced NO chief-report.md — posting the fallback notice (no real output)."
             node scripts/worker_slack.mjs fail auditor "No report produced — likely the weekly Max limit or an error. See the Actions run log; resumes next Monday."
           fi
+
+      # Turn the auditor's drafted tasks into 'proposed' rows (Kevin approves →
+      # 'ready'). Keyed step, NOT the Claude step — the DB key never touches Claude.
+      # Server-side spec-gate + cap refuse anything vague; agents can't reach 'ready'.
+      - name: Propose tasks from audit findings (keyed — not Claude)
+        if: ${{ always() && hashFiles('proposed-tasks.json') != '' }}
+        env:
+          # Track A's QUEUE lives on PROD — the builder claims from prod (run_night.mjs
+          # uses the prod ref). So the auditor proposes to the PROD queue: auditor scores
+          # prod → proposes to prod → Kevin promotes on prod → builder builds from prod.
+          # (Env vars keep the STG_ names the scripts read; they point at prod.)
+          STG_URL: https://${{ secrets.SUPABASE_PROD_PROJECT_REF }}.supabase.co
+          STG_KEY: ${{ secrets.SUPABASE_PROD_SERVICE_ROLE_KEY }}
+          SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PROPOSE_CAP: "3"
+        run: node scripts/propose_tasks.mjs proposed-tasks.json auditor
 
       # Keep the produced report as a downloadable artifact — an audit trail so
       # "did it actually produce output?" is always answerable after the fact.

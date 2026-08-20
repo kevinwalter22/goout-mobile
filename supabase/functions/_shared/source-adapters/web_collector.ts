@@ -209,7 +209,12 @@ export function normalizeWebCollectorCandidate(raw: WebCollectorCandidate): Norm
     description: raw.description_snippet,
     hook_line: generateHookLine(raw),
     category,
-    sub_category: raw.extraction_strategy, // Store extraction strategy as sub_category for reference
+    // The extraction strategy (jsonld/ics/html_dom) is INGESTION metadata, not a venue/
+    // event category — it must never sit in sub_category, which feeds the intent mapping
+    // (a 'jsonld' sub_category matches no rule and pollutes curation). Strategy stays on
+    // the raw event; sub_category is left null for web-collected items (kind='event'
+    // routing + tags handle them).
+    sub_category: null,
     location_name: raw.location_name || raw._target_venue_name || null,
     address: raw.address,
     town,

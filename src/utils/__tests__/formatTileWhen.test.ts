@@ -122,3 +122,30 @@ describe("formatTileWhen — Later events get an absolute date", () => {
     expect(formatTileWhen(e, NOW)).toBe("Sep 15, 7pm");
   });
 });
+
+// Date-only events (source date, no time → local midnight): all-day, never "12am".
+describe("formatTileWhen — date-only (midnight) events show no misleading time", () => {
+  const TUE = new Date(2026, 7, 18, 12, 0, 0); // Tue Aug 18 2026, noon
+
+  it("today, all-day → 'Today' (not 'Today 12am')", () => {
+    const e = makeItem("event", new Date(2026, 7, 18, 0, 0, 0).toISOString());
+    expect(formatTileWhen(e, TUE)).toBe("Today");
+  });
+  it("tomorrow, all-day → 'Tomorrow'", () => {
+    const e = makeItem("event", new Date(2026, 7, 19, 0, 0, 0).toISOString());
+    expect(formatTileWhen(e, TUE)).toBe("Tomorrow");
+  });
+  it("this week, all-day → weekday only (not 'Sat 12am')", () => {
+    const e = makeItem("event", new Date(2026, 7, 22, 0, 0, 0).toISOString()); // Sat
+    expect(formatTileWhen(e, TUE)).toBe("Sat");
+  });
+  it("later, all-day → absolute date only (not 'Aug 27, 12am')", () => {
+    const e = makeItem("event", new Date(2026, 7, 27, 0, 0, 0).toISOString());
+    expect(formatTileWhen(e, TUE)).toBe("Aug 27");
+  });
+  it("an all-day event today doesn't vanish after 3am", () => {
+    const morning = new Date(2026, 7, 18, 9, 0, 0);
+    const e = makeItem("event", new Date(2026, 7, 18, 0, 0, 0).toISOString());
+    expect(formatTileWhen(e, morning)).toBe("Today"); // old default (start+3h) would be null
+  });
+});
