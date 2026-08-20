@@ -39,7 +39,7 @@ jobs:
       # this secret. When unset, the build still runs but submit is skipped.
       ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history so we can diff the merged push range and decide whether
           # the mobile client changed (gates the EAS build below).
