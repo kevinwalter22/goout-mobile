@@ -73,9 +73,15 @@ jobs:
             YOUR REPORT:
             1. Top-line movement: card-ready %, completeness, event freshness,
                notability confidence — current vs. previous snapshot (delta).
-            2. Worst categories per region (lowest scorecard_pct / biggest
-               regressions) with the specific weakness (missing images/hooks,
-               stale events, low confidence).
+            2. Worst INTENTS per region. The scorecard is keyed to the 6 intents
+               (get a bite / grab a drink / get outside / see something / what's
+               happening / go play), scored against the LIVE system (carousel
+               eligibility + blended notability + model_notability). Call out the
+               lowest scorecard_pct / biggest regressions with the specific
+               weakness: low eligible_pct, high pct_unscored (items the model
+               never scored), weak notability distribution (notable/fine/unsure),
+               low completeness, stale events, or a high `residue` (unmapped)
+               count for the region.
             3. Notability sample (the part SQL can't do): judge ~5–8 items from
                weak categories against the North Star local-recommendation test;
                flag inventory-not-curation items and any stale/past events that
@@ -135,10 +141,12 @@ jobs:
       - name: Propose tasks from audit findings (keyed — not Claude)
         if: ${{ always() && hashFiles('proposed-tasks.json') != '' }}
         env:
-          # Staging queue = where build_tasks lives. Derive the URL from the staging
-          # ref; key is the staging service-role key. (Both secrets confirmed present.)
-          STG_URL: https://${{ secrets.SUPABASE_STAGING_PROJECT_REF }}.supabase.co
-          STG_KEY: ${{ secrets.SUPABASE_STAGING_SERVICE_ROLE_KEY }}
+          # Track A's QUEUE lives on PROD — the builder claims from prod (run_night.mjs
+          # uses the prod ref). So the auditor proposes to the PROD queue: auditor scores
+          # prod → proposes to prod → Kevin promotes on prod → builder builds from prod.
+          # (Env vars keep the STG_ names the scripts read; they point at prod.)
+          STG_URL: https://${{ secrets.SUPABASE_PROD_PROJECT_REF }}.supabase.co
+          STG_KEY: ${{ secrets.SUPABASE_PROD_SERVICE_ROLE_KEY }}
           SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           PROPOSE_CAP: "3"
