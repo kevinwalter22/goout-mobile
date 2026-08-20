@@ -42,9 +42,28 @@ export function formatTileWhen(item: TileWhenItem, now: Date = new Date()): stri
   const startsAt = new Date(item.starts_at);
   if (isNaN(startsAt.getTime())) return null;
 
+  // Date-only events — the source gave a date but no time, so the parser defaulted to
+  // local midnight. Treat as ALL-DAY: show the day/date, never a misleading "12am", and
+  // don't let it vanish a few hours after midnight.
+  const dateOnly = startsAt.getHours() === 0 && startsAt.getMinutes() === 0;
+
   const endsAt = item.ends_at
     ? new Date(item.ends_at)
-    : new Date(startsAt.getTime() + 3 * 60 * 60 * 1000);
+    : dateOnly
+      ? new Date(startsAt.getFullYear(), startsAt.getMonth(), startsAt.getDate(), 23, 59, 59)
+      : new Date(startsAt.getTime() + 3 * 60 * 60 * 1000);
+
+  if (dateOnly) {
+    if (now > endsAt) return null; // day already over
+    if (isSameCalendarDay(startsAt, now)) return "Today";
+    const tomorrowDay = new Date(now);
+    tomorrowDay.setDate(tomorrowDay.getDate() + 1);
+    if (isSameCalendarDay(startsAt, tomorrowDay)) return "Tomorrow";
+    const weekOutDay = new Date(now);
+    weekOutDay.setDate(weekOutDay.getDate() + 7);
+    if (startsAt > weekOutDay) return `${MONTH_ABBREV[startsAt.getMonth()]} ${startsAt.getDate()}`;
+    return DAY_ABBREV[startsAt.getDay()];
+  }
 
   if (now >= startsAt && now <= endsAt) return "Happening now";
   if (now > endsAt) return null; // already over
