@@ -132,8 +132,19 @@ export type ExploreItem = {
   canonical_item_id?: string | null;
   is_duplicate?: boolean;
   normalized_confidence?: number | null;
+  // Place-notability composite score (migration 144), 1.00-5.00.
+  notability_score?: number | null;
+  // Intent Layer 2 mapping (migrations 158/159) — this item's home (primary)
+  // intent plus any conservative secondaries (migration 158 §4.0).
+  intents?: ExploreItemIntent[] | null;
   // Allow extra fields from DB without breaking assignment
   [key: string]: any;
+};
+
+export type ExploreItemIntent = {
+  slug: string;
+  name: string;
+  is_primary: boolean;
 };
 
 export type EventRSVP = {

@@ -9,11 +9,14 @@ import type { ScoredItem } from "./scoring";
 import {
   GROUP_TAXONOMY,
   DIVERSITY_CAPS,
+  INTENT_TAXONOMY,
+  INTENT_GROUPING_ENABLED,
   type CardType,
   type DiversityCategory,
   type GroupDefinition,
   type GroupingContext,
 } from "../config/groupTaxonomy";
+import { windowWhatsHappening } from "./whatsHappeningWindows";
 
 // ============================================================================
 // Types
@@ -40,13 +43,16 @@ export interface GroupingConfig {
   maxItemsPerGroup: number;
   maxGroupsPerItem: number;
   maxTotalGroups: number;
+  /** Expand-not-replace switch: intent carousels (default) vs. legacy GROUP_TAXONOMY. */
+  useIntentGrouping: boolean;
 }
 
-const DEFAULT_CONFIG: GroupingConfig = {
+export const DEFAULT_CONFIG: GroupingConfig = {
   minItemsPerGroup: 3,
   maxItemsPerGroup: 10,
   maxGroupsPerItem: 1,
   maxTotalGroups: 15,
+  useIntentGrouping: INTENT_GROUPING_ENABLED,
 };
 
 // ============================================================================
@@ -159,6 +165,116 @@ const BLOCKED_SUB_CATEGORIES = new Set([
   "clothing store", "florist", "pet store",
 ]);
 
+/** Overflow gate shared by both grouping paths: tier 1+, not suppressed, not blocked. */
+function isOverflowEligible(item: ScoredItem, groupedItemIds: Set<string>): boolean {
+  if (groupedItemIds.has(item.id)) return false;
+  const tier = (item as any).relevance_tier as number | null | undefined;
+  if (tier != null && tier < 1) return false;
+  if ((item as any).is_admin_suppressed) return false;
+  const sub = ((item as any).sub_category as string || "").toLowerCase();
+  if (sub && BLOCKED_SUB_CATEGORIES.has(sub)) return false;
+  return true;
+}
+
+/**
+ * Two-surface carousel eligibility (docs/intent_taxonomy.md §9): non-null
+ * `is_carousel_eligible` means the item has been through the blended-notability
+ * curation pass (Portland bite+drink today) — `false` is excluded from browse
+ * carousels outright, and ranking prefers `blended_notability` over the raw
+ * `notability_score`. Items with a null flag (every other intent/region) are
+ * unaffected — the old behavior.
+ */
+function isCarouselExcluded(item: ScoredItem): boolean {
+  return (item as any).is_carousel_eligible === false;
+}
+
+function carouselRankValue(item: ScoredItem): number {
+  const eligibility = (item as any).is_carousel_eligible;
+  if (eligibility !== null && eligibility !== undefined) {
+    const blended = (item as any).blended_notability;
+    return typeof blended === "number" ? blended : -Infinity;
+  }
+  return item.notability_score ?? 0;
+}
+
+/**
+ * Intent grouping (docs/intent_taxonomy.md §4/§7 task 3): each item's PRIMARY
+ * intent is its home carousel, plus up to ONE secondary — capping total
+ * carousel appearances at 2. Items with no item_intents rows appear nowhere.
+ * Carousels are ordered by intents.sort_order; within a carousel, items rank
+ * by blended notability where curated (§9) else notability_score DESC
+ * (soonest starts_at ASC for What's Happening).
+ */
+export function groupItemsByIntent(
+  items: ScoredItem[],
+  now: Date = new Date()
+): ResolvedGroup[] {
+  const byIntent = new Map<string, ScoredItem[]>();
+
+  // Dedupe the input by id: the scored list can carry the same item twice (e.g. the
+  // postable-now merge), which otherwise duplicates it WITHIN its carousel.
+  const seen = new Set<string>();
+  const uniqueItems = items.filter((i) =>
+    seen.has(i.id) ? false : (seen.add(i.id), true)
+  );
+
+  // ONE carousel per item — its PRIMARY intent ONLY. No secondaries: an item is
+  // never repeated across carousels (more variety; a café shows only under Get a
+  // Bite, not also under Grab a Drink).
+  for (const item of uniqueItems) {
+    const primary = item.intents?.find((i) => i.is_primary);
+    if (primary && INTENT_TAXONOMY.some((d) => d.slug === primary.slug)) {
+      const list = byIntent.get(primary.slug) || [];
+      list.push(item);
+      byIntent.set(primary.slug, list);
+    }
+  }
+
+  const groups: ResolvedGroup[] = [];
+  for (const def of [...INTENT_TAXONOMY].sort((a, b) => a.sortOrder - b.sortOrder)) {
+    const groupItemsForIntent = byIntent.get(def.slug)?.filter((item) => !isCarouselExcluded(item));
+    if (!groupItemsForIntent || groupItemsForIntent.length === 0) continue;
+
+    const sorted = [...groupItemsForIntent].sort((a, b) => {
+      if (def.rankBy === "soonest") {
+        const aTime = a.starts_at ? new Date(a.starts_at).getTime() : Infinity;
+        const bTime = b.starts_at ? new Date(b.starts_at).getTime() : Infinity;
+        return aTime - bTime;
+      }
+      return carouselRankValue(b) - carouselRankValue(a);
+    });
+
+    if (def.slug === "whats_happening") {
+      // Split the (soonest-sorted) event feed into ordered, series-collapsed time
+      // windows; each non-empty window renders as its own carousel row. Empty
+      // windows are omitted (see whatsHappeningWindows).
+      for (const w of windowWhatsHappening(sorted, now)) {
+        groups.push({
+          id: `intent_whats_happening_${w.key}`,
+          cardType: "standard",
+          title: w.title,
+          subtitle: def.subtitle,
+          items: w.items,
+          avgTop3Score: computeAvgTop3(w.items),
+          diversityCategory: "general",
+        });
+      }
+      continue;
+    }
+
+    groups.push({
+      id: `intent_${def.slug}`,
+      cardType: "standard",
+      title: def.title,
+      subtitle: def.subtitle,
+      items: sorted,
+      avgTop3Score: computeAvgTop3(sorted),
+      diversityCategory: "general",
+    });
+  }
+  return groups;
+}
+
 function resolveSubtitle(
   def: GroupDefinition,
   ctx: GroupingContext
@@ -253,6 +369,25 @@ export function groupItems(
     if (sub && BLOCKED_SUB_CATEGORIES.has(sub)) return false;
     return true;
   });
+
+  // 2a. Intent grouping path (default) — expand-not-replace: the GROUP_TAXONOMY
+  // path below stays as the fallback behind config.useIntentGrouping.
+  if (config.useIntentGrouping) {
+    const intentGroups = groupItemsByIntent(cardEligibleItems, ctx.now);
+    groups.push(...intentGroups);
+
+    // Residue (zero-intent items) is invisible EVERYWHERE in intent mode — no
+    // "More to explore" leak (a fitness gym must not resurface below the carousels).
+    const overflow: ScoredItem[] = [];
+
+    if (__DEV__) {
+      console.log(
+        `\n[GroupEngine:intent] Carousels: ${intentGroups.length} | Overflow: 0 (residue hidden)`
+      );
+    }
+
+    return { groups, overflow, totalProcessed: items.length };
+  }
 
   // 2b. Build tag prevalence map for distinctiveness scoring
   const tagDf = buildTagDf(cardEligibleItems);
@@ -439,15 +574,7 @@ export function groupItems(
   }
 
   const overflow = items
-    .filter((item) => {
-      if (groupedItemIds.has(item.id)) return false;
-      const tier = (item as any).relevance_tier as number | null | undefined;
-      if (tier != null && tier < 1) return false;
-      if ((item as any).is_admin_suppressed) return false;
-      const sub = ((item as any).sub_category as string || "").toLowerCase();
-      if (sub && BLOCKED_SUB_CATEGORIES.has(sub)) return false;
-      return true;
-    })
+    .filter((item) => isOverflowEligible(item, groupedItemIds))
     .sort((a, b) => b.recommendScore - a.recommendScore);
 
   // 8. Dev-only diagnostics

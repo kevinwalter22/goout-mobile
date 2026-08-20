@@ -1,6 +1,18 @@
-import { groupItems, computeGroupDistinctiveness, type GroupingConfig } from "../groupingEngine";
+import {
+  groupItems,
+  groupItemsByIntent,
+  computeGroupDistinctiveness,
+  DEFAULT_CONFIG,
+  type GroupingConfig,
+} from "../groupingEngine";
 import type { ScoredItem, ScoreBreakdown } from "../scoring";
 import { GROUP_TAXONOMY, type GroupDefinition, type GroupingContext } from "../../config/groupTaxonomy";
+
+// These pre-existing tests exercise the legacy GROUP_TAXONOMY predicate-matching
+// path (docs/intent_taxonomy.md §7 task 3 expand-not-replace fallback). None of
+// their fixture items carry `intents`, so they must opt out of the new
+// intent-grouping default explicitly rather than silently landing in overflow.
+const TAXONOMY_CONFIG: GroupingConfig = { ...DEFAULT_CONFIG, useIntentGrouping: false };
 
 // ============================================================================
 // Test Helpers
@@ -109,7 +121,7 @@ describe("groupingEngine quality gating", () => {
 
     const items = [hotelItem, motelItem, storageItem, goodRestaurant];
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // Collect all item IDs from all groups
     const groupedIds = new Set<string>();
@@ -147,7 +159,7 @@ describe("groupingEngine quality gating", () => {
 
     const items = [suppressed, normal];
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     const allIds = new Set<string>();
     for (const g of result.groups) {
@@ -182,7 +194,7 @@ describe("groupingEngine quality gating", () => {
 
     const items = [tier0, tier1, tier2];
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // tier 0 should not appear anywhere
     const allIds = new Set<string>();
@@ -223,7 +235,7 @@ describe("groupingEngine quality gating", () => {
     }
 
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // Count appearances per item across all groups
     const appearances = new Map<string, number>();
@@ -282,7 +294,7 @@ describe("groupingEngine quality gating", () => {
     }
 
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // Count food_drink groups
     const foodGroups = result.groups.filter(
@@ -389,7 +401,7 @@ describe("group distinctiveness", () => {
 
     const items = [...distinctiveItems, ...genericItems];
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // Find winter_activities and family_friendly groups
     const winterGroup = result.groups.find((g) => g.id === "winter_activities");
@@ -432,7 +444,7 @@ describe("sports_rec group matching", () => {
     }
 
     const ctx = makeContext();
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     const sportsGroup = result.groups.find((g) => g.id === "sports_rec");
     expect(sportsGroup).toBeUndefined();
@@ -521,7 +533,7 @@ describe("event visibility rule", () => {
 
     const items = [event1, event2, ...activities];
     const ctx = makeContext({ now });
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // At least one group should contain the events
     const eventGroups = result.groups.filter((g) =>
@@ -567,7 +579,7 @@ describe("event visibility rule", () => {
     }
 
     const ctx = makeContext({ now });
-    const result = groupItems(items, [], ctx);
+    const result = groupItems(items, [], ctx, TAXONOMY_CONFIG);
 
     // The live_music group has minItems=2 on its definition,
     // so it should form with just 2 events
@@ -581,5 +593,220 @@ describe("event visibility rule", () => {
       g.items.some((item) => item.kind === "event")
     );
     expect(eventInGroup).toBe(true);
+  });
+});
+
+describe("intent grouping (docs/intent_taxonomy.md §4/§7 task 3)", () => {
+  const barA = makeScoredItem({
+    id: "bar-a",
+    title: "The Thirsty Pig",
+    notability_score: 4.5,
+    intents: [{ slug: "grab_a_drink", name: "Grab a Drink", is_primary: true }],
+  });
+  const barB = makeScoredItem({
+    id: "bar-b",
+    title: "Corner Tap",
+    notability_score: 3.0,
+    intents: [{ slug: "grab_a_drink", name: "Grab a Drink", is_primary: true }],
+  });
+  const museum = makeScoredItem({
+    id: "museum-1",
+    title: "Portland Museum of Art",
+    notability_score: 4.0,
+    intents: [
+      { slug: "see_something", name: "See Something", is_primary: true },
+      { slug: "get_outside", name: "Get Outside", is_primary: false },
+    ],
+  });
+  const gym = makeScoredItem({
+    id: "gym-1",
+    title: "Anytime Fitness",
+    sub_category: "gym",
+    notability_score: 5.0,
+    // No item_intents rows — must not surface in any carousel.
+  });
+
+  it("groups items into their primary carousel, ranked by notability_score DESC", () => {
+    const result = groupItems([barA, barB, museum, gym], [], makeContext());
+
+    const drinkGroup = result.groups.find((g) => g.id === "intent_grab_a_drink");
+    expect(drinkGroup).toBeDefined();
+    expect(drinkGroup!.items.map((i) => i.id)).toEqual(["bar-a", "bar-b"]);
+
+    const seeGroup = result.groups.find((g) => g.id === "intent_see_something");
+    expect(seeGroup!.items.map((i) => i.id)).toEqual(["museum-1"]);
+  });
+
+  it("places each item in its PRIMARY carousel ONLY — no secondaries", () => {
+    const result = groupItems([barA, barB, museum, gym], [], makeContext());
+
+    // museum-1 carries a get_outside SECONDARY, but secondaries are dropped: it
+    // appears ONLY under its primary (See Something), never repeated in Get Outside.
+    const outsideGroup = result.groups.find((g) => g.id === "intent_get_outside");
+    expect(
+      outsideGroup === undefined ||
+        !outsideGroup.items.some((i) => i.id === "museum-1")
+    ).toBe(true);
+
+    const appearances = result.groups.filter((g) =>
+      g.items.some((i) => i.id === "museum-1")
+    ).length;
+    expect(appearances).toBe(1);
+  });
+
+  it("de-duplicates an item that appears twice in the input (no within-carousel dupes)", () => {
+    // The scored list can carry the same item twice (the postable-now merge); it
+    // must still appear only ONCE in its carousel.
+    const result = groupItemsByIntent([barA, barA, barB]);
+    const drinkGroup = result.find((g) => g.id === "intent_grab_a_drink");
+    expect(drinkGroup!.items.map((i) => i.id)).toEqual(["bar-a", "bar-b"]);
+  });
+
+  it("excludes items with no item_intents rows from every carousel", () => {
+    const result = groupItems([barA, barB, museum, gym], [], makeContext());
+
+    for (const group of result.groups) {
+      expect(group.items.some((i) => i.id === "gym-1")).toBe(false);
+    }
+  });
+
+  it("ranks What's Happening by soonest starts_at ASC, not notability", () => {
+    const now = new Date(2026, 1, 1, 12, 0); // Feb 1 2026 — fixed so windowing is deterministic
+    const laterEvent = makeScoredItem({
+      id: "evt-later",
+      title: "Later Show",
+      kind: "event",
+      starts_at: new Date(2026, 1, 25).toISOString(), // +24d → "Later" window
+      notability_score: 4.9,
+      intents: [{ slug: "whats_happening", name: "What's Happening", is_primary: true }],
+    });
+    const soonerEvent = makeScoredItem({
+      id: "evt-sooner",
+      title: "Sooner Show",
+      kind: "event",
+      starts_at: new Date(2026, 1, 21).toISOString(), // +20d → "Later" window too
+      notability_score: 2.5,
+      intents: [{ slug: "whats_happening", name: "What's Happening", is_primary: true }],
+    });
+
+    const result = groupItemsByIntent([laterEvent, soonerEvent], now);
+    // What's Happening now splits into time windows; both fall in "Later", soonest-first.
+    const laterGroup = result.find((g) => g.id === "intent_whats_happening_later");
+    expect(laterGroup!.items.map((i) => i.id)).toEqual(["evt-sooner", "evt-later"]);
+  });
+
+  it("splits What's Happening into ordered, non-empty time-window carousels", () => {
+    const now = new Date(2026, 1, 17, 12, 0); // Tue Feb 17 2026
+    const tonight = makeScoredItem({
+      id: "evt-tonight", title: "Tonight Show", kind: "event",
+      starts_at: new Date(2026, 1, 17, 20, 0).toISOString(),
+      intents: [{ slug: "whats_happening", name: "What's Happening", is_primary: true }],
+    });
+    const weekend = makeScoredItem({
+      id: "evt-weekend", title: "Weekend Show", kind: "event",
+      starts_at: new Date(2026, 1, 21, 19, 0).toISOString(), // Sat Feb 21
+      intents: [{ slug: "whats_happening", name: "What's Happening", is_primary: true }],
+    });
+    const result = groupItemsByIntent([weekend, tonight], now);
+    const whIds = result.filter((g) => g.id.startsWith("intent_whats_happening_")).map((g) => g.id);
+    expect(whIds).toEqual(["intent_whats_happening_tonight", "intent_whats_happening_this_weekend"]);
+  });
+
+  it("orders carousels by intents.sort_order", () => {
+    const result = groupItemsByIntent([barA, barB, museum]);
+    const ids = result.map((g) => g.id);
+    // museum's get_outside is a SECONDARY (now dropped) — only the two primary
+    // carousels exist, ordered by sort_order (grab_a_drink=20 before see_something=40).
+    expect(ids).toEqual([
+      "intent_grab_a_drink",
+      "intent_see_something",
+    ]);
+  });
+});
+
+describe("two-surface carousel curation (docs/intent_taxonomy.md §9)", () => {
+  const foreStreet = makeScoredItem({
+    id: "bite-fore-street",
+    title: "Fore Street",
+    notability_score: 3.0, // deliberately lower than the ineligible chain below
+    is_carousel_eligible: true,
+    blended_notability: 4.9,
+    intents: [{ slug: "get_a_bite", name: "Get a Bite", is_primary: true }],
+  } as any);
+  const centralProvisions = makeScoredItem({
+    id: "bite-central-provisions",
+    title: "Central Provisions",
+    notability_score: 2.5,
+    is_carousel_eligible: true,
+    blended_notability: 4.6,
+    intents: [{ slug: "get_a_bite", name: "Get a Bite", is_primary: true }],
+  } as any);
+  const isaBistro = makeScoredItem({
+    id: "bite-isa-bistro",
+    title: "Isa Bistro",
+    notability_score: 4.8, // high raw notability but curated OUT
+    is_carousel_eligible: false,
+    blended_notability: 3.9,
+    intents: [{ slug: "get_a_bite", name: "Get a Bite", is_primary: true }],
+  } as any);
+  const eventide = makeScoredItem({
+    id: "drink-eventide",
+    title: "Eventide Oyster Co.",
+    notability_score: 3.0,
+    is_carousel_eligible: true,
+    blended_notability: 4.8,
+    intents: [{ slug: "grab_a_drink", name: "Grab a Drink", is_primary: true }],
+  } as any);
+  const crumbl = makeScoredItem({
+    id: "drink-crumbl",
+    title: "Crumbl",
+    notability_score: 4.5,
+    is_carousel_eligible: false,
+    blended_notability: 2.0,
+    intents: [{ slug: "grab_a_drink", name: "Grab a Drink", is_primary: true }],
+  } as any);
+  // Other region/intent: is_carousel_eligible NULL — unchanged, ranked by notability_score.
+  const trailhead = makeScoredItem({
+    id: "outside-trailhead",
+    title: "Some Trailhead",
+    notability_score: 4.0,
+    intents: [{ slug: "get_outside", name: "Get Outside", is_primary: true }],
+  });
+
+  it("excludes is_carousel_eligible=false items from the browse carousel", () => {
+    const result = groupItemsByIntent([foreStreet, centralProvisions, isaBistro]);
+    const biteGroup = result.find((g) => g.id === "intent_get_a_bite");
+    expect(biteGroup!.items.map((i) => i.id)).not.toContain("bite-isa-bistro");
+  });
+
+  it("ranks eligible items by blended_notability DESC, not raw notability_score", () => {
+    const result = groupItemsByIntent([foreStreet, centralProvisions, isaBistro]);
+    const biteGroup = result.find((g) => g.id === "intent_get_a_bite");
+    // foreStreet has the lower notability_score but the higher blended_notability.
+    expect(biteGroup!.items.map((i) => i.id)).toEqual([
+      "bite-fore-street",
+      "bite-central-provisions",
+    ]);
+  });
+
+  it("keeps restaurants and low-blend chains out of Grab a Drink", () => {
+    const result = groupItemsByIntent([eventide, crumbl]);
+    const drinkGroup = result.find((g) => g.id === "intent_grab_a_drink");
+    expect(drinkGroup!.items.map((i) => i.id)).toEqual(["drink-eventide"]);
+  });
+
+  it("leaves is_carousel_eligible=NULL intents/regions ranked by notability_score as before", () => {
+    const other = makeScoredItem({
+      id: "outside-other",
+      title: "Another Spot",
+      notability_score: 2.0,
+      intents: [{ slug: "get_outside", name: "Get Outside", is_primary: true }],
+    });
+    const result = groupItemsByIntent([trailhead, other]);
+    const outsideGroup = result.find((g) => g.id === "intent_get_outside");
+    expect(outsideGroup!.items.map((i) => i.id)).toEqual([
+      "outside-trailhead",
+      "outside-other",
+    ]);
   });
 });
