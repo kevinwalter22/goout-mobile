@@ -35,13 +35,14 @@ const SLACK_WEBHOOK = process.env.SLACK_CHIEF_WEBHOOK_URL || process.env.SLACK_W
 const BUILD_CAP = Number(EAS_BUILD_CAP) || 22;
 const BUILD_WARN = Math.ceil(BUILD_CAP * 0.8); // amber at 80% of cap
 
-// Rough $/request estimates — the counter stores requests, not dollars, so these are
-// deliberately conservative order-of-magnitude figures for trend-spotting, not invoicing.
-const EST_USD_PER_REQ = {
-  anthropic_haiku: 0.011, // web/venue event extraction: ~6k in + ~1k out @ Haiku 4.5
-  anthropic_opus_notability: 0.022, // ~2k in + ~0.5k out @ Opus 4.8
-  google_places: 0.017, // Places details/text-search list price
-};
+// api_usage_counters.requests_used means different things per service:
+//   - anthropic_*  → accumulates CENTS of spend (the edge fns increment by cost_cents),
+//     so dollars = value/100 EXACTLY (not an estimate), and the cap is a cents budget.
+//   - google_places / predicthq → accumulates CALL COUNT; est $ via a per-call list price.
+const CENTS_SERVICES = new Set(["anthropic_haiku", "anthropic_opus_notability"]);
+const USD_PER_CALL = { google_places: 0.017, predicthq: 0.0 };
+// The one line that grows with ingestion (sources × cities × churn) — called out weekly.
+const PRIMARY_VARIABLE = "anthropic_haiku";
 
 const flags = []; // human-readable threshold breaches → drive the @-mention
 
@@ -105,17 +106,25 @@ async function apiSection() {
       group by service order by reqs desc`
   );
   const lines = [];
-  let estTotal = 0;
+  let total = 0;
   for (const { service, reqs, lim } of rows) {
-    const rate = EST_USD_PER_REQ[service] ?? 0;
-    const est = reqs * rate;
-    estTotal += est;
     const pct = lim ? Math.round((reqs / lim) * 100) : 0;
     const bar = pct >= 80 ? "🔴" : pct >= 50 ? "🟠" : "🟢";
-    lines.push(`• ${bar} \`${service}\`: ${reqs.toLocaleString()}/${lim.toLocaleString()} reqs (${pct}%) ≈ $${est.toFixed(2)} est`);
-    if (lim && reqs / lim >= 0.8) flags.push(`${service} at ${pct}% of request cap`);
+    const tag = service === PRIMARY_VARIABLE ? "  ← variable cost to watch (scales with ingestion)" : "";
+    if (CENTS_SERVICES.has(service)) {
+      const usd = reqs / 100; // counter IS cents → exact spend
+      const budget = lim / 100; // cap is a cents budget
+      total += usd;
+      lines.push(`• ${bar} \`${service}\`: $${usd.toFixed(2)} / $${budget.toFixed(0)} budget (${pct}%)${tag}`);
+      if (lim && reqs / lim >= 0.8) flags.push(`${service} at ${pct}% of $${budget.toFixed(0)} budget`);
+    } else {
+      const est = reqs * (USD_PER_CALL[service] ?? 0);
+      total += est;
+      lines.push(`• ${bar} \`${service}\`: ${reqs.toLocaleString()} calls (${pct}% of cap) ≈ $${est.toFixed(2)} est`);
+      if (lim && reqs / lim >= 0.8) flags.push(`${service} at ${pct}% of call cap`);
+    }
   }
-  lines.push(`• *Est. metered LLM/API this month:* ~$${estTotal.toFixed(2)} (agents run on subscription → $0 metered)`);
+  lines.push(`• *Metered LLM/API this month: ~$${total.toFixed(2)}* (agents run on subscription → $0 metered)`);
   return lines.join("\n");
 }
 
