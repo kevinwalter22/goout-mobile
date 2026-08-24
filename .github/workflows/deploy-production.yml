@@ -117,13 +117,60 @@ jobs:
         if: ${{ env.EXPO_TOKEN != '' }}
         run: npm ci
 
-      - name: Trigger EAS production build
+      # --- Client refresh: OTA-first, build ONLY when the fingerprint moves ---
+      # Mirrors the staging flow (deploy-staging.yml). JS/display changes ride an OTA
+      # to the `production` channel → NO EAS build (0 builds for a JS-only release,
+      # holding the 22/mo cap). A full build fires ONLY when the runtime FINGERPRINT
+      # changed (native code / deps / config) — detected by "no finished production
+      # build exists for the OTA's runtime yet", so native changes can't slip out via
+      # OTA. Runs AFTER the Production approval gate, so the OTA still ships only on
+      # Kevin's deploy approval (it skips App Store *review*, not the deploy gate).
+      - name: Publish OTA to production + decide if a build is needed
+        id: ota
         if: ${{ env.EXPO_TOKEN != '' }}
+        env:
+          EXPO_PUBLIC_MAPBOX_TOKEN: ${{ secrets.EXPO_PUBLIC_MAPBOX_TOKEN }}
+        run: |
+          # Bundle with the SAME production client env the EAS build uses
+          # (eas.json build.production.env) + Mapbox from the secret, so eas update's
+          # fingerprint matches the production build's runtime and the OTA actually
+          # reaches installed builds. Clean CI env — no local .env, no contamination.
+          eval "$(node -e 'const e=require("./eas.json").build.production.env||{};for(const[k,v]of Object.entries(e))console.log("export "+k+"="+JSON.stringify(String(v)))')"
+          case "$EXPO_PUBLIC_SUPABASE_URL" in
+            *"$PROD_REF"*) echo "OTA env = production supabase ✓";;
+            *) echo "::error::OTA env is not production ($EXPO_PUBLIC_SUPABASE_URL) — refusing to publish"; exit 1;;
+          esac
+          MSG=$(git log -1 --format='%s' | head -c 120)
+          if ! npx eas-cli@latest update --branch production --platform ios --message "$MSG" --non-interactive --json > /tmp/ota.json 2> /tmp/ota.err; then
+            echo "::error::eas update failed"; cat /tmp/ota.err; cat /tmp/ota.json; exit 1
+          fi
+          RT=$(node -e 'let j=require("/tmp/ota.json");const a=Array.isArray(j)?j:[j];const u=a.find(x=>x.platform==="ios"||x.runtimeVersion)||a[0];console.log((u&&u.runtimeVersion)||"")')
+          echo "OTA published to production — iOS runtime: ${RT:-<unknown>}"
+          # Need a build if we can't read the runtime (safe default) OR no finished
+          # production build exists for it yet (fingerprint moved = native/deps/config).
+          if [ -z "$RT" ]; then
+            echo "::warning::could not read OTA runtime — building to be safe."
+            echo "need_build=true" >> "$GITHUB_OUTPUT"
+          else
+            HAS=$(npx eas-cli@latest build:list --platform ios --status finished --limit 30 --non-interactive --json 2>/dev/null | node -e 'let d="";const rt=process.argv[1];process.stdin.on("data",c=>d+=c).on("end",()=>{try{const b=JSON.parse(d);console.log(b.some(x=>x.buildProfile==="production"&&(((x.runtime&&x.runtime.version)===rt)||x.runtimeVersion===rt))?"yes":"no")}catch{console.log("no")}})' "$RT")
+            if [ "$HAS" = "yes" ]; then
+              echo "::notice::JS/display change — OTA only, NO EAS build (runtime $RT already has a production build)."
+              echo "need_build=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::Fingerprint changed (native/deps/config) — no production build on runtime $RT → building + store submission."
+              echo "need_build=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      # Full build ONLY when the fingerprint moved (native/deps/config). Submission to
+      # the App Store stays with submit-production.yml (unchanged).
+      - name: Trigger EAS production build (fingerprint moved)
+        if: ${{ env.EXPO_TOKEN != '' && steps.ota.outputs.need_build == 'true' }}
         run: npx eas-cli@latest build --platform ios --profile production --non-interactive --no-wait
 
       - name: Skip EAS (no token)
         if: ${{ env.EXPO_TOKEN == '' }}
-        run: echo "::warning::EXPO_TOKEN not set — skipped EAS production build."
+        run: echo "::warning::EXPO_TOKEN not set — skipped EAS production refresh."
 
       - name: Tag release
         id: tag
