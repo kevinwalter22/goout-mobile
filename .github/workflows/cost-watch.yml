@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # read autonomous workflow run-load for the subscription-headroom section
 
 concurrency:
   group: cost-watch
@@ -41,4 +42,6 @@ jobs:
           SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
           SLACK_ALERT_MENTION: ${{ secrets.SLACK_ALERT_MENTION }}
           EAS_BUILD_CAP: "22"
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: node scripts/cost_watch.mjs

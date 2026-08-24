@@ -146,16 +146,65 @@ async function easSection() {
   return `• ${bar} *EAS iOS builds this month:* ${total}/${BUILD_CAP} (${detail || "none"})`;
 }
 
+// ── D. Autonomous load vs the shared subscription pool ───────────────────────
+// The agents + builder run on Kevin's Max subscription (one shared quota with his
+// interactive use). Anthropic doesn't expose a "% of weekly quota remaining" to CI,
+// so the honest early-warning signal is AUTONOMOUS RUN-LOAD: how much the scheduled
+// agents ran this week. A spike here (new autonomous work, or the builder churning
+// many tasks/night) is what would start eating into interactive headroom — visible
+// here before it becomes a mid-work wall. Definitive quota view is `/usage` in-app.
+async function autonomousLoadSection() {
+  const token = process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY; // owner/repo — auto-set in Actions
+  if (!token || !repo) return "• Autonomous load: skipped (no GITHUB_TOKEN/repo).";
+  const WFS = ["worker-auditor.yml", "worker-maintainer.yml", "worker-researcher.yml", "nightly-builder.yml"];
+  const since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  let runs = 0;
+  let minutes = 0;
+  const per = [];
+  for (const wf of WFS) {
+    try {
+      const r = await fetch(
+        `https://api.github.com/repos/${repo}/actions/workflows/${wf}/runs?created=%3E%3D${since}&per_page=100`,
+        { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } }
+      );
+      if (!r.ok) continue;
+      const j = await r.json();
+      const list = j.workflow_runs || [];
+      let m = 0;
+      for (const run of list) {
+        if (run.run_started_at && run.updated_at) {
+          m += Math.max(0, (new Date(run.updated_at) - new Date(run.run_started_at)) / 60000);
+        }
+      }
+      runs += list.length;
+      minutes += m;
+      if (list.length) per.push(`${wf.replace(/\.yml$/, "").replace(/^worker-/, "")} ${list.length}`);
+    } catch {
+      /* skip a workflow that errors */
+    }
+  }
+  const mins = Math.round(minutes);
+  const bar = mins > 300 ? "🔴" : mins > 120 ? "🟠" : "🟢";
+  if (mins > 300) flags.push(`autonomous run-load ${mins}min/wk — high, may pressure your quota`);
+  else if (mins > 120) flags.push(`autonomous run-load ${mins}min/wk — climbing`);
+  return (
+    `• ${bar} *Autonomous run-load (7d):* ${runs} runs, ${mins} min wall-clock (${per.join(", ") || "none"})\n` +
+    `• Baseline ≈ 3 weekly workers + nightly builder. Agents/builder are on your subscription ($0 metered); this is the headroom leading-indicator — definitive quota is \`/usage\` in-app.`
+  );
+}
+
 async function main() {
   if (!SUPABASE_ACCESS_TOKEN || !SUPABASE_PROD_PROJECT_REF || !SLACK_CHIEF_WEBHOOK_URL) {
     console.log("cost_watch: required secrets missing — inert (no post).");
     return;
   }
 
-  const [supa, api, eas] = await Promise.all([
+  const [supa, api, eas, load] = await Promise.all([
     supabaseSection().catch((e) => `• Supabase section failed: ${e.message}`),
     apiSection().catch((e) => `• API section failed: ${e.message}`),
     easSection().catch((e) => `• EAS section failed: ${e.message}`),
+    autonomousLoadSection().catch((e) => `• Autonomous load failed: ${e.message}`),
   ]);
 
   const header = flags.length
@@ -172,6 +221,9 @@ async function main() {
     "",
     "*EAS builds*",
     eas,
+    "",
+    "*Subscription headroom (autonomous load)*",
+    load,
     flags.length ? `\n*Flags:* ${flags.join(" · ")}` : "",
   ]
     .filter((x) => x !== null && x !== undefined)
