@@ -22,10 +22,15 @@ const {
   SUPABASE_ACCESS_TOKEN,
   SUPABASE_PROD_PROJECT_REF,
   EXPO_TOKEN,
-  SLACK_CHIEF_WEBHOOK_URL,
   SLACK_ALERT_MENTION = "",
   EAS_BUILD_CAP = "22",
 } = process.env;
+
+// Prefer the dedicated #euda-chief webhook; fall back to #euda-monitoring
+// (SLACK_WEBHOOK_URL) — same convention as scripts/worker_slack.mjs. The chief
+// webhook is optional; SLACK_CHIEF_WEBHOOK_URL is not a repo secret today, so the
+// fallback is what actually posts.
+const SLACK_WEBHOOK = process.env.SLACK_CHIEF_WEBHOOK_URL || process.env.SLACK_WEBHOOK_URL || "";
 
 const BUILD_CAP = Number(EAS_BUILD_CAP) || 22;
 const BUILD_WARN = Math.ceil(BUILD_CAP * 0.8); // amber at 80% of cap
@@ -195,7 +200,7 @@ async function autonomousLoadSection() {
 }
 
 async function main() {
-  if (!SUPABASE_ACCESS_TOKEN || !SUPABASE_PROD_PROJECT_REF || !SLACK_CHIEF_WEBHOOK_URL) {
+  if (!SUPABASE_ACCESS_TOKEN || !SUPABASE_PROD_PROJECT_REF || !SLACK_WEBHOOK) {
     console.log("cost_watch: required secrets missing — inert (no post).");
     return;
   }
@@ -234,7 +239,7 @@ async function main() {
     return;
   }
 
-  const res = await fetch(SLACK_CHIEF_WEBHOOK_URL, {
+  const res = await fetch(SLACK_WEBHOOK, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text: body }),
