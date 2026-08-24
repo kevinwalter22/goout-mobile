@@ -1,0 +1,44 @@
+name: Cost watch (weekly)
+
+# Deterministic, no-LLM weekly cost report → #euda-monitoring (via SLACK_CHIEF_WEBHOOK_URL).
+# Surfaces the three historical blow-up vectors BEFORE the receipt:
+#   - Supabase idle compute (stray branch DBs / project count)
+#   - Claude/Google API metered spend vs request caps
+#   - EAS builds vs the 22/mo free cap
+# Inert until the secrets exist (scripts/cost_watch.mjs exits 0 without posting).
+# Costs ~$0 to run — no Claude call, just a few API reads + a Slack post.
+
+on:
+  schedule:
+    - cron: "0 13 * * 1" # Mondays 13:00 UTC (~9am ET) — start of week, ahead of any spike
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cost-watch
+  cancel-in-progress: false
+
+jobs:
+  cost-watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Warm eas-cli (avoid cold-install race inside the script)
+        run: npx --yes eas-cli@latest --version
+
+      - name: Weekly cost report → Slack
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROD_PROJECT_REF: ${{ secrets.SUPABASE_PROD_PROJECT_REF }}
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          SLACK_CHIEF_WEBHOOK_URL: ${{ secrets.SLACK_CHIEF_WEBHOOK_URL }}
+          SLACK_ALERT_MENTION: ${{ secrets.SLACK_ALERT_MENTION }}
+          EAS_BUILD_CAP: "22"
+        run: node scripts/cost_watch.mjs
