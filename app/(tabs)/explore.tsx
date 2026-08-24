@@ -33,7 +33,7 @@ import { GroupedExploreFeed } from "../../src/components/GroupedExploreFeed";
 import { ViewModeToggle, type ViewMode } from "../../src/components/ViewModeToggle";
 import { processPostableNow } from "../../src/lib/postableNow";
 import { useGroupedExplore } from "../../src/hooks/useGroupedExplore";
-import { getEffectiveFilters } from "../../src/config/exploreFilters";
+import { getEffectiveFilters, LIST_INTERIM_SORT } from "../../src/config/exploreFilters";
 import { logInteraction } from "../../src/lib/interactionLogger";
 import { getSessionId } from "../../src/lib/sessionId";
 import { flushEngagement, logEngagement, replayPersistedEvents } from "../../src/lib/engagementBuffer";
@@ -482,6 +482,9 @@ export default function Explore() {
   } = useRecommender(userLocation, {
     enableScoring: true,
     pageSizeOverride: viewMode === "cards" ? 200 : undefined,
+    // LIST view interim ordering (three-view model) — notability placeholder for the
+    // Phase-3 social ranking. Map has its own query; cards group by intent internally.
+    sortOverride: viewMode === "list" ? LIST_INTERIM_SORT : undefined,
     regionId: activeRegionId,
   });
 

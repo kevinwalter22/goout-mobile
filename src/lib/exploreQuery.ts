@@ -451,10 +451,14 @@ async function queryExploreItemsRaw(
             dataLength: rpcData.length,
           });
 
+          // Errand/chain gate (three-view model): the RPC path returns full rows, so
+          // filter out non-places (is_place=false). Defensive `!== false` degrades to
+          // fallback behavior if a not-yet-migrated RPC omits the column.
+          let filteredData = (rpcData as any[]).filter((item: any) => item.is_place !== false);
+
           // Apply kind filter (client-side since RPC doesn't support it)
-          let filteredData = rpcData;
           if (filters.kindFilter !== "all") {
-            filteredData = rpcData.filter((item: any) => item.kind === filters.kindFilter);
+            filteredData = filteredData.filter((item: any) => item.kind === filters.kindFilter);
           }
 
           // Apply distance filter/sort on all fetched rows
@@ -503,6 +507,7 @@ async function queryExploreItemsRaw(
       .eq("is_admin_suppressed", false) // Admin suppression gate
       .gte("priority", 0) // Exclude stale/demoted items (priority = -1)
       .eq("is_duplicate", false) // Exclude cross-source duplicates
+      .eq("is_place", true) // Errand/chain gate: real places only (migration 171, item_intents source of truth)
       .or("normalized_confidence.is.null,normalized_confidence.gte.40") // Quality gate
       .or(
         userId
@@ -570,6 +575,13 @@ async function queryExploreItemsRaw(
         query = query
           .order("priority", { ascending: false })
           .order("starts_at", { ascending: true, nullsFirst: false });
+        break;
+      case "notability":
+        // LIST view interim ordering (three-view model). Placeholder for the Phase-3
+        // SOCIAL ranking — see LIST_INTERIM_SORT in config/exploreFilters.ts.
+        query = query
+          .order("blended_notability", { ascending: false, nullsFirst: false })
+          .order("priority", { ascending: false });
         break;
     }
 
