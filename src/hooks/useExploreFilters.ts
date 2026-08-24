@@ -68,7 +68,7 @@ export interface UseExploreFiltersReturn {
 
 export function useExploreFilters(
   userLocation?: { lat: number; lng: number } | null,
-  options?: { pageSizeOverride?: number; regionId?: string | null }
+  options?: { pageSizeOverride?: number; sortOverride?: SortOption; regionId?: string | null }
 ): UseExploreFiltersReturn {
   const { user } = useAuth();
 
@@ -107,9 +107,11 @@ export function useExploreFilters(
       const _t0 = __DEV__ ? performance.now() : 0;
 
       try {
-        const queryFilters = options?.pageSizeOverride
-          ? { ...filterState, pageSize: options.pageSizeOverride }
-          : filterState;
+        const queryFilters = {
+          ...filterState,
+          ...(options?.pageSizeOverride ? { pageSize: options.pageSizeOverride } : {}),
+          ...(options?.sortOverride ? { sort: options.sortOverride } : {}),
+        };
         const result: QueryResult<ExploreItem> = await queryExploreItems(
           supabase,
           queryFilters,
@@ -248,6 +250,17 @@ export function useExploreFilters(
     prevPageSizeOverrideRef.current = pageSizeOverride;
     executeQuery({ ...filtersRef.current, page: 0 }, false);
   }, [pageSizeOverride, executeQuery]);
+
+  // Re-fetch when the sort override changes (e.g. switching into the LIST view,
+  // which orders by notability — three-view model). Same filtersRef pattern.
+  const sortOverride = options?.sortOverride;
+  const prevSortOverrideRef = useRef<SortOption | undefined>(sortOverride);
+  useEffect(() => {
+    if (!hasLoadedRef.current) return;
+    if (sortOverride === prevSortOverrideRef.current) return;
+    prevSortOverrideRef.current = sortOverride;
+    executeQuery({ ...filtersRef.current, page: 0, sort: sortOverride ?? filtersRef.current.sort }, false);
+  }, [sortOverride, executeQuery]);
 
   // Re-fetch when the active region changes (user switched metro, or GPS
   // resolved a region). Reset to page 0 so the new metro loads from the top.

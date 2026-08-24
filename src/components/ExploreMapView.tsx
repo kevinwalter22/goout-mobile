@@ -375,6 +375,7 @@ export function ExploreMapView({
             .not("lng", "is", null)
             .gte("priority", 0)
             .eq("is_duplicate", false)
+            .eq("is_place", true) // Errand/chain gate: the map shows real places, not the phone book (migration 171)
             .or("review_status.is.null,review_status.in.(auto_approved,approved)");
 
           activityQuery = applyFilters(applyBbox(activityQuery));

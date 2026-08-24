@@ -62,7 +62,20 @@ export type PriceBucket = "all" | "free" | "$" | "$$" | "$$$";
 
 export type TimeWindow = "all" | "today" | "tonight" | "tomorrow" | "this_weekend" | "this_week" | "this_month";
 
-export type SortOption = "soonest" | "priority" | "distance";
+export type SortOption = "soonest" | "priority" | "distance" | "notability";
+
+// ── LIST view ordering (three-view model — see docs/three_view_model.md) ──────
+// The LIST view's TRUE identity is SOCIAL: ranked by what your network is actually
+// doing (5 friends at a happy hour ranks high even at a non-notable bar — social
+// signal ≠ notability). That's the differentiated, most-Euda view. It depends on the
+// social graph + post density + the posting flow, which don't exist yet (Phase 3),
+// so building the social ranking now would mean inventing fake signals we'd rip out.
+//
+// INTERIM (this submit): order the list by blended notability so it's coherent with
+// the rest of the app, not the retired pre-Layer-2 ranking. This is a PLACEHOLDER.
+// The Phase-3 social ranking drops in by changing THIS constant (and adding a
+// "social" SortOption case) — nothing hardcodes notability-ordering deeper than here.
+export const LIST_INTERIM_SORT: SortOption = "notability";
 
 export type DistanceRadius = 5 | 10 | 25 | 50 | 100 | "any";
 

@@ -20,6 +20,7 @@ import {
   getDayOfWeek,
 } from "../lib/scoring";
 import { RECOMMENDER_CONFIG } from "../config/recommenderConfig";
+import type { SortOption } from "../config/exploreFilters";
 import type { ExploreItem } from "../types/database";
 
 // ============================================================================
@@ -33,6 +34,8 @@ export interface UseRecommenderOptions {
   enableLLMReranker?: boolean;
   /** Override page size for initial fetch (e.g., 200 for cards mode) */
   pageSizeOverride?: number;
+  /** Override the sort (e.g. "notability" for LIST view — three-view model). */
+  sortOverride?: SortOption;
   /** Active region (metro) to hard-scope the feed to. Null = unscoped. */
   regionId?: string | null;
 }
@@ -62,10 +65,10 @@ export function useRecommender(
   userLocation?: { lat: number; lng: number } | null,
   options: UseRecommenderOptions = {}
 ): UseRecommenderReturn {
-  const { enableScoring = true, enableLLMReranker = false, pageSizeOverride, regionId } = options;
+  const { enableScoring = true, enableLLMReranker = false, pageSizeOverride, sortOverride, regionId } = options;
 
   const { user } = useAuth();
-  const exploreFilters = useExploreFilters(userLocation, { pageSizeOverride, regionId });
+  const exploreFilters = useExploreFilters(userLocation, { pageSizeOverride, sortOverride, regionId });
   const { weather } = useWeather(userLocation);
   const { flags: featureFlags } = useFeatureFlags();
 
