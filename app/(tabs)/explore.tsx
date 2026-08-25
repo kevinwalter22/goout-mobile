@@ -1359,30 +1359,6 @@ export default function Explore() {
         onReset={resetAdvancedFilters}
       />
 
-      {/* Create Event FAB */}
-      <Pressable
-        onPress={() => router.push("/create-event")}
-        accessibilityLabel="Create event"
-        accessibilityRole="button"
-        style={{
-          position: "absolute",
-          bottom: 32,
-          right: 24,
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          backgroundColor: Colors.primary,
-          justifyContent: "center",
-          alignItems: "center",
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.25,
-          shadowRadius: 4,
-          elevation: 5,
-        }}
-      >
-        <Ionicons name="add" size={28} color="#fff" />
-      </Pressable>
     </View>
   );
 }
