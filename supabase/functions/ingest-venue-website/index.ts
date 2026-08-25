@@ -574,7 +574,10 @@ Deno.serve(async (req) => {
           const b2 = await hasAnthropicBudget(supabase);
           if (!b2.ok) break;
 
-          const ext = await extractEvents(page.html, hints, { supabase });
+          const ext = await extractEvents(page.html, hints, {
+            supabase,
+            sourceKey: `venue:${ctx?.title ?? row.explore_item_id}`,
+          });
           r.cost_cents += ext.usage.cost_cents;
           for (const ev of ext.events) {
             allCandidates.push(llmEventToCandidate(ev, page.url, ctx!));
