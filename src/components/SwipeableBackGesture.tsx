@@ -6,11 +6,6 @@ import * as Haptics from "expo-haptics";
 
 const TAB_ROUTES = ["/feed", "/explore", "/profile"];
 
-// Screens that explicitly disable native back gesture (gestureEnabled: false)
-// because accidental back-navigation would lose unsaved form data.
-// SwipeableBackGesture must respect the same intent.
-const GESTURE_DISABLED_PREFIXES = ["/create-event", "/edit-event", "/location-picker"];
-
 /**
  * Wraps the root Stack to provide mid-screen horizontal back-swipe on
  * detail screens (event/[id], settings/*, etc.).  Uses the same RNGH
@@ -28,7 +23,6 @@ export function SwipeableBackGesture({ children }: { children: React.ReactNode }
 
   const panGesture = useMemo(() => {
     const isTabScreen = TAB_ROUTES.includes(pathname);
-    const isGestureDisabled = GESTURE_DISABLED_PREFIXES.some((p) => pathname.startsWith(p));
 
     return (
       Gesture.Pan()
@@ -37,8 +31,7 @@ export function SwipeableBackGesture({ children }: { children: React.ReactNode }
         .activeOffsetX([-12, 12])
         .failOffsetY([-20, 20])
         // Disabled on tab screens (SwipeableTabsContainer handles those)
-        // and on form screens that explicitly opt out of back gestures.
-        .enabled(!isTabScreen && !isGestureDisabled)
+        .enabled(!isTabScreen)
         .onEnd((event) => {
           const { translationX, translationY, velocityX } = event;
 
