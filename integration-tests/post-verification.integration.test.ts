@@ -87,10 +87,29 @@ describe("enforce_post_verification (BEFORE INSERT)", () => {
     expect(data?.id).toBeTruthy();
   });
 
-  it("accepts a standalone post (no explore_item_id) with no verification", async () => {
+  // Phase 3 (migration 173): "no post from nowhere" — a standalone post must carry the
+  // poster's coords. Coordless standalone posts (the old behavior) are now rejected.
+  it("rejects a standalone post (no FKs) that omits the poster's coords", async () => {
     const { data, error } = await admin
       .from("posts")
       .insert(basePost() as any)
+      .select("id")
+      .single();
+    expect(data).toBeNull();
+    expect(error).not.toBeNull();
+    expect(error?.message).toMatch(/coordinates|verified_lat|verified_lng|verified_at|invariant/i);
+  });
+
+  it("accepts a standalone (My Location) post that carries the poster's coords", async () => {
+    const { data, error } = await admin
+      .from("posts")
+      .insert(
+        basePost({
+          verified_lat: 41.2557,
+          verified_lng: -74.3601,
+          verified_at: new Date().toISOString(),
+        }) as any,
+      )
       .select("id")
       .single();
     expect(error).toBeNull();
@@ -130,10 +149,18 @@ describe("log_post_at_event (AFTER INSERT) — engagement_log fire-off", () => {
     expect(Number(row.user_location.lng)).toBeCloseTo(-74.36, 5);
   });
 
-  it("writes NO engagement_log row for a standalone post", async () => {
+  it("writes NO engagement_log row for a standalone (My Location) post", async () => {
+    // Standalone posts now require coords (migration 173); they still produce no
+    // engagement_log row because they carry no explore_item_id.
     const { data: post, error } = await admin
       .from("posts")
-      .insert(basePost() as any)
+      .insert(
+        basePost({
+          verified_lat: 41.25,
+          verified_lng: -74.36,
+          verified_at: new Date().toISOString(),
+        }) as any,
+      )
       .select("id")
       .single();
     expect(error).toBeNull();
