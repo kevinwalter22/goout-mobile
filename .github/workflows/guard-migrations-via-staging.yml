@@ -1,0 +1,48 @@
+name: Guard — migrations flow through staging
+
+# Enforces the hard rule (PROJECT_STATE): migration work flows feature → staging → main.
+# A PR to `main` may NOT add a supabase/migrations/*.sql file that isn't already on the
+# `staging` branch. This makes it physically impossible to merge a migration straight to
+# main (bypassing the staging deploy + the integration gate that runs against live staging).
+#
+# Make this a REQUIRED status check on `main` in branch protection for it to block merges.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  migrations-via-staging:
+    name: migrations must be on staging first
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: New migrations must already exist on the staging branch
+        run: |
+          git fetch origin main staging --quiet
+          # Migration files ADDED by this PR relative to main.
+          added=$(git diff --name-only --diff-filter=A "origin/main...HEAD" -- 'supabase/migrations/*.sql' || true)
+          if [ -z "$added" ]; then
+            echo "No new migrations in this PR — nothing to guard."
+            exit 0
+          fi
+          echo "New migrations in this PR:"; echo "$added" | sed 's/^/  /'
+          missing=""
+          for f in $added; do
+            if git cat-file -e "origin/staging:$f" 2>/dev/null; then
+              echo "  ok: $f is on staging"
+            else
+              missing="$missing $f"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::These migrations are NOT on the 'staging' branch. Migration work must flow feature → staging → main (never straight to main, never hand-applied to staging). Merge them to 'staging' first so deploy-staging applies them + the integration tests validate against real staging, then promote to main.  Offending:$missing"
+            exit 1
+          fi
+          echo "All new migrations are already on staging — ok to promote to main."
