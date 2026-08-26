@@ -78,59 +78,119 @@ Deno.serve(async (req) => {
       });
     }
 
-    // SOURCE-LIVENESS — the durable fix for silent source-death. The stage check
-    // above stays green as long as ingest has ANY activity (web_collector), so it
-    // can't see an individual source going dark — how Ticketmaster/PredictHQ stayed
-    // frozen ~2 months unnoticed. This measures OUTPUT (rows in event_ingest_raw),
-    // not fetch attempts — so it also catches a source that "fetches" but writes
-    // nothing (a stub / broken adapter, e.g. two headline sources empty forever).
-    // N is per-source-type cadence so a genuinely low-frequency source doesn't
-    // false-alarm on a normal gap; brand-new sources (<1d) get a grace period.
-    const STALE_DAYS_BY_TYPE: Record<string, number> = {
-      api_ticketmaster: 3, api_predicthq: 3, api_google_places: 3,
-      api_eventbrite: 4, api_yelp: 4, web_collector: 4, web_community_calendar: 7,
+    // SOURCE-LIVENESS — catch a source that is SILENTLY BROKEN: it's configured to
+    // fetch but either can't fetch (stale / erroring) or fetches and returns NOTHING
+    // (dead endpoint / stub adapter). This is the "Ticketmaster frozen 2 months
+    // unnoticed" failure mode.
+    //
+    // What we DON'T alert on: a source that fetches fine but simply has no NEW events.
+    // A settled catalog (fetches OK, returns data, nothing new happening) is HEALTHY,
+    // not broken — measuring new event_ingest_raw rows conflated the two and spammed a
+    // healthy Ticketmaster. "Gone quiet" is a weekly FYI in the maintainer report, not
+    // a siren. Here: alive = fetched recently, 0 errors, returned data.
+    //
+    // De-dup: a broken source pages at most once / 24h (or the moment it newly breaks),
+    // never every 30-min run — a siren that re-fires every 30 min trains you to ignore it.
+    const STALE_MULT = 3;                 // tolerate this many missed fetch cycles
+    const API_STALE_FLOOR_MIN = 6 * 60;   // ...but at least 6h for a fast cron
+    const WEB_STALE_FLOOR_MIN = 24 * 60;  // web collectors run on a slower cadence
+    const CONSEC_ERR_ALERT = 3;
+    const ageMin = (iso: string | null | undefined) =>
+      iso ? (now - new Date(iso).getTime()) / 60000 : Infinity;
+
+    type Health = { name: string; type: string; alive: boolean; reason: string };
+    const health = new Map<string, Health>();
+    const seed = (id: string, name: string, type: string) => {
+      if (!health.has(id)) health.set(id, { name, type, alive: false, reason: "no successful fetch on record" });
     };
-    // Only sources ACTIVELY configured to fetch (an enabled partition, or an enabled
-    // collector target) are checked — so an intentionally-paused source (Google
-    // Places' enumeration is pulled back; a source whose partitions are all off) is
-    // never false-flagged. A source that IS configured to fetch but produces no rows
-    // is the real death signal.
-    const active = new Map<string, any>();
+
+    // API sources (fetch_partitions): alive = fresh fetch + no errors + total_fetched > 0.
+    // A source is alive if ANY of its enabled partitions is healthy.
     const { data: aParts } = await supabase
       .from("fetch_partitions")
-      .select("source_id, event_sources!inner(id, name, type, is_enabled)")
+      .select("source_id, last_fetched_at, last_result, consecutive_errors, fetch_interval_minutes, event_sources!inner(id, name, type, is_enabled)")
       .eq("is_enabled", true)
       .eq("event_sources.is_enabled", true);
-    for (const p of (aParts ?? []) as any[]) active.set(p.source_id, p.event_sources);
-    const { data: wcSrcs } = await supabase
-      .from("event_sources").select("id, name, type").eq("is_enabled", true)
-      .in("type", ["web_collector", "web_community_calendar"]);
-    for (const s of (wcSrcs ?? []) as any[]) {
-      const { count } = await supabase
-        .from("collector_targets").select("id", { count: "exact", head: true })
-        .eq("source_id", s.id).eq("is_enabled", true);
-      if ((count ?? 0) > 0) active.set(s.id, s);
-    }
-    const darkSources: string[] = [];
-    for (const [sid, s] of active) {
-      const { data: last } = await supabase
-        .from("event_ingest_raw")
-        .select("created_at")
-        .eq("source_id", sid)
-        .order("created_at", { ascending: false })
-        .limit(1);
-      const lastAt = last?.[0]?.created_at;
-      const nDays = STALE_DAYS_BY_TYPE[s.type] ?? 3;
-      const ageDays = lastAt ? (now - new Date(lastAt).getTime()) / 8.64e7 : Infinity;
-      if (ageDays > nDays) {
-        darkSources.push(`${s.name} — ${lastAt ? Math.round(ageDays) + "d silent" : "0 rows ever"} (N=${nDays}d)`);
+    for (const p of (aParts ?? []) as any[]) {
+      const s = p.event_sources;
+      seed(s.id, s.name, s.type);
+      const staleAt = Math.max((p.fetch_interval_minutes || 0) * STALE_MULT, API_STALE_FLOOR_MIN);
+      const fresh = ageMin(p.last_fetched_at) <= staleAt;
+      const errored = (p.consecutive_errors || 0) >= CONSEC_ERR_ALERT || Number(p.last_result?.errors || 0) > 0;
+      const gotData = Number(p.last_result?.total_fetched || 0) > 0;
+      if (fresh && !errored && gotData) {
+        health.set(s.id, { name: s.name, type: s.type, alive: true, reason: "" });
+      } else if (!health.get(s.id)?.alive) {
+        const reason = !fresh
+          ? `no successful fetch in ${(ageMin(p.last_fetched_at) / 60).toFixed(0)}h`
+          : errored
+          ? `${p.consecutive_errors || p.last_result?.errors} recent fetch error(s)`
+          : "fetches but returns 0 rows (dead endpoint / broken adapter)";
+        health.set(s.id, { name: s.name, type: s.type, alive: false, reason });
       }
     }
 
-    if (darkSources.length) {
-      await notify("critical", "Ingestion source(s) producing 0 rows", {
-        text: darkSources.map((s) => `• ${s}`).join("\n"),
-        context: "monitor-pipeline-health · source-liveness",
+    // Web collectors (collector_targets): alive = ran recently, not circuit-broken,
+    // no errors. A venue legitimately finding 0 events on a run is NOT broken — the
+    // circuit breaker / consecutive_errors already catch a genuinely-failing parser.
+    const { data: wcT } = await supabase
+      .from("collector_targets")
+      .select("source_id, last_run_at, last_run_errors, consecutive_errors, max_consecutive_errors, circuit_breaker, crawl_frequency_minutes, event_sources!inner(id, name, type, is_enabled)")
+      .eq("is_enabled", true)
+      .eq("event_sources.is_enabled", true);
+    for (const t of (wcT ?? []) as any[]) {
+      const s = t.event_sources;
+      seed(s.id, s.name, s.type);
+      const staleAt = Math.max((t.crawl_frequency_minutes || 0) * STALE_MULT, WEB_STALE_FLOOR_MIN);
+      const fresh = ageMin(t.last_run_at) <= staleAt;
+      const errored = !!t.circuit_breaker
+        || (t.consecutive_errors || 0) >= (t.max_consecutive_errors || CONSEC_ERR_ALERT)
+        || Number(t.last_run_errors || 0) > 0;
+      if (fresh && !errored) {
+        health.set(s.id, { name: s.name, type: s.type, alive: true, reason: "" });
+      } else if (!health.get(s.id)?.alive) {
+        const reason = t.circuit_breaker
+          ? "circuit breaker tripped"
+          : !fresh
+          ? `no run in ${(ageMin(t.last_run_at) / 60).toFixed(0)}h`
+          : "recent run errors";
+        health.set(s.id, { name: s.name, type: s.type, alive: false, reason });
+      }
+    }
+
+    const brokenSources = [...health.entries()].filter(([, h]) => !h.alive);
+
+    // COOLDOWN — state (source_id -> last-alerted ISO) lives in app_config so it
+    // survives across the stateless cron runs. Alert a broken source only if it's
+    // newly broken (not in state) or >24h since its last page. Recovered sources
+    // drop out of the state (so a re-break pages fresh).
+    const COOLDOWN_MS = 24 * 60 * 60 * 1000;
+    const STATE_KEY = "monitor_liveness_alert_state";
+    let prevState: Record<string, string> = {};
+    try {
+      const { data: cfg } = await supabase.from("app_config").select("value").eq("key", STATE_KEY).maybeSingle();
+      if (cfg?.value) prevState = JSON.parse(cfg.value);
+    } catch { /* first run / malformed → treat as empty */ }
+
+    const nextState: Record<string, string> = {};
+    const toAlert: string[] = [];
+    for (const [id, h] of brokenSources) {
+      const lastAlerted = prevState[id] ? new Date(prevState[id]).getTime() : 0;
+      if (now - lastAlerted > COOLDOWN_MS) {
+        toAlert.push(`${h.name} — ${h.reason}`);
+        nextState[id] = new Date(now).toISOString();
+      } else {
+        nextState[id] = prevState[id]; // still broken, within cooldown → stay quiet
+      }
+    }
+    try {
+      await supabase.from("app_config").upsert({ key: STATE_KEY, value: JSON.stringify(nextState) }, { onConflict: "key" });
+    } catch { /* non-fatal: worst case the next run re-evaluates */ }
+
+    if (toAlert.length) {
+      await notify("critical", "Ingestion source(s) silently broken", {
+        text: toAlert.map((s) => `• ${s}`).join("\n"),
+        context: "monitor-pipeline-health · source-liveness (≤ once/24h per source)",
       });
     }
 
@@ -140,7 +200,8 @@ Deno.serve(async (req) => {
         stages: EXPECTED_STAGES.length,
         warnings: warnings.length,
         criticals: criticals.length,
-        dark_sources: darkSources.length,
+        broken_sources: brokenSources.length,
+        alerted: toAlert.length,
         last_seen: fields,
       }),
       { headers: { ...cors, "Content-Type": "application/json" } },

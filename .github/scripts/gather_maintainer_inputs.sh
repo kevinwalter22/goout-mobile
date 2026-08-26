@@ -16,6 +16,12 @@ node -e "const p=require('./package.json');console.log(JSON.stringify({expo:p.de
 
 npx --yes expo-doctor > maint-inputs/expo-doctor.txt 2>&1 || true
 
+# Source-liveness FYI: prod sources that fetch fine but have gone quiet (no new event
+# 14d+). Read-only. SUPABASE_ACCESS_TOKEN is scoped to THIS gather step only (never the
+# Claude step). Degrades to a note if the token/ref aren't set.
+node .github/scripts/fetch_source_liveness.mjs > maint-inputs/source-liveness.json 2>/dev/null \
+  || echo '{"note":"source-liveness unavailable"}' > maint-inputs/source-liveness.json
+
 echo "maintainer inputs gathered:"
 ls -la maint-inputs
 exit 0

@@ -40,6 +40,11 @@ jobs:
         run: node scripts/worker_slack.mjs start maintainer "Weekly dependency & deprecation watch"
 
       - name: Gather dependency + security signal
+        # SUPABASE_ACCESS_TOKEN + PROD_REF are scoped to THIS step only (read-only
+        # source-liveness query) — deliberately NOT exposed to the Claude step below.
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROD_REF: ${{ secrets.SUPABASE_PROD_PROJECT_REF }}
         run: bash .github/scripts/gather_maintainer_inputs.sh
 
       - name: Claude — write the maintainer report
@@ -55,8 +60,10 @@ jobs:
 
             INPUTS (already gathered): ./maint-inputs/outdated.json (npm outdated),
             ./maint-inputs/audit.json (npm audit), ./maint-inputs/manifest.json
-            (key deps incl. expo + react-native), ./maint-inputs/expo-doctor.txt.
-            Some may be empty — note it rather than inventing findings.
+            (key deps incl. expo + react-native), ./maint-inputs/expo-doctor.txt,
+            ./maint-inputs/source-liveness.json (prod sources that fetch fine but
+            have produced no NEW event in 14+ days). Some may be empty — note it
+            rather than inventing findings.
 
             YOUR REPORT:
             1. Security: summarize npm-audit vulnerabilities by severity, and
@@ -74,6 +81,11 @@ jobs:
             4. "What to address first" — a short ranked list of concrete upgrade
                actions, each tagged with its autonomy tier. Recommendations only;
                you do not execute them.
+            5. Source liveness (FYI): from ./maint-inputs/source-liveness.json, list
+               any source that fetches fine but hasn't produced a NEW event in N days
+               — "likely settled, worth a glance." This is an OBSERVATION, not an
+               alert (real breakage pages separately via monitor-pipeline-health). If
+               the file is empty/[], say "all active sources producing fresh events."
 
             CONSTRAINTS: report-only. The ONLY file you may write is
             ./chief-report.md. Do not edit package.json, install anything beyond
