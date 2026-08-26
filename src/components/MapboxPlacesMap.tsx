@@ -7,6 +7,7 @@ import Mapbox, {
   SymbolLayer,
   CircleLayer,
   Images,
+  LocationPuck,
 } from "@rnmapbox/maps";
 import { Colors } from "../config/theme";
 import { aggregateToPlaces, placePriority } from "../lib/mapPlaces";
@@ -233,6 +234,12 @@ export function MapboxPlacesMap({
             }}
           />
         </ShapeSource>
+
+        {/* T7 — native blue current-location puck for normal users (was missing
+            after the @rnmapbox switch; only the override/dev purple dot existed).
+            Shown only when NOT using the override dot, so override/dev accounts (whose
+            device GPS differs from their forced coords) don't get two markers. */}
+        {!showUserDot && <LocationPuck visible puckBearing="heading" pulsing={{ isEnabled: true }} />}
 
         {/* "You are here" (review/override account). */}
         {showUserDot && userLocation && (
