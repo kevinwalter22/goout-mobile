@@ -1,18 +1,20 @@
 // Post-first compose screen (Phase 3 · T5) — the crown-jewel picker.
 // Reached after capture (app/post/camera.tsx). Two steps:
-//   1. PICK: search_places_for_post (fuzzy, distance-ranked, 30km-capped) + a always-
-//      present prominent "Post My Location". Select a place → verifyPostLocation (400m):
-//      in range → link verified; out of range → BLOCK the link, degrade to My Location.
+//   1. PICK: nearby places on open (tap to link, no typing) + search_places_for_post
+//      (fuzzy, distance-ranked, 30km-capped) + an always-present "Post My Location".
+//      Select a place → verifyPostLocation (400m): in range → link verified; out of
+//      range → BLOCK the link, degrade to My Location.
 //   2. DETAILS: caption + Post (via src/lib/submitPost — same insert branching as check-in).
 //
-// docs/phase3_post_first.md §2 + §5b. "Posting never dead-ends": My Location is one tap
-// from every state (empty search, no results, out of range).
+// UNIFIED: the traditional item-gated route (event / postable pin → strict check-in
+// verify) now enters HERE too, pre-linked (draft.linked) — so there is ONE camera +
+// ONE post screen regardless of how you started. A pre-linked draft skips the picker.
 //
-// NOTE (judgment call, flagged for Kevin): the spec's separate "title" step has no
-// posts.title column to persist to — the posts table only has `caption`. So title +
-// caption are collapsed into the single caption field: a linked post shows the place
-// name as context (its title comes from the explore_item_id join), a My-Location post
-// uses the caption as its text. A distinct editable post title would need a new column.
+// Top spacing uses the safe-area inset (app convention: insets.top + margin) so the
+// header clears the notch/Dynamic Island in prod AND the staging env banner in staging.
+//
+// NOTE: posts has no title column — title + caption collapse into caption; a linked
+// post shows the place name as context (its title comes from the explore_item_id join).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -26,6 +28,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/hooks/useAuth";
@@ -49,7 +52,7 @@ type PlaceResult = {
 };
 
 type Target =
-  | { kind: "linked"; item: PlaceResult; lat: number; lng: number; at: string }
+  | { kind: "linked"; item: { id: string; title: string; location_name: string | null }; itemKind?: "event" | "activity" | null; lat: number; lng: number; at: string }
   | { kind: "mylocation"; lat: number; lng: number; at: string };
 
 const DEBOUNCE_MS = 350;
@@ -65,23 +68,38 @@ export default function PostCompose() {
   const { user } = useAuth();
   const { showToast } = useToast();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const draft = useMemo(() => getPostDraft(), []);
   const previewUri = draft?.photos[draft.photos.length - 1];
+  // Item-gated: the place is already linked + verified → skip the picker.
+  const preLinked = draft?.linked ?? null;
 
   const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [locError, setLocError] = useState<string | null>(null);
   const [locLoading, setLocLoading] = useState(true);
 
-  const [step, setStep] = useState<"pick" | "details">("pick");
+  const [step, setStep] = useState<"pick" | "details">(preLinked ? "details" : "pick");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PlaceResult[]>([]);
+  const [nearby, setNearby] = useState<PlaceResult[]>([]);
   const [searching, setSearching] = useState(false);
-  const [searched, setSearched] = useState(false); // a search has returned at least once
+  const [searched, setSearched] = useState(false);
   const [blocked, setBlocked] = useState<{ place: PlaceResult; distance?: number } | null>(null);
   const [verifying, setVerifying] = useState(false);
 
-  const [target, setTarget] = useState<Target | null>(null);
+  const [target, setTarget] = useState<Target | null>(
+    preLinked
+      ? {
+          kind: "linked",
+          item: { id: preLinked.exploreItemId, title: preLinked.title, location_name: preLinked.locationName ?? null },
+          itemKind: preLinked.itemKind ?? null,
+          lat: preLinked.lat,
+          lng: preLinked.lng,
+          at: preLinked.at,
+        }
+      : null,
+  );
   const [caption, setCaption] = useState("");
   const [posting, setPosting] = useState(false);
 
@@ -94,23 +112,40 @@ export default function PostCompose() {
     }
   }, [draft]);
 
-  // Read GPS once on mount — needed for both search ranking and My Location.
+  // Read GPS once on mount, then fetch NEARBY places (empty query = distance-ranked)
+  // so the picker shows tappable spots immediately, no typing. Skipped when pre-linked.
   useEffect(() => {
+    if (preLinked) {
+      setLocLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const loc = await getCurrentLocation();
       if (cancelled) return;
       if (loc.error || (loc.latitude === 0 && loc.longitude === 0)) {
-        setLocError(loc.error || "We couldn&rsquo;t get your location");
-      } else {
-        setUserLoc({ lat: loc.latitude, lng: loc.longitude });
+        setLocError(loc.error || "We couldn't get your location");
+        setLocLoading(false);
+        return;
       }
+      setUserLoc({ lat: loc.latitude, lng: loc.longitude });
       setLocLoading(false);
+      try {
+        const { data } = await (supabase.rpc as any)("search_places_for_post", {
+          p_query: "",
+          p_lat: loc.latitude,
+          p_lng: loc.longitude,
+          p_limit: 12,
+        });
+        if (!cancelled && Array.isArray(data)) setNearby(data as PlaceResult[]);
+      } catch {
+        /* nearby is a convenience; search still works */
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [preLinked]);
 
   const runSearch = useCallback(
     async (q: string) => {
@@ -139,7 +174,6 @@ export default function PostCompose() {
     [userLoc],
   );
 
-  // Debounced search on query change.
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (query.trim().length < MIN_QUERY) {
@@ -153,7 +187,6 @@ export default function PostCompose() {
     };
   }, [query, runSearch]);
 
-  // Select a searched place → relaxed-radius verify.
   async function selectPlace(place: PlaceResult) {
     setBlocked(null);
     setVerifying(true);
@@ -162,14 +195,14 @@ export default function PostCompose() {
       if (res.allowed && res.user_lat != null && res.user_lng != null && res.verified_at) {
         setTarget({
           kind: "linked",
-          item: place,
+          item: { id: place.id, title: place.title, location_name: place.location_name },
+          itemKind: null,
           lat: res.user_lat,
           lng: res.user_lng,
           at: res.verified_at,
         });
         setStep("details");
       } else {
-        // Out of range (or GPS/permission issue) → block the link, offer My Location.
         setBlocked({ place, distance: res.distance });
       }
     } finally {
@@ -177,7 +210,6 @@ export default function PostCompose() {
     }
   }
 
-  // "Post My Location" — always available; real post-time coords, no place link.
   async function postMyLocation() {
     setVerifying(true);
     try {
@@ -190,12 +222,7 @@ export default function PostCompose() {
         );
         return;
       }
-      setTarget({
-        kind: "mylocation",
-        lat: loc.latitude,
-        lng: loc.longitude,
-        at: new Date().toISOString(),
-      });
+      setTarget({ kind: "mylocation", lat: loc.latitude, lng: loc.longitude, at: new Date().toISOString() });
       setBlocked(null);
       setStep("details");
     } finally {
@@ -216,7 +243,7 @@ export default function PostCompose() {
         verifiedLng: target.lng,
         verifiedAt: target.at,
         exploreItemId: target.kind === "linked" ? target.item.id : null,
-        itemKind: null,
+        itemKind: target.kind === "linked" ? target.itemKind ?? null : null,
       });
       if (error) {
         errorHaptic();
@@ -232,62 +259,64 @@ export default function PostCompose() {
     }
   }
 
-  // ---- render ----------------------------------------------------------------
+  const headerTop = insets.top + 14;
   const headerBack = (
     <Pressable
-      onPress={() => (step === "details" ? setStep("pick") : router.back())}
+      onPress={() => (step === "details" && !preLinked ? setStep("pick") : router.back())}
       accessibilityLabel="Back"
       accessibilityRole="button"
-      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
       style={{ width: 40, height: 40, justifyContent: "center" }}
     >
       <Ionicons name="chevron-back" size={26} color={colors.text} />
     </Pressable>
   );
 
-  const myLocationButton = (
-    <Pressable
-      onPress={postMyLocation}
-      disabled={verifying}
-      accessibilityLabel="Post as My Location"
-      accessibilityRole="button"
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        padding: 16,
-        borderRadius: 12,
-        backgroundColor: Colors.primary,
-        opacity: verifying ? 0.6 : 1,
-      }}
-    >
-      <Ionicons name="navigate" size={18} color="#fff" />
-      <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Post My Location</Text>
-    </Pressable>
-  );
+  function PlaceRow({ r }: { r: PlaceResult }) {
+    return (
+      <Pressable
+        onPress={() => selectPlace(r)}
+        disabled={verifying}
+        accessibilityLabel={`Tag ${r.title}`}
+        accessibilityRole="button"
+        style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border, opacity: verifying ? 0.5 : 1 }}
+      >
+        <Ionicons name="location-outline" size={20} color={Colors.primary} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text }} numberOfLines={1}>{r.title}</Text>
+          {!!r.location_name && r.location_name !== r.title && (
+            <Text style={{ fontSize: 12, color: colors.textSecondary }} numberOfLines={1}>{r.location_name}</Text>
+          )}
+        </View>
+        <Text style={{ fontSize: 12, color: colors.textTertiary }}>{fmtDistance(r.distance_m)}</Text>
+      </Pressable>
+    );
+  }
 
+  // ---------- DETAILS ----------
   if (step === "details") {
     return (
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={{ flex: 1, backgroundColor: colors.background }}
-      >
-        <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingTop: Platform.OS === "ios" ? 56 : 16 }}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, backgroundColor: colors.background }}>
+        <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingTop: headerTop }}>
           {headerBack}
-          <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text, marginLeft: 4 }}>Add details</Text>
+          <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text, marginLeft: 4 }}>Add details</Text>
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ padding: 20, gap: 16, alignItems: "center" }} keyboardShouldPersistTaps="handled">
+          {/* Big preview — mirrors the home-feed post (3:4), just slightly smaller. */}
           {previewUri && (
-            <Image source={{ uri: previewUri }} style={{ width: 120, height: 160, borderRadius: 12, alignSelf: "center", backgroundColor: colors.surfaceVariant }} resizeMode="cover" />
+            <Image
+              source={{ uri: previewUri }}
+              style={{ width: "82%", aspectRatio: 3 / 4, borderRadius: 16, backgroundColor: colors.surfaceVariant }}
+              resizeMode="cover"
+            />
           )}
 
-          {/* Where — the "title" context. Linked shows the place; My Location shows coords. */}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 10, backgroundColor: colors.surface }}>
-            <Ionicons name={target?.kind === "linked" ? "location" : "navigate"} size={18} color={Colors.primary} />
+          {/* Where — linked place or My Location, on-theme. */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: Colors.primary + "33", alignSelf: "stretch" }}>
+            <Ionicons name={target?.kind === "linked" ? "location" : "navigate"} size={20} color={Colors.primary} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, fontWeight: "700", color: colors.text }} numberOfLines={1}>
+              <Text style={{ fontSize: 16, fontWeight: "700", color: colors.text }} numberOfLines={1}>
                 {target?.kind === "linked" ? target.item.title : "My Location"}
               </Text>
               {target?.kind === "linked" && !!target.item.location_name && (
@@ -299,7 +328,7 @@ export default function PostCompose() {
             </View>
           </View>
 
-          <View style={{ gap: 8 }}>
+          <View style={{ gap: 8, alignSelf: "stretch" }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
               <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text }}>Caption</Text>
               <Text style={{ fontSize: 13, color: colors.textTertiary }}>{caption.length}/{MAX_CAPTION_LENGTH}</Text>
@@ -321,29 +350,26 @@ export default function PostCompose() {
             disabled={posting}
             accessibilityLabel="Post"
             accessibilityRole="button"
-            style={{ padding: 16, borderRadius: 12, backgroundColor: posting ? colors.textSecondary : Colors.primary, alignItems: "center", marginTop: 8 }}
+            style={{ padding: 16, borderRadius: 14, backgroundColor: posting ? colors.textSecondary : Colors.primary, alignItems: "center", marginTop: 4, alignSelf: "stretch" }}
           >
-            {posting ? <ActivityIndicator color="#fff" /> : <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Post</Text>}
+            {posting ? <ActivityIndicator color="#fff" /> : <Text style={{ color: "#fff", fontSize: 17, fontWeight: "700" }}>Post</Text>}
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     );
   }
 
-  // step === "pick"
+  // ---------- PICK ----------
+  const showNearby = query.trim().length < MIN_QUERY;
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={{ flex: 1, backgroundColor: colors.background }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingTop: Platform.OS === "ios" ? 56 : 16 }}>
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, backgroundColor: colors.background }}>
+      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingTop: headerTop }}>
         {headerBack}
-        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text, marginLeft: 4 }}>Where are you?</Text>
+        <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text, marginLeft: 4 }}>Where are you?</Text>
       </View>
 
-      <View style={{ paddingHorizontal: 20, paddingTop: 8, gap: 12 }}>
-        {/* Search field */}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.inputBg }}>
+      <View style={{ paddingHorizontal: 20, paddingTop: 10, gap: 12 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.inputBg }}>
           <Ionicons name="search" size={18} color={colors.textSecondary} />
           <TextInput
             value={query}
@@ -362,20 +388,15 @@ export default function PostCompose() {
           )}
         </View>
 
-        {/* Location status / GPS error */}
-        {locLoading && (
-          <Text style={{ fontSize: 13, color: colors.textSecondary }}>Getting your location…</Text>
-        )}
+        {locLoading && <Text style={{ fontSize: 13, color: colors.textSecondary }}>Getting your location…</Text>}
         {!locLoading && locError && (
           <View style={{ padding: 12, borderRadius: 10, backgroundColor: colors.surface, gap: 6 }}>
             <Text style={{ fontSize: 14, fontWeight: "600", color: colors.text }}>We couldn&rsquo;t get your location</Text>
             <Text style={{ fontSize: 13, color: colors.textSecondary }}>Every post needs your location. Enable location for Euda in Settings, then reopen this screen.</Text>
           </View>
         )}
-
-        {/* Out-of-range block (§5b) */}
         {blocked && (
-          <View style={{ padding: 12, borderRadius: 10, backgroundColor: colors.surface, borderWidth: 1, borderColor: Colors.primary, gap: 8 }}>
+          <View style={{ padding: 12, borderRadius: 10, backgroundColor: Colors.primary + "14", borderWidth: 1, borderColor: Colors.primary, gap: 8 }}>
             <Text style={{ fontSize: 14, color: colors.text }}>
               You&rsquo;re not close enough to tag{" "}
               <Text style={{ fontWeight: "700" }}>{blocked.place.title}</Text>
@@ -385,52 +406,49 @@ export default function PostCompose() {
         )}
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
-        {/* Results */}
-        {results.map((r) => (
-          <Pressable
-            key={r.id}
-            onPress={() => selectPlace(r)}
-            disabled={verifying}
-            accessibilityLabel={`Tag ${r.title}`}
-            accessibilityRole="button"
-            style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border, opacity: verifying ? 0.5 : 1 }}
-          >
-            <Ionicons name="location-outline" size={20} color={colors.textSecondary} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text }} numberOfLines={1}>{r.title}</Text>
-              {!!r.location_name && r.location_name !== r.title && (
-                <Text style={{ fontSize: 12, color: colors.textSecondary }} numberOfLines={1}>{r.location_name}</Text>
-              )}
-            </View>
-            <Text style={{ fontSize: 12, color: colors.textTertiary }}>{fmtDistance(r.distance_m)}</Text>
-          </Pressable>
-        ))}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+        {/* Typed search results */}
+        {!showNearby && results.map((r) => <PlaceRow key={r.id} r={r} />)}
 
-        {/* Empty / not-found state (§5b) — never a dead end */}
-        {searched && !searching && results.length === 0 && query.trim().length >= MIN_QUERY && (
+        {/* Empty typed-search state (§5b) — never a dead end */}
+        {!showNearby && searched && !searching && results.length === 0 && (
           <View style={{ paddingVertical: 20, alignItems: "center", gap: 4 }}>
             <Text style={{ fontSize: 15, fontWeight: "600", color: colors.text }}>Can&rsquo;t find it?</Text>
             <Text style={{ fontSize: 13, color: colors.textSecondary, textAlign: "center" }}>No places match near you. You can still post as My Location.</Text>
           </View>
         )}
 
-        {/* No-search / initial state prompt */}
-        {query.trim().length < MIN_QUERY && !locError && (
+        {/* Nearby (no query) — tap a spot without typing */}
+        {showNearby && nearby.length > 0 && (
+          <>
+            <Text style={{ fontSize: 12, fontWeight: "700", color: colors.textSecondary, letterSpacing: 0.5, textTransform: "uppercase", paddingBottom: 4 }}>Nearby</Text>
+            {nearby.map((r) => <PlaceRow key={r.id} r={r} />)}
+          </>
+        )}
+        {showNearby && !locLoading && !locError && nearby.length === 0 && (
           <Text style={{ fontSize: 13, color: colors.textSecondary, paddingVertical: 12 }}>
-            Search for a place you&rsquo;re at, or just post your location.
+            No places near you — search above, or just post your location.
           </Text>
         )}
       </ScrollView>
 
-      {/* My Location — persistent, prominent (never conditional). */}
-      <View style={{ padding: 20, paddingBottom: Platform.OS === "ios" ? 34 : 20, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.background }}>
+      {/* My Location — persistent, prominent. */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: Math.max(insets.bottom, 16), borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.background }}>
         {verifying ? (
           <View style={{ padding: 16, alignItems: "center" }}>
             <ActivityIndicator color={Colors.primary} />
           </View>
         ) : (
-          myLocationButton
+          <Pressable
+            onPress={postMyLocation}
+            disabled={verifying}
+            accessibilityLabel="Post as My Location"
+            accessibilityRole="button"
+            style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 16, borderRadius: 14, backgroundColor: Colors.primary }}
+          >
+            <Ionicons name="navigate" size={18} color="#fff" />
+            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>Post My Location</Text>
+          </Pressable>
         )}
       </View>
     </KeyboardAvoidingView>

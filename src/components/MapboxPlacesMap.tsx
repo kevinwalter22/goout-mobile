@@ -133,6 +133,14 @@ export function MapboxPlacesMap({
         style={{ flex: 1 }}
         styleURL={Mapbox.StyleURL.Street}
         scaleBarEnabled={false}
+        // Mapbox attribution + logo are REQUIRED to stay visible (ToS) but MAY be
+        // repositioned. The attribution "ⓘ" defaults to bottom-RIGHT, where the purple
+        // FAB overlaps it — move both to the bottom-LEFT (logo's home) so they're clear
+        // of the FAB while remaining fully visible. Do NOT disable them.
+        logoEnabled
+        attributionEnabled
+        logoPosition={{ bottom: 8, left: 8 }}
+        attributionPosition={{ bottom: 8, left: 92 }}
         onPress={() => {
           // Ignore the map-level tap that immediately follows a pin tap (they can
           // both fire), which would otherwise deselect what you just selected.

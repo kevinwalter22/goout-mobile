@@ -897,10 +897,13 @@ export default function Explore() {
           }
           return;
         }
+        // Unified flow: into the post-first camera with the place pre-linked + verified.
         router.push({
-          pathname: "/checkin/[eventId]",
+          pathname: "/post/camera",
           params: {
-            eventId: itemId,
+            exploreItemId: itemId,
+            itemTitle: item.title,
+            itemLocationName: item.location_name ?? "",
             itemKind: item.kind,
             verified_lat: String(result.user_lat),
             verified_lng: String(result.user_lng),
