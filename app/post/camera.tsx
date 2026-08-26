@@ -30,6 +30,7 @@ import { heavyHaptic, errorHaptic } from "../../src/utils/haptics";
 import { captureError } from "../../src/lib/logger";
 import { normalizePostImage } from "../../src/utils/imageTransform";
 import { setPostDraft } from "../../src/utils/postDraftStore";
+import { DualCameraPost } from "../../src/components/DualCameraPost";
 
 const MODE_OPTIONS: { key: CameraMode; label: string }[] = [
   { key: CAMERA_MODES.BACK, label: "Back" },
@@ -202,8 +203,16 @@ export default function PostCamera() {
         <Pressable onPress={handleCancel} accessibilityLabel="Cancel" accessibilityRole="button" style={closeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="close" size={24} color="#fff" />
         </Pressable>
-        <View style={{ flex: 1, justifyContent: "center" }}>
-          <Image source={{ uri: previewUri }} style={{ width: "100%", aspectRatio: 3 / 4 }} resizeMode="contain" />
+        {/* Preview mirrors the home feed: rounded 3:4; dual shows the BeReal overlay
+            (tap to swap, drag the inset, hold to peek) — same component the feed uses. */}
+        <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 16 }}>
+          <View style={{ width: "100%", aspectRatio: 3 / 4, borderRadius: 16, overflow: "hidden", backgroundColor: "#111" }}>
+            {isDualMode && photos.length === 2 ? (
+              <DualCameraPost backUri={photos[0]} frontUri={photos[1]} style={{ flex: 1 }} />
+            ) : (
+              <Image source={{ uri: previewUri }} style={{ flex: 1 }} resizeMode="cover" />
+            )}
+          </View>
         </View>
         <View style={{ padding: 24, paddingBottom: Math.max(insets.bottom, 24), backgroundColor: colors.surface, gap: 12, flexDirection: "row" }}>
           <Pressable onPress={retake} accessibilityLabel="Retake photo" accessibilityRole="button" style={{ flex: 1, padding: 16, borderRadius: 14, borderWidth: 2, borderColor: colors.border, alignItems: "center" }}>
@@ -242,15 +251,16 @@ export default function PostCamera() {
             </Text>
           )}
 
-          {/* Shutter — larger + a purple ring + a generous tap target. */}
+          {/* Shutter — large + a generous tap target, but subtle: a soft purple ring
+              and a translucent inner disc (not solid white) so it doesn't over-pop. */}
           <Pressable
             onPress={takePhoto}
             accessibilityLabel="Take photo"
             accessibilityRole="button"
             hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-            style={{ width: 84, height: 84, borderRadius: 42, alignSelf: "center", alignItems: "center", justifyContent: "center", borderWidth: 5, borderColor: Colors.primary, backgroundColor: "rgba(255,255,255,0.25)" }}
+            style={{ width: 84, height: 84, borderRadius: 42, alignSelf: "center", alignItems: "center", justifyContent: "center", borderWidth: 4, borderColor: "rgba(124,58,237,0.85)", backgroundColor: "rgba(255,255,255,0.18)" }}
           >
-            <View style={{ width: 62, height: 62, borderRadius: 31, backgroundColor: "#fff" }} />
+            <View style={{ width: 62, height: 62, borderRadius: 31, backgroundColor: "rgba(255,255,255,0.45)" }} />
           </Pressable>
 
           {/* Mode selector — hidden mid dual-capture so it can't reset a half-done shot. */}

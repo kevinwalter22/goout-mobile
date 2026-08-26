@@ -41,6 +41,7 @@ import { submitPost } from "../../src/lib/submitPost";
 import { getPostDraft, clearPostDraft } from "../../src/utils/postDraftStore";
 import { MAX_CAPTION_LENGTH } from "../../src/config/constants";
 import { successHaptic, errorHaptic } from "../../src/utils/haptics";
+import { DualCameraPost } from "../../src/components/DualCameraPost";
 
 type PlaceResult = {
   id: string;
@@ -259,6 +260,20 @@ export default function PostCompose() {
     }
   }
 
+  function cancelPost() {
+    Alert.alert("Discard post?", "Your photo and caption won't be saved.", [
+      { text: "Keep editing", style: "cancel" },
+      {
+        text: "Discard",
+        style: "destructive",
+        onPress: () => {
+          clearPostDraft();
+          router.replace("/(tabs)/feed" as any);
+        },
+      },
+    ]);
+  }
+
   const headerTop = insets.top + 14;
   const headerBack = (
     <Pressable
@@ -297,20 +312,29 @@ export default function PostCompose() {
   if (step === "details") {
     return (
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 8, paddingTop: headerTop }}>
-          {headerBack}
-          <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text, marginLeft: 4 }}>Add details</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 8, paddingTop: headerTop }}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            {headerBack}
+            <Text style={{ fontSize: 20, fontWeight: "700", color: colors.text, marginLeft: 4 }}>Add details</Text>
+          </View>
+          <Pressable onPress={cancelPost} accessibilityLabel="Cancel post" accessibilityRole="button" hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} style={{ width: 44, height: 40, alignItems: "flex-end", justifyContent: "center", paddingRight: 8 }}>
+            <Ionicons name="close" size={26} color={colors.textSecondary} />
+          </Pressable>
         </View>
 
         <ScrollView contentContainerStyle={{ padding: 20, gap: 16, alignItems: "center" }} keyboardShouldPersistTaps="handled">
-          {/* Big preview — mirrors the home-feed post (3:4), just slightly smaller. */}
-          {previewUri && (
+          {/* Big preview — mirrors the home-feed post (3:4). Dual shows the BeReal overlay. */}
+          {draft && draft.mode === "dual" && draft.photos.length === 2 ? (
+            <View style={{ width: "82%", aspectRatio: 3 / 4, borderRadius: 16, overflow: "hidden", backgroundColor: colors.surfaceVariant }}>
+              <DualCameraPost backUri={draft.photos[0]} frontUri={draft.photos[1]} style={{ flex: 1 }} />
+            </View>
+          ) : previewUri ? (
             <Image
               source={{ uri: previewUri }}
               style={{ width: "82%", aspectRatio: 3 / 4, borderRadius: 16, backgroundColor: colors.surfaceVariant }}
               resizeMode="cover"
             />
-          )}
+          ) : null}
 
           {/* Where — linked place or My Location, on-theme. */}
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: Colors.primary + "33", alignSelf: "stretch" }}>
@@ -406,7 +430,7 @@ export default function PostCompose() {
         )}
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
         {/* Typed search results */}
         {!showNearby && results.map((r) => <PlaceRow key={r.id} r={r} />)}
 
