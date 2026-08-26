@@ -1,5 +1,5 @@
 import * as Location from "expo-location";
-import { CHECK_IN_RADIUS_METERS } from "../config/constants";
+import { CHECK_IN_RADIUS_METERS, POST_FIRST_RADIUS_METERS } from "../config/constants";
 
 // Conversion constants
 const METERS_PER_MILE = 1609.344;
@@ -221,6 +221,49 @@ export async function verifyCheckInLocation(
       allowed: false,
       distance: Math.round(distance),
       error: `You need to be closer to check in (${Math.round(distance)}m away)`,
+    };
+  }
+
+  return {
+    allowed: true,
+    distance: Math.round(distance),
+    user_lat: latitude,
+    user_lng: longitude,
+    verified_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Verify user can post at a location, using the more forgiving post-first
+ * radius (POST_FIRST_RADIUS_METERS). Mirrors verifyCheckInLocation, which
+ * stays on the strict CHECK_IN_RADIUS_METERS for the existing check-in path.
+ */
+export async function verifyPostLocation(
+  eventLat: number,
+  eventLon: number,
+): Promise<VerifyCheckInResult> {
+  // Request permission
+  const { granted, denied, error: permError } =
+    await requestLocationPermission();
+  if (!granted) {
+    return { allowed: false, denied, error: permError };
+  }
+
+  // Get current location
+  const { latitude, longitude, error: locError } = await getCurrentLocation();
+  if (locError) {
+    return { allowed: false, error: locError };
+  }
+
+  // Check distance
+  const distance = getDistanceInMeters(latitude, longitude, eventLat, eventLon);
+  const allowed = distance <= POST_FIRST_RADIUS_METERS;
+
+  if (!allowed) {
+    return {
+      allowed: false,
+      distance: Math.round(distance),
+      error: `You need to be closer to post (${Math.round(distance)}m away)`,
     };
   }
 
