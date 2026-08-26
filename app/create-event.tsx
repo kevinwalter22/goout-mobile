@@ -10,7 +10,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { router, Stack } from "expo-router";
+import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,6 +18,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { useTheme } from "../src/contexts/ThemeContext";
 import { Colors } from "../src/config/theme";
 import { useCreateEvent } from "../src/hooks/useCreateEvent";
+import { useUnsavedChangesGuard } from "../src/hooks/useUnsavedChangesGuard";
 import { AddressAutocomplete, type AddressSuggestion } from "../src/components/AddressAutocomplete";
 import { setLocationPickerCallback } from "../src/utils/locationPickerStore";
 
@@ -97,6 +98,18 @@ export default function CreateEvent() {
   const hasLocation = selectedCoords !== null || address.trim().length > 0;
   const canSubmit = title.trim().length > 0 && !loading && hasLocation;
 
+  const isDirty =
+    title.trim().length > 0 ||
+    description.trim().length > 0 ||
+    locationName.trim().length > 0 ||
+    address.trim().length > 0 ||
+    selectedCoords !== null ||
+    imageUri !== null ||
+    endDate !== null ||
+    recurrence !== "none" ||
+    visibility !== "friends_only";
+  const allowNextBack = useUnsavedChangesGuard(isDirty);
+
   async function handleSubmit() {
     if (!canSubmit) return;
 
@@ -122,9 +135,10 @@ export default function CreateEvent() {
         Alert.alert(
           "Pending Review",
           "Your event was created but is pending review. It will be visible to others once approved.",
-          [{ text: "OK", onPress: () => router.back() }],
+          [{ text: "OK", onPress: () => { allowNextBack(); router.back(); } }],
         );
       } else {
+        allowNextBack();
         router.back();
       }
     } else if (error) {
@@ -147,7 +161,6 @@ export default function CreateEvent() {
       style={{ flex: 1, backgroundColor: colors.background }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <Stack.Screen options={{ gestureEnabled: false }} />
       {/* Header */}
       <View
         style={{

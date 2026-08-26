@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -26,6 +26,7 @@ import { AddressAutocomplete, type AddressSuggestion } from "../../src/component
 import type { ExploreItem } from "../../src/types/database";
 import { checkBeforeSubmit, moderateText } from "../../src/lib/moderation/textModeration";
 import { setLocationPickerCallback } from "../../src/utils/locationPickerStore";
+import { useUnsavedChangesGuard } from "../../src/hooks/useUnsavedChangesGuard";
 
 /**
  * Geocode an address to get lat/lng coordinates
@@ -122,6 +123,18 @@ export default function EditEvent() {
   // Coordinates from address selection
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
 
+  // Snapshot of the loaded form values, used to detect unsaved edits
+  const initialFormRef = useRef<{
+    title: string;
+    description: string;
+    locationName: string;
+    address: string;
+    visibility: "friends_only" | "public";
+    recurrence: "none" | "weekly" | "monthly";
+    startDate: number;
+    endDate: number | null;
+  } | null>(null);
+
   // Handle address selection from autocomplete
   function handleAddressSelect(suggestion: AddressSuggestion) {
     setSelectedCoords({ lat: suggestion.lat, lng: suggestion.lng });
@@ -153,23 +166,38 @@ export default function EditEvent() {
         return;
       }
 
+      const loadedTitle = data.title || "";
+      const loadedDescription = data.description || "";
+      const loadedLocationName = data.location_name || "";
+      const loadedAddress = data.address || "";
+      const loadedVisibility = data.visibility === "public" ? "public" : "friends_only";
+      const loadedRecurrence =
+        data.recurrence && ["weekly", "monthly"].includes(data.recurrence)
+          ? (data.recurrence as "weekly" | "monthly")
+          : "none";
+      const loadedStartDate = data.starts_at ? new Date(data.starts_at) : new Date();
+      const loadedEndDate = data.ends_at ? new Date(data.ends_at) : null;
+
       setItem(data as ExploreItem);
-      setTitle(data.title || "");
-      setDescription(data.description || "");
-      setLocationName(data.location_name || "");
-      setAddress(data.address || "");
-      setVisibility(data.visibility === "public" ? "public" : "friends_only");
-      if (data.recurrence && ["weekly", "monthly"].includes(data.recurrence)) {
-        setRecurrence(data.recurrence as "weekly" | "monthly");
-      } else {
-        setRecurrence("none");
-      }
-      if (data.starts_at) {
-        setStartDate(new Date(data.starts_at));
-      }
-      if (data.ends_at) {
-        setEndDate(new Date(data.ends_at));
-      }
+      setTitle(loadedTitle);
+      setDescription(loadedDescription);
+      setLocationName(loadedLocationName);
+      setAddress(loadedAddress);
+      setVisibility(loadedVisibility);
+      setRecurrence(loadedRecurrence);
+      if (data.starts_at) setStartDate(loadedStartDate);
+      if (data.ends_at) setEndDate(loadedEndDate);
+
+      initialFormRef.current = {
+        title: loadedTitle,
+        description: loadedDescription,
+        locationName: loadedLocationName,
+        address: loadedAddress,
+        visibility: loadedVisibility,
+        recurrence: loadedRecurrence,
+        startDate: loadedStartDate.getTime(),
+        endDate: loadedEndDate?.getTime() ?? null,
+      };
 
       setLoadingItem(false);
     }
