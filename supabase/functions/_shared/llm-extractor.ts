@@ -91,6 +91,15 @@ export interface ExtractEventsOptions {
   supabase?: any;
   /** Override the default 40,000-char prompt truncation. */
   maxPromptChars?: number;
+  /**
+   * Identifies the caller for per-source cost attribution (e.g.
+   * "collector:<target.name>" from ingest-web-collector, "venue:<title>"
+   * from ingest-venue-website). When present alongside opts.supabase, the
+   * cost is ALSO logged to haiku_usage_by_source in addition to the global
+   * anthropic_haiku counter. Purely additive — omitting it only skips the
+   * per-source breakdown, the global counter still increments.
+   */
+  sourceKey?: string;
   /** Skip critique pass entirely (testing only). */
   skipCritique?: boolean;
   /**
@@ -559,7 +568,7 @@ export async function extractEvents(
   const totalOutput = extractOutputTokens + critiqueOutputTokens;
   const cents = costCents(totalInput, totalOutput);
 
-  // Optional: log cost to api_usage_counters
+  // Optional: log cost to api_usage_counters (global cap, unchanged)
   if (opts.supabase && cents > 0) {
     try {
       await opts.supabase.rpc("increment_api_usage", {
@@ -568,6 +577,20 @@ export async function extractEvents(
       });
     } catch (err) {
       errors.push(`budget log failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Optional: per-source breakdown, additive to (never a substitute for)
+    // the global counter above. A failure here must not affect the global
+    // count or the caller's result — it's logged separately.
+    if (opts.sourceKey) {
+      try {
+        await opts.supabase.rpc("increment_haiku_usage_by_source", {
+          p_source_key: opts.sourceKey,
+          p_cost_cents: cents,
+        });
+      } catch (err) {
+        errors.push(`per-source cost log failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 

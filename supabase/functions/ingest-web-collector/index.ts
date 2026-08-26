@@ -428,7 +428,10 @@ serve(async (req) => {
                   default_category: target.default_category ?? undefined,
                 };
                 try {
-                  const llmResult = await extractEvents(page.raw_html, hints, { supabase });
+                  const llmResult = await extractEvents(page.raw_html, hints, {
+                    supabase,
+                    sourceKey: `collector:${target.name}`,
+                  });
                   llmCallsMade++;
                   llmCostCents += llmResult.usage.cost_cents;
                   console.log(
