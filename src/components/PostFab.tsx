@@ -22,10 +22,12 @@ export function PostFab() {
       accessibilityRole="button"
       style={{
         position: "absolute",
-        // Sits 22px above the tab bar (was 32) — nudged down per Kevin, and kept
-        // 8px above + 8px inside the map preview card's bottom-right corner
-        // (card is bottom:14, right:16) so the purple circle reads symmetric there.
-        bottom: 22 + TAB_BAR_HEIGHT + insets.bottom,
+        // Sits 12px above the tab bar. Tuned so that on the Explore/map view, when
+        // the preview card is up, the FAB lands in the card's bottom-right corner
+        // with bottom-gap == right-gap (~8pt each): card is bottom:14/right:16, FAB
+        // is right:24 (8pt inset from the card's right edge) and this offset puts its
+        // bottom edge ~8pt above the card's bottom edge. Per Kevin's screenshot.
+        bottom: 12 + TAB_BAR_HEIGHT + insets.bottom,
         right: 24,
         width: 56,
         height: 56,
