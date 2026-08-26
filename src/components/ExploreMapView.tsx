@@ -692,7 +692,9 @@ export function ExploreMapView({
         <Animated.View
           style={{
             position: "absolute",
-            bottom: 24,
+            // Nudged down (was 24) to tighten the gap to the bottom nav without
+            // touching it, and to sit symmetrically under the purple-plus FAB.
+            bottom: 14,
             left: 16,
             right: 16,
             opacity: previewAnim,

@@ -22,7 +22,10 @@ export function PostFab() {
       accessibilityRole="button"
       style={{
         position: "absolute",
-        bottom: 32 + TAB_BAR_HEIGHT + insets.bottom,
+        // Sits 22px above the tab bar (was 32) — nudged down per Kevin, and kept
+        // 8px above + 8px inside the map preview card's bottom-right corner
+        // (card is bottom:14, right:16) so the purple circle reads symmetric there.
+        bottom: 22 + TAB_BAR_HEIGHT + insets.bottom,
         right: 24,
         width: 56,
         height: 56,
