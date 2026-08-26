@@ -105,6 +105,7 @@ export default function PostCompose() {
   const [posting, setPosting] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
 
   // Defensive: if we somehow landed here with no captured photo, go back.
   useEffect(() => {
@@ -205,6 +206,9 @@ export default function PostCompose() {
         setStep("details");
       } else {
         setBlocked({ place, distance: res.distance });
+        // Snap back to the top so the "post your location instead" warning + the full
+        // "Nearby" list are visible together (otherwise the list stays mid-scroll).
+        scrollRef.current?.scrollTo({ y: 0, animated: true });
       }
     } finally {
       setVerifying(false);
@@ -430,7 +434,7 @@ export default function PostCompose() {
         )}
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
         {/* Typed search results */}
         {!showNearby && results.map((r) => <PlaceRow key={r.id} r={r} />)}
 
