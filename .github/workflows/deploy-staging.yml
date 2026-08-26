@@ -18,11 +18,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Gate: reuse the PR test workflow. secrets: inherit passes the staging secrets
-  # through to its integration job.
+  # Fast gate: reuse the PR test workflow but SKIP its integration job here
+  # (run_integration: false). Integration runs later in `deploy`, AFTER `db push`,
+  # so a behavior-changing migration and the test that asserts it can co-deploy.
+  # secrets: inherit passes the staging secrets through.
   test:
     uses: ./.github/workflows/test.yml
     secrets: inherit
+    with:
+      run_integration: false
 
   deploy:
     name: Migrations + edge functions + EAS (staging)
@@ -34,6 +38,12 @@ jobs:
       STAGING_REF: ${{ secrets.SUPABASE_STAGING_PROJECT_REF }}
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      # Integration suite runs post-migration (see step below). Same secrets the
+      # test.yml integration job uses; URL is derived from the staging ref.
+      STAGING_SUPABASE_URL: https://${{ secrets.SUPABASE_STAGING_PROJECT_REF }}.supabase.co
+      STAGING_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_STAGING_SERVICE_ROLE_KEY }}
+      STAGING_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_STAGING_ANON_KEY }}
+      SENTRY_DSN_EDGE: ${{ secrets.SENTRY_DSN_EDGE }}
       # App Store Connect API key (.p8, base64) used to auto-submit the staging
       # build to TestFlight. The .p8 is gitignored, so CI reconstructs it from
       # this secret. When unset, the build still runs but submit is skipped.
@@ -108,9 +118,20 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install deps (EAS needs node_modules to resolve config plugins)
-        if: ${{ env.EXPO_TOKEN != '' }}
+      # node_modules is needed both for the integration suite below and for EAS
+      # to resolve config plugins — install once, unconditionally.
+      - name: Install deps
         run: npm ci
+
+      # Validate the NOW-migrated staging DB before shipping any client build.
+      # This is the same suite the PR gate runs, but here it runs AFTER `db push`
+      # (the PR gate runs it before). That ordering is the whole point: a
+      # behavior-changing migration (e.g. 173's coords invariant) and the test
+      # asserting its new behavior land together on staging without deadlocking.
+      # A failure here fails the job and stops the EAS build below (forward-fix
+      # policy: the migration stays applied; see the failure Slack note).
+      - name: Integration tests (post-migration, vs staging)
+        run: npm run test:integration
 
       # Reconstruct the App Store Connect API key (.p8) from the base64 secret so
       # `eas build --auto-submit` can hand it to EAS for the server-side TestFlight

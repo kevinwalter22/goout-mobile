@@ -17,6 +17,16 @@ name: Test
 on:
   pull_request:
   workflow_call:
+    inputs:
+      run_integration:
+        description: >-
+          Run the staging integration job. Defaults true (every PR runs it).
+          deploy-staging sets this false and runs integration AFTER `db push`
+          instead — otherwise a behavior-changing migration and the test that
+          asserts its new behavior can never co-deploy (the test would assert
+          against un-migrated staging and deadlock the migration forever).
+        type: boolean
+        default: true
 
 concurrency:
   group: test-${{ github.workflow }}-${{ github.ref }}
@@ -45,6 +55,13 @@ jobs:
   integration:
     name: Integration tests (staging)
     needs: [checks]
+    # Run on every PR, and on any workflow_call that didn't explicitly disable it
+    # (deploy-production's call → default true → runs). deploy-staging passes false
+    # and re-runs the suite itself AFTER migrations apply. NOTE: on a pull_request
+    # event `inputs.run_integration` is unset and GitHub coerces it to falsy, so a
+    # bare `inputs.run_integration != false` would WRONGLY skip integration on PRs —
+    # the event_name clause is what keeps the PR gate alive.
+    if: ${{ github.event_name == 'pull_request' || inputs.run_integration }}
     runs-on: ubuntu-latest
     env:
       # URL is derived from the staging ref so there's one fewer secret to manage.
