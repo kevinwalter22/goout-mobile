@@ -11,13 +11,14 @@ import { Colors } from "../config/theme";
 // iOS-only paddingTop:8 set on tabBarStyle in app/(tabs)/_layout.tsx.
 const TAB_BAR_HEIGHT = 49 + (Platform.OS === "ios" ? 8 : 0);
 
-/** Purple-plus FAB, shared across every tab. Destination is /create-event until T5 flips it to post-first. */
+/** Purple-plus FAB, shared across every tab. Opens the post-first flow (T5);
+ *  "Create an event" now lives as a secondary link on the camera screen. */
 export function PostFab() {
   const insets = useSafeAreaInsets();
 
   return (
     <Pressable
-      onPress={() => router.push("/create-event")}
+      onPress={() => router.push("/post/camera")}
       accessibilityLabel="Create event"
       accessibilityRole="button"
       style={{
