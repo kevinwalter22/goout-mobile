@@ -7,6 +7,7 @@
 // Runs in the maintainer's GATHER step (bash) so SUPABASE_ACCESS_TOKEN stays scoped to
 // that step and never reaches the Claude agent step. Prints a JSON array to stdout.
 import https from "node:https";
+import { Buffer } from "node:buffer";
 
 const TOKEN = process.env.SUPABASE_ACCESS_TOKEN;
 const REF = process.env.PROD_REF;
