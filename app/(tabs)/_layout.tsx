@@ -8,6 +8,7 @@ import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
 import { SwipeableTabsContainer } from "../../src/components/SwipeableTabsContainer";
 import { WelcomeModal } from "../../src/components/WelcomeModal";
+import { PostFab } from "../../src/components/PostFab";
 
 const WELCOME_KEY = "@euda_has_seen_welcome";
 
@@ -97,6 +98,7 @@ export default function TabsLayout() {
         }}
       />
     </Tabs>
+    <PostFab />
     <WelcomeModal visible={showWelcome} onClose={dismissWelcome} />
     </SwipeableTabsContainer>
   );
