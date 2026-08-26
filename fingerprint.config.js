@@ -4,10 +4,14 @@
 // and force a rebuild. Those fields don't change native compatibility, so an OTA can
 // still reach an installed build across a version bump — keeping the OTA-first flow intact.
 //
-// SourceSkips.ExpoConfigVersions === 1 (see @expo/fingerprint). Adding this file changes
-// the fingerprint ONCE (a one-time build); after that, version bumps are OTA-safe.
-const { SourceSkips } = require("@expo/fingerprint");
-
+// `sourceSkips: 1` === SourceSkips.ExpoConfigVersions in @expo/fingerprint. We use the
+// raw bitmask value rather than `require("@expo/fingerprint")` on purpose: @expo/fingerprint
+// is only a TRANSITIVE dep here (via expo/expo-updates, not in package.json), and requiring
+// it inside this config crashed the EAS "Configure expo-updates" build phase (build #35).
+// A plain number is a valid sourceSkips value and can't throw at config-load time.
+//
+// Adding this file changes the fingerprint ONCE (a one-time build); after that, version
+// bumps are OTA-safe.
 module.exports = {
-  sourceSkips: SourceSkips.ExpoConfigVersions,
+  sourceSkips: 1,
 };
