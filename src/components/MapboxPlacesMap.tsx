@@ -139,7 +139,7 @@ export function MapboxPlacesMap({
         logoEnabled
         attributionEnabled
         logoPosition={{ bottom: 8, left: 8 }}
-        attributionPosition={{ top: 8, right: 8 }}
+        attributionPosition={{ top: 3, right: 3 }}
         onPress={() => {
           // Ignore the map-level tap that immediately follows a pin tap (they can
           // both fire), which would otherwise deselect what you just selected.
