@@ -11,6 +11,7 @@ import { sanitizeTimeText } from "../utils/formatTimeText";
 import { regionToBbox, bboxContains, type MapRegion } from "../utils/mapViewport";
 import { getFallbackImage } from "../lib/categoryFallbackImages";
 import { MapboxPlacesMap } from "./MapboxPlacesMap";
+import { computePostableNow } from "../lib/postableNow";
 import { regionToZoom } from "../lib/mapClustering";
 import type { ExploreItem } from "../types/database";
 import type {
@@ -34,6 +35,8 @@ interface ExploreMapViewProps {
   timeWindow?: TimeWindow;
   distance?: DistanceRadius;
   tags?: string[];
+  /** Double-tap a postable pin / tap "Post here now" on the preview → post camera (T8). */
+  onCameraShortcut?: (item: ExploreItem) => void;
 }
 
 // Default map events horizon: 60 days (region-model decision A2). Only applies
@@ -97,6 +100,7 @@ export function ExploreMapView({
   timeWindow = "all",
   distance = 50,
   tags = [],
+  onCameraShortcut,
 }: ExploreMapViewProps) {
   const { colors } = useTheme();
 
@@ -477,6 +481,14 @@ export function ExploreMapView({
     [selectedItemId, mappableItems]
   );
 
+  // Is the selected place postable right now? Drives the preview card's POST NOW
+  // badge + "Post here now" CTA (the reliable map path; the pin double-tap is the
+  // gesture parity, this is the discoverable button).
+  const selectedPostable = useMemo(
+    () => (selectedItem ? computePostableNow(selectedItem, userLocation).isPostable : false),
+    [selectedItem, userLocation]
+  );
+
   // Animate preview card in/out. A short timing curve (not a spring) keeps the
   // card feeling instant on tap — combined with the always-mounted selection
   // ring in MapboxPlacesMap, selecting a place is snappy now.
@@ -564,6 +576,7 @@ export function ExploreMapView({
         onRegionChange={handleRegionChangeComplete}
         onSelectItem={selectItem}
         itemById={itemById}
+        onCameraShortcut={onCameraShortcut}
       />
 
       {/* Zoom-out ceiling: prompt to zoom in rather than scan a whole state */}
@@ -777,6 +790,20 @@ export function ExploreMapView({
                   marginTop: 4,
                 }}
               >
+                {selectedPostable && (
+                  <View
+                    style={{
+                      paddingHorizontal: 8,
+                      paddingVertical: 2,
+                      borderRadius: 4,
+                      backgroundColor: Colors.primary,
+                    }}
+                  >
+                    <Text style={{ fontSize: 10, fontWeight: "700", color: "#fff" }}>
+                      POST NOW
+                    </Text>
+                  </View>
+                )}
                 <Text
                   style={{
                     fontSize: 11,
@@ -855,15 +882,38 @@ export function ExploreMapView({
                     ·
                   </Text>
                 )}
-                <Text
-                  style={{
-                    fontSize: 12,
-                    fontWeight: "600",
-                    color: Colors.primary,
-                  }}
-                >
-                  View details &rsaquo;
-                </Text>
+                {selectedPostable && onCameraShortcut ? (
+                  // Reliable map path to the camera (the pin double-tap is the
+                  // gesture parity; this is the discoverable button). stopPropagation
+                  // so it doesn't also fire the card's View-details navigation.
+                  <Pressable
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      onCameraShortcut(selectedItem);
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      borderRadius: 6,
+                      backgroundColor: Colors.primary,
+                    }}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: "700", color: "#fff" }}>
+                      Post here now &rsaquo;
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Text
+                    style={{
+                      fontSize: 12,
+                      fontWeight: "600",
+                      color: Colors.primary,
+                    }}
+                  >
+                    View details &rsaquo;
+                  </Text>
+                )}
               </View>
             </View>
           </Pressable>

@@ -4,7 +4,7 @@
  * 160px wide, compact card with image, title, distance + open-now dot, tags.
  */
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { Image, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../contexts/ThemeContext";
@@ -17,15 +17,20 @@ import { formatTileWhen } from "../utils/formatTileWhen";
 interface GroupCarouselTileProps {
   item: ScoredItem;
   userLocation: { lat: number; lng: number } | null;
+  /** Tile belongs to a postable_now group → POST NOW badge + double-tap shortcut. */
+  isPostable?: boolean;
   onPress: (itemId: string) => void;
   onLongPress?: (itemId: string) => void;
+  onCameraShortcut?: (item: ScoredItem) => void;
 }
 
 function GroupCarouselTileInner({
   item,
   userLocation,
+  isPostable = false,
   onPress,
   onLongPress,
+  onCameraShortcut,
 }: GroupCarouselTileProps) {
   const { colors } = useTheme();
 
@@ -38,20 +43,51 @@ function GroupCarouselTileInner({
   const tags = (item.tags || []).slice(0, 2);
   const whenText = useMemo(() => formatTileWhen(item), [item.kind, item.starts_at, item.ends_at]);
 
+  // Double-tap → camera, single tap → detail. Same 200ms discriminator the list
+  // ExploreCard uses, so the gesture feels identical across surfaces. Only armed
+  // when the tile is postable AND a shortcut handler is present.
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+  }, []);
+
+  const canShortcut = isPostable && !!onCameraShortcut;
+
+  function handlePress() {
+    if (!canShortcut) {
+      onPress(item.id);
+      return;
+    }
+    if (tapTimerRef.current !== null) {
+      clearTimeout(tapTimerRef.current);
+      tapTimerRef.current = null;
+      onCameraShortcut?.(item);
+    } else {
+      tapTimerRef.current = setTimeout(() => {
+        tapTimerRef.current = null;
+        onPress(item.id);
+      }, 200);
+    }
+  }
+
   return (
     <Pressable
-      onPress={() => onPress(item.id)}
+      onPress={handlePress}
       onLongPress={() => onLongPress?.(item.id)}
+      accessibilityRole="button"
+      accessibilityLabel={item.title}
+      accessibilityHint={canShortcut ? "Tap to view details, double-tap to go straight to camera" : "Tap to view details"}
       style={{
         width: 160,
         borderRadius: 12,
         backgroundColor: colors.surface,
-        borderWidth: 1,
-        borderColor: colors.border,
+        borderWidth: isPostable ? 2 : 1,
+        borderColor: isPostable ? Colors.primary : colors.border,
         overflow: "hidden",
       }}
     >
       {/* Image — prefer thumbnail, fall back to full image (user-created events only set image_url) */}
+      <View>
       {(item.image_thumb_url || item.image_url) ? (
         <Image
           source={{ uri: item.image_thumb_url ?? item.image_url ?? undefined }}
@@ -74,6 +110,27 @@ function GroupCarouselTileInner({
           </View>
         );
       })()}
+
+        {/* POST NOW badge — overlaid on the image for postable tiles (parity
+            with the list ExploreCard badge). */}
+        {isPostable && (
+          <View
+            style={{
+              position: "absolute",
+              top: 6,
+              left: 6,
+              paddingHorizontal: 8,
+              paddingVertical: 2,
+              borderRadius: 4,
+              backgroundColor: Colors.primary,
+            }}
+          >
+            <Text style={{ fontSize: 10, fontWeight: "700", color: "#fff" }}>
+              POST NOW
+            </Text>
+          </View>
+        )}
+      </View>
 
       {/* Content */}
       <View style={{ padding: 8, gap: 4 }}>

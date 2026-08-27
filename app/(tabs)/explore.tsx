@@ -77,6 +77,13 @@ function haversineMeters(
 const ItemSep = () => <View style={{ height: 10 }} />;
 
 // Memoized explore card — only re-renders when its own data changes
+// The minimal item shape the camera shortcut needs. ExploreItem (list/map) and
+// ScoredItem (card carousel) both satisfy it, so any surface can pass its item.
+type CameraShortcutItem = Pick<
+  ExploreItem,
+  "id" | "title" | "lat" | "lng" | "kind" | "location_name"
+>;
+
 const ExploreCard = React.memo(function ExploreCard({
   item,
   rsvpInfo,
@@ -95,7 +102,7 @@ const ExploreCard = React.memo(function ExploreCard({
   kindFilter: KindFilter;
   onPress: (id: string) => void;
   onLongPress?: (id: string) => void;
-  onCameraShortcut?: (id: string) => void;
+  onCameraShortcut?: (item: CameraShortcutItem) => void;
   currentUserId?: string;
 }) {
   const { colors } = useTheme();
@@ -117,7 +124,7 @@ const ExploreCard = React.memo(function ExploreCard({
       // Second tap within the window — double-tap confirmed → go to camera
       clearTimeout(tapTimerRef.current);
       tapTimerRef.current = null;
-      onCameraShortcut(item.id);
+      onCameraShortcut(item);
     } else {
       // First tap — wait 200ms for a possible second tap
       tapTimerRef.current = setTimeout(() => {
@@ -879,9 +886,12 @@ export default function Explore() {
   // insert can satisfy the geo+time invariant (migration 137). Adds a 2-3s
   // GPS lock on tap — acceptable for the data integrity gain.
   const handleCameraShortcut = useCallback(
-    async (itemId: string) => {
+    // Takes the item OBJECT (not just an id) so every surface — list, card
+    // carousel, and map — can invoke it with the item it already holds. The map
+    // and carousel fetch their own items, which aren't guaranteed to be in
+    // `orderedItems`, so an id-plus-lookup would silently miss there.
+    async (item: CameraShortcutItem) => {
       if (didSwipeNavigateRecently()) return;
-      const item = orderedItems.find((i) => i.id === itemId);
       if (!item || item.lat == null || item.lng == null) return;
       try {
         const result = await verifyCheckInLocation(item.lat, item.lng);
@@ -901,7 +911,7 @@ export default function Explore() {
         router.push({
           pathname: "/post/camera",
           params: {
-            exploreItemId: itemId,
+            exploreItemId: item.id,
             itemTitle: item.title,
             itemLocationName: item.location_name ?? "",
             itemKind: item.kind,
@@ -917,7 +927,7 @@ export default function Explore() {
         );
       }
     },
-    [orderedItems],
+    [],
   );
 
   // Suppress item ("Not Interested") — long-press on cards/list items
@@ -1185,6 +1195,7 @@ export default function Explore() {
           timeWindow={effectiveFilters.timeWindow}
           distance={effectiveFilters.distance}
           tags={effectiveFilters.tags}
+          onCameraShortcut={handleCameraShortcut}
         />
       ) : viewMode === "cards" ? (
         <GroupedExploreFeed
@@ -1193,6 +1204,7 @@ export default function Explore() {
           userLocation={userLocation}
           onItemPress={handleItemPress}
           onSuppressItem={handleSuppressItem}
+          onCameraShortcut={handleCameraShortcut}
           onRefresh={handleRefresh}
           refreshing={refreshing}
           loading={loading}

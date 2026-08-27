@@ -12,6 +12,7 @@ import Mapbox, {
 import { Colors } from "../config/theme";
 import { aggregateToPlaces, placePriority } from "../lib/mapPlaces";
 import { nearestRepId } from "../lib/mapTap";
+import { computePostableNow } from "../lib/postableNow";
 import { MAP_PIN_IMAGES } from "../utils/mapPinImages";
 import type { MapRegion } from "../utils/mapViewport";
 import type { ExploreItem } from "../types/database";
@@ -41,35 +42,55 @@ type Props = {
   /** Fired when a place is tapped — gives the representative item for the preview. */
   onSelectItem: (item: ExploreItem | null) => void;
   itemById: Map<string, ExploreItem>;
+  /** Double-tap a postable pin → straight to the post camera (T8 parity). */
+  onCameraShortcut?: (item: ExploreItem) => void;
 };
 
-// GeoJSON FeatureCollection of PLACES (one feature per venue/coordinate).
-function toFeatureCollection(items: ExploreItem[]) {
+// GeoJSON FeatureCollection of PLACES (one feature per venue/coordinate). Each
+// feature also carries `postable` — whether the user is at the place AND its
+// representative item is available to post right now (computePostableNow) — which
+// drives the postable halo + the double-tap-to-camera gesture (T8).
+function toFeatureCollection(
+  items: ExploreItem[],
+  itemById: Map<string, ExploreItem>,
+  userLocation: { lat: number; lng: number } | null,
+) {
   const places = aggregateToPlaces(items);
+  const postableRepIds = new Set<string>();
   return {
     fc: {
       type: "FeatureCollection" as const,
-      features: places.map((p) => ({
-        type: "Feature" as const,
-        id: p.id,
-        geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
-        properties: {
+      features: places.map((p) => {
+        const repId = p.itemIds[0];
+        const repItem = itemById.get(repId);
+        const postable = repItem
+          ? computePostableNow(repItem, userLocation).isPostable
+          : false;
+        if (postable) postableRepIds.add(repId);
+        return {
+          type: "Feature" as const,
           id: p.id,
-          // icon = the emoji's bundled pin (or the fallback pin) — always a valid image key
-          icon: iconFor(p.emoji),
-          count: p.eventCount,
-          // Higher priority is placed FIRST and therefore WINS native collision
-          // when pins overlap. Events rank above venues, then by notability — so
-          // zoomed out you see the notable few, and the long tail fills in as the
-          // map de-densifies on zoom-in. (Mapbox draws lowest sort-key first, so
-          // the value is negated where it's used as symbolSortKey.)
-          priority: placePriority(p),
-          repId: p.itemIds[0],
-          allIds: p.itemIds.join(","),
-        },
-      })),
+          geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
+          properties: {
+            id: p.id,
+            // icon = the emoji's bundled pin (or the fallback pin) — always a valid image key
+            icon: iconFor(p.emoji),
+            count: p.eventCount,
+            // Higher priority is placed FIRST and therefore WINS native collision
+            // when pins overlap. Events rank above venues, then by notability — so
+            // zoomed out you see the notable few, and the long tail fills in as the
+            // map de-densifies on zoom-in. (Mapbox draws lowest sort-key first, so
+            // the value is negated where it's used as symbolSortKey.)
+            priority: placePriority(p),
+            repId,
+            allIds: p.itemIds.join(","),
+            postable,
+          },
+        };
+      }),
     },
     places,
+    postableRepIds,
   };
 }
 
@@ -83,13 +104,33 @@ export function MapboxPlacesMap({
   onRegionChange,
   onSelectItem,
   itemById,
+  onCameraShortcut,
 }: Props) {
   const mapRef = useRef<MapView>(null);
   // Timestamp of the last pin tap — used to swallow the map's deselect-on-tap
   // that can pair with a pin tap and undo the selection (the "took 3 tries" feel).
   const lastPinTapRef = useRef(0);
+  // Double-tap tracking: the id + time of the last SELECTING tap. A second tap on
+  // the same postable pin within the window fires the camera shortcut. Selection
+  // itself is never delayed, so the snappy single-tap select is preserved.
+  const lastSelIdRef = useRef<string | null>(null);
+  const lastSelAtRef = useRef(0);
 
-  const { fc } = useMemo(() => toFeatureCollection(items), [items]);
+  const { fc, postableRepIds } = useMemo(
+    () => toFeatureCollection(items, itemById, userLocation),
+    [items, itemById, userLocation],
+  );
+
+  // Postable places as their own shape — drives a halo drawn UNDER the pins. A
+  // dedicated source (vs. a data-expression on the collision-managed places
+  // layer) means the halo never orphans from a collision-dropped pin.
+  const postableShape = useMemo(
+    () => ({
+      type: "FeatureCollection" as const,
+      features: fc.features.filter((f) => f.properties.postable),
+    }),
+    [fc],
+  );
 
   // Selected place as a 1-feature shape (or empty). The source stays mounted; we
   // only swap the shape, so the ring appears immediately on tap.
@@ -120,10 +161,26 @@ export function MapboxPlacesMap({
   };
 
   const handlePlacePress = (e: any) => {
-    lastPinTapRef.current = Date.now();
+    const now = Date.now();
+    lastPinTapRef.current = now;
     const repId = nearestRepId(e?.features, e?.coordinates);
     const item = repId ? itemById.get(repId) : undefined;
-    if (item) onSelectItem(item); // a resolved pin tap always selects; never deselects
+    if (!item || !repId) return;
+    // Double-tap a postable pin (already selected, tapped again quickly) → camera.
+    if (
+      onCameraShortcut &&
+      postableRepIds.has(repId) &&
+      lastSelIdRef.current === item.id &&
+      now - lastSelAtRef.current < 400
+    ) {
+      lastSelIdRef.current = null;
+      onCameraShortcut(item);
+      return;
+    }
+    // First tap (or a slow second tap) → select immediately; arm the double-tap.
+    lastSelIdRef.current = item.id;
+    lastSelAtRef.current = now;
+    onSelectItem(item); // a resolved pin tap always selects; never deselects
   };
 
   return (
@@ -164,6 +221,22 @@ export function MapboxPlacesMap({
             if (__DEV__) console.warn("[map] missing pin image for", name);
           }}
         />
+
+        {/* Postable halo — a purple glow UNDER pins you're at + can post to right
+            now (T8). Own source so it renders below the collision-managed pins and
+            never orphans. Distinct from the selection ring (darker/thicker). */}
+        <ShapeSource id="postable-places" shape={postableShape}>
+          <CircleLayer
+            id="postable-ring"
+            style={{
+              circleRadius: 22,
+              circleColor: "rgba(124,58,237,0.16)",
+              circleStrokeColor: Colors.primary,
+              circleStrokeWidth: 2.5,
+              circlePitchAlignment: "map",
+            }}
+          />
+        </ShapeSource>
 
         <ShapeSource
           id="places"
