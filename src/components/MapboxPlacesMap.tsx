@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
 import { GestureDetector, Gesture } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
@@ -22,8 +22,8 @@ import type { ExploreItem } from "../types/database";
 // One-time SDK token (public — safe in the client). Restricted to the map SKU.
 Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || "");
 
-// Reused for the "nothing selected" state so a ShapeSource stays mounted (updating
-// a shape is far cheaper than mounting a native source+layer on every tap).
+// Reused for the "nothing" state so a ShapeSource stays mounted (updating a shape
+// is far cheaper than mounting a native source+layer on every change).
 const EMPTY_FC = { type: "FeatureCollection" as const, features: [] };
 
 // Fallback pin for any emoji without a bundled image (📍 is always in the set) —
@@ -31,16 +31,19 @@ const EMPTY_FC = { type: "FeatureCollection" as const, features: [] };
 const FALLBACK_EMOJI = "📍";
 const iconFor = (emoji: string): string => (MAP_PIN_IMAGES[emoji] ? emoji : FALLBACK_EMOJI);
 
-// One ring language. Every ring is the SAME size + SAME translucent inner; only
-// the stroke colour/width changes: postable = brand purple ("you can post here"),
-// selected-but-not-postable = a neutral charcoal focus ring. A postable pin that
-// is also selected just gets a BOLDER purple ring — never a second ring.
+// One ring language: every ring is the SAME size + SAME translucent inner; only the
+// stroke colour/width changes. Postable = brand purple ("you can post here"), and a
+// selected postable ring just gets BOLDER (never a second ring). Selected-but-not-
+// postable = a neutral charcoal focus ring (dark gray, not black).
 const RING_RADIUS = 22;
 const RING_INNER = "rgba(255,255,255,0.16)";
 const RING_PURPLE = Colors.primary;
-const RING_CHARCOAL = "#4B5563"; // dark gray, not black (black read too heavy on-device)
+const RING_CHARCOAL = "#4B5563";
 const RING_WIDTH = 3;
 const RING_WIDTH_BOLD = 5.5;
+
+// How close (screen px) a double-tap must land to a postable pin to count as a hit.
+const PIN_HIT_RADIUS = 30;
 
 type Props = {
   items: ExploreItem[]; // mappable items in scope (events + activities)
@@ -60,8 +63,7 @@ type Props = {
 
 // GeoJSON FeatureCollection of PLACES (one feature per venue/coordinate). Each
 // feature carries `postable` — whether the user is at the place AND its
-// representative item is available to post right now (computePostableNow) — which
-// drives the postable halo + the double-tap-to-camera gesture (T8).
+// representative item is available to post right now (computePostableNow).
 function toFeatureCollection(
   items: ExploreItem[],
   itemById: Map<string, ExploreItem>,
@@ -69,41 +71,41 @@ function toFeatureCollection(
 ) {
   const places = aggregateToPlaces(items);
   const postableRepIds = new Set<string>();
-  return {
-    fc: {
-      type: "FeatureCollection" as const,
-      features: places.map((p) => {
-        const repId = p.itemIds[0];
-        const repItem = itemById.get(repId);
-        const postable = repItem
-          ? computePostableNow(repItem, userLocation).isPostable
-          : false;
-        if (postable) postableRepIds.add(repId);
-        return {
-          type: "Feature" as const,
+  const postablePlaces: { lng: number; lat: number; repId: string }[] = [];
+  const fc = {
+    type: "FeatureCollection" as const,
+    features: places.map((p) => {
+      const repId = p.itemIds[0];
+      const repItem = itemById.get(repId);
+      const postable = repItem
+        ? computePostableNow(repItem, userLocation).isPostable
+        : false;
+      if (postable) {
+        postableRepIds.add(repId);
+        postablePlaces.push({ lng: p.lng, lat: p.lat, repId });
+      }
+      return {
+        type: "Feature" as const,
+        id: p.id,
+        geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
+        properties: {
           id: p.id,
-          geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
-          properties: {
-            id: p.id,
-            // icon = the emoji's bundled pin (or the fallback pin) — always a valid image key
-            icon: iconFor(p.emoji),
-            count: p.eventCount,
-            // Higher priority is placed FIRST and therefore WINS native collision
-            // when pins overlap. Events rank above venues, then by notability — so
-            // zoomed out you see the notable few, and the long tail fills in as the
-            // map de-densifies on zoom-in. (Mapbox draws lowest sort-key first, so
-            // the value is negated where it's used as symbolSortKey.)
-            priority: placePriority(p),
-            repId,
-            allIds: p.itemIds.join(","),
-            postable,
-          },
-        };
-      }),
-    },
-    places,
-    postableRepIds,
+          // icon = the emoji's bundled pin (or the fallback pin) — always a valid image key
+          icon: iconFor(p.emoji),
+          count: p.eventCount,
+          // Higher priority is placed FIRST and therefore WINS native collision when
+          // pins overlap. Events rank above venues, then by notability — so zoomed out
+          // you see the notable few, and the long tail fills in on zoom-in. (Mapbox
+          // draws lowest sort-key first, so the value is negated as symbolSortKey.)
+          priority: placePriority(p),
+          repId,
+          allIds: p.itemIds.join(","),
+          postable,
+        },
+      };
+    }),
   };
+  return { fc, places, postableRepIds, postablePlaces };
 }
 
 export function MapboxPlacesMap({
@@ -119,89 +121,108 @@ export function MapboxPlacesMap({
   onCameraShortcut,
 }: Props) {
   const mapRef = useRef<MapView>(null);
-  // Timestamp of the last pin tap — used to swallow the map's deselect-on-tap
-  // that can pair with a pin tap and undo the selection (the "took 3 tries" feel).
+  const cameraRef = useRef<Camera>(null);
+  // Timestamp of the last pin tap — used to swallow the map's deselect-on-tap that
+  // can pair with a pin tap and undo the selection (the "took 3 tries" feel).
   const lastPinTapRef = useRef(0);
 
-  const { fc, postableRepIds } = useMemo(
+  const { fc, postablePlaces } = useMemo(
     () => toFeatureCollection(items, itemById, userLocation),
     [items, itemById, userLocation],
   );
 
-  // HIGHLIGHT set = postable pins ∪ the selected pin, rendered in ONE dedicated
-  // layer that force-shows the pin (iconIgnorePlacement) so a ring is ALWAYS
-  // coupled to a visible pin — no orphan rings when the map declutters. The ring
-  // colour/width is data-driven from `postable`/`selected` so every item shows
-  // exactly ONE ring. This source is tiny (a handful of features), so rebuilding
-  // it on selection is cheap — unlike the full `places` source (that was ~1s lag).
-  const highlightShape = useMemo(() => {
-    const features = fc.features
-      .filter((f) => {
-        const isSelected =
-          !!selectedItemId &&
-          (f.properties.allIds as string).split(",").includes(selectedItemId);
-        return f.properties.postable === true || isSelected;
-      })
-      .map((f) => ({
-        ...f,
-        properties: {
-          ...f.properties,
-          selected:
-            !!selectedItemId &&
-            (f.properties.allIds as string).split(",").includes(selectedItemId),
-        },
-      }));
-    return features.length
-      ? { type: "FeatureCollection" as const, features }
-      : EMPTY_FC;
+  // Ids of place-pins that actually RENDERED (survived native collision) at the
+  // current camera — queried on idle. null = "not queried yet / just changed" →
+  // show all postable rings (avoids a first-paint gap); after the query it's the
+  // real rendered set, so a postable ring declutters WITH its pin (no orphan).
+  const [renderedIds, setRenderedIds] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    setRenderedIds(null); // new data → show all, next idle prunes to what rendered
+  }, [fc]);
+
+  const isSelected = useCallback(
+    (f: any) =>
+      !!selectedItemId &&
+      (f.properties.allIds as string).split(",").includes(selectedItemId),
+    [selectedItemId],
+  );
+
+  // Postable rings for NON-selected postable pins that are on-screen (renderedIds).
+  // No force-show: the pin lives in the collision-managed `places` layer and
+  // declutters normally; the ring is filtered to the same rendered set so it
+  // appears/disappears exactly with its pin.
+  const postableRingShape = useMemo(() => {
+    const features = fc.features.filter((f) => {
+      if (f.properties.postable !== true) return false;
+      if (renderedIds != null && !renderedIds.has(String(f.properties.id))) return false;
+      if (isSelected(f)) return false; // selected pin's ring is drawn by the selection layer
+      return true;
+    });
+    return features.length ? { type: "FeatureCollection" as const, features } : EMPTY_FC;
+  }, [fc, renderedIds, isSelected]);
+
+  // The selected place (1 feature or empty) — carries `postable` so its ring picks
+  // the right colour/width. The selected pin is force-shown (below) so it stays put
+  // while you're previewing it.
+  const selectedShape = useMemo(() => {
+    if (!selectedItemId) return EMPTY_FC;
+    const sel = fc.features.find((f) =>
+      (f.properties.allIds as string).split(",").includes(selectedItemId),
+    );
+    return sel ? { type: "FeatureCollection" as const, features: [sel] } : EMPTY_FC;
   }, [fc, selectedItemId]);
 
-  // Double-tap → post, via react-native-gesture-handler. We deliberately do NOT
-  // detect double-taps from the map's onPress: iOS's native double-tap recognizer
-  // CLAIMS the gesture (for zoom), so a second onPress never fires — that's why
-  // the earlier timing approach couldn't work. RNGH recognizes the double-tap
-  // independently. We KEEP Mapbox's native double-tap-zoom ON (empty-map +
-  // non-postable double-taps still zoom, 100% reliably) and RNGH only ADDS
-  // "double-tap a postable pin → post". Worst case (RNGH misses) it just zooms —
-  // never a dead gesture — and the preview card's "Post here now" button is always
-  // the guaranteed path.
-  const handleDoubleTapPost = useCallback(
+  // DOUBLE-TAP handling. The map's native onPress never fires twice for a double-tap
+  // (iOS's double-tap recognizer claims it), so detection MUST come from RNGH. And
+  // the native double-tap-zoom recognizer CANCELS RNGH's gesture — so we disable it
+  // (gestureSettings below) and re-implement zoom here. Net (matching Kevin's model):
+  // double-tap a postable pin → post; double-tap anywhere else → zoom in.
+  const handleDoubleTap = useCallback(
     async (x: number, y: number) => {
-      if (!onCameraShortcut) return;
+      const map: any = mapRef.current;
+      if (!map) return;
       try {
-        // A ~48pt box around the tap is forgiving about landing on a 36pt pin.
-        const box: [number, number, number, number] = [y - 24, x - 24, y + 24, x + 24];
-        const res = await (mapRef.current as any)?.queryRenderedFeaturesInRect(
-          box,
-          [],
-          ["highlight-pin"],
-        );
-        for (const feat of res?.features ?? []) {
-          const repId = feat?.properties?.repId as string | undefined;
-          if (repId && postableRepIds.has(repId)) {
-            const item = itemById.get(repId);
-            if (item) {
-              onCameraShortcut(item);
-              return;
+        // Postable-pin hit-test by projecting each postable place to the screen
+        // (few of them) — more reliable than a rendered-feature query for a tap.
+        if (onCameraShortcut) {
+          for (const pl of postablePlaces) {
+            const pt = await map.getPointInView([pl.lng, pl.lat]);
+            if (pt && Math.hypot(pt[0] - x, pt[1] - y) <= PIN_HIT_RADIUS) {
+              const item = itemById.get(pl.repId);
+              if (item) {
+                onCameraShortcut(item);
+                return;
+              }
             }
           }
         }
+        // Not on a postable pin → zoom in toward the tap (native double-tap-zoom is
+        // disabled, so we drive the camera ourselves).
+        const coord = await map.getCoordinateFromView([x, y]);
+        const z = await map.getZoom();
+        if (coord && typeof z === "number") {
+          cameraRef.current?.setCamera({
+            centerCoordinate: coord,
+            zoomLevel: z + 1,
+            animationDuration: 220,
+          });
+        }
       } catch {
-        // best-effort — the "Post here now" button is the guaranteed fallback
+        // best-effort — the preview card's "Post here now" button + pinch-zoom remain
       }
     },
-    [onCameraShortcut, postableRepIds, itemById],
+    [postablePlaces, itemById, onCameraShortcut],
   );
 
   const doubleTap = useMemo(
     () =>
       Gesture.Tap()
         .numberOfTaps(2)
-        .maxDuration(320)
+        .maxDuration(300)
         .onEnd((e) => {
-          runOnJS(handleDoubleTapPost)(e.x, e.y);
+          runOnJS(handleDoubleTap)(e.x, e.y);
         }),
-    [handleDoubleTapPost],
+    [handleDoubleTap],
   );
 
   const handleIdle = async (feat: any) => {
@@ -220,6 +241,25 @@ export function MapboxPlacesMap({
       latitudeDelta: latDelta || 0.08,
       longitudeDelta: lngDelta || 0.08,
     });
+
+    // #2 — tie postable rings to pins that actually rendered. Query the place-pin
+    // layer (pass [] filter, NOT null — that was the earlier bug) for what survived
+    // collision at this camera; postableRingShape filters to this set.
+    try {
+      const rendered = await (mapRef.current as any)?.queryRenderedFeaturesInRect(
+        [],
+        [],
+        ["place-pin"],
+      );
+      const ids = new Set<string>();
+      for (const f of rendered?.features ?? []) {
+        const id = (f?.properties as any)?.id;
+        if (id != null) ids.add(String(id));
+      }
+      setRenderedIds(ids);
+    } catch {
+      // best-effort — leave the last set (or show-all null)
+    }
   };
 
   const handlePlacePress = (e: any) => {
@@ -238,12 +278,16 @@ export function MapboxPlacesMap({
           styleURL={Mapbox.StyleURL.Street}
           scaleBarEnabled={false}
           // Mapbox attribution + logo are REQUIRED to stay visible (ToS) but MAY be
-          // repositioned. Logo sits in the bottom-LEFT corner; the attribution "ⓘ"
-          // moves to the TOP-RIGHT — both clear of the bottom-right FAB. Do NOT disable.
+          // repositioned. Logo bottom-LEFT; the attribution "ⓘ" top-RIGHT — both clear
+          // of the bottom-right FAB. Do NOT disable them.
           logoEnabled
           attributionEnabled
           logoPosition={{ bottom: 8, left: 8 }}
           attributionPosition={{ top: -4, right: 0 }}
+          // Disable Mapbox's native double-tap-zoom: it competes with + cancels the
+          // RNGH double-tap (that's why the pin double-tap never fired). We re-drive
+          // zoom ourselves in handleDoubleTap. Pinch + two-finger zoom-out untouched.
+          gestureSettings={{ doubleTapToZoomInEnabled: false }}
           onPress={() => {
             // Ignore the map-level tap that immediately follows a pin tap (they can
             // both fire), which would otherwise deselect what you just selected.
@@ -253,6 +297,7 @@ export function MapboxPlacesMap({
           onMapIdle={handleIdle as any}
         >
           <Camera
+            ref={cameraRef}
             defaultSettings={{
               centerCoordinate: [initialCenter.lng, initialCenter.lat],
               zoomLevel: initialZoom,
@@ -269,6 +314,23 @@ export function MapboxPlacesMap({
             }}
           />
 
+          {/* Postable halo — drawn UNDER the pins, only for non-selected postable
+              pins that are currently rendered (renderedIds), so it declutters with
+              its pin. Normal-width purple; the selected postable pin's (bolder) ring
+              comes from the selection layer instead. */}
+          <ShapeSource id="postable-ring-src" shape={postableRingShape}>
+            <CircleLayer
+              id="postable-ring"
+              style={{
+                circleRadius: RING_RADIUS,
+                circleColor: RING_INNER,
+                circleStrokeColor: RING_PURPLE,
+                circleStrokeWidth: RING_WIDTH,
+                circlePitchAlignment: "map",
+              }}
+            />
+          </ShapeSource>
+
           <ShapeSource
             id="places"
             shape={fc}
@@ -277,9 +339,8 @@ export function MapboxPlacesMap({
           >
             {/* One symbol per place: emoji-disc icon + optional event-count badge.
                 iconAllowOverlap:false is the native collision that de-clutters when
-                zoomed out; symbolSortKey (=-priority) decides who survives — events
-                and notable venues win, the long tail fills in on zoom-in. The badge
-                rides on the same symbol (textOptional) so it never floats alone. */}
+                zoomed out; symbolSortKey (=-priority) decides who survives. Postable
+                pins live here too, so they declutter exactly like everything else. */}
             <SymbolLayer
               id="place-pin"
               style={{
@@ -306,15 +367,13 @@ export function MapboxPlacesMap({
             />
           </ShapeSource>
 
-          {/* Highlight layer — postable pins ∪ the selected pin. The ring is drawn
-              first (under), then the pin is RE-DRAWN with collision disabled (on
-              top) so the ring is always coupled to a visible pin: the ring can
-              never orphan, because its pin is force-shown right here with it.
-              circleStrokeColor/Width are data-driven → exactly one ring per item:
-              postable = purple (bolder when selected), else = charcoal. */}
-          <ShapeSource id="highlight" shape={highlightShape}>
+          {/* Selection layer — always mounted (empty until a pin is tapped), drawn
+              ON TOP with the pin force-shown so a selected place stays put while you
+              preview it. ONE ring: bold purple if the selected place is postable,
+              else a charcoal focus ring — same size + inner as the postable halo. */}
+          <ShapeSource id="selected-place" shape={selectedShape}>
             <CircleLayer
-              id="highlight-ring"
+              id="selected-ring"
               style={{
                 circleRadius: RING_RADIUS,
                 circleColor: RING_INNER,
@@ -326,7 +385,7 @@ export function MapboxPlacesMap({
                 ],
                 circleStrokeWidth: [
                   "case",
-                  ["all", ["==", ["get", "postable"], true], ["==", ["get", "selected"], true]],
+                  ["==", ["get", "postable"], true],
                   RING_WIDTH_BOLD,
                   RING_WIDTH,
                 ],
@@ -334,7 +393,7 @@ export function MapboxPlacesMap({
               }}
             />
             <SymbolLayer
-              id="highlight-pin"
+              id="selected-pin"
               style={{
                 iconImage: ["get", "icon"],
                 iconSize: 0.5,
@@ -357,10 +416,8 @@ export function MapboxPlacesMap({
             />
           </ShapeSource>
 
-          {/* T7 — native blue current-location puck for normal users (was missing
-              after the @rnmapbox switch; only the override/dev purple dot existed).
-              Shown only when NOT using the override dot, so override/dev accounts
-              (whose device GPS differs from their forced coords) don't get two markers. */}
+          {/* T7 — native blue current-location puck for normal users. Shown only when
+              NOT using the override dot, so override/dev accounts don't get two markers. */}
           {!showUserDot && <LocationPuck visible puckBearing="heading" pulsing={{ isEnabled: true }} />}
 
           {/* "You are here" (review/override account). */}
