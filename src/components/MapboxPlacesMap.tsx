@@ -134,12 +134,12 @@ export function MapboxPlacesMap({
         styleURL={Mapbox.StyleURL.Street}
         scaleBarEnabled={false}
         // Mapbox attribution + logo are REQUIRED to stay visible (ToS) but MAY be
-        // repositioned. Both live in the bottom-LEFT (clear of the purple FAB), with the
-        // attribution "ⓘ" to the LEFT of the logo — reads cleaner. Do NOT disable them.
+        // repositioned. Logo sits in the bottom-LEFT corner; the attribution "ⓘ" moves
+        // to the TOP-RIGHT — both clear of the bottom-right FAB. Do NOT disable them.
         logoEnabled
         attributionEnabled
-        attributionPosition={{ bottom: 8, left: 8 }}
-        logoPosition={{ bottom: 8, left: 48 }}
+        logoPosition={{ bottom: 8, left: 8 }}
+        attributionPosition={{ top: 8, right: 8 }}
         onPress={() => {
           // Ignore the map-level tap that immediately follows a pin tap (they can
           // both fire), which would otherwise deselect what you just selected.
