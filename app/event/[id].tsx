@@ -24,7 +24,6 @@ import { shareItem } from "../../src/utils/share";
 import { logInteraction } from "../../src/lib/interactionLogger";
 import { logEngagement } from "../../src/lib/engagementBuffer";
 import { getSessionId } from "../../src/lib/sessionId";
-import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
 import { useItemFeedback, type FeedbackType } from "../../src/hooks/useItemFeedback";
 import { FriendsGoingSheet } from "../../src/components/FriendsGoingSheet";
 import { AdminEditSheet } from "../../src/components/AdminEditSheet";
@@ -199,10 +198,9 @@ export default function EventDetail() {
         return;
       }
 
-      // Log post_started analytics event
-      if (user) {
-        logAnalyticsEvent(user.id, "post_started", { itemKind: item.kind });
-      }
+      // (post_started now fires on /post/camera mount for EVERY entry — FAB,
+      // this event button, and the map/card double-tap shortcut — so the funnel
+      // is counted uniformly in one place instead of per-entry here.)
 
       // Unified flow: route into the post-first camera with the place PRE-LINKED +
       // pre-verified (strict check-in). Both posting routes now share one camera + one

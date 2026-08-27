@@ -38,6 +38,7 @@ import { Colors } from "../../src/config/theme";
 import { supabase } from "../../src/lib/supabase";
 import { getCurrentLocation, verifyPostLocation } from "../../src/utils/location";
 import { submitPost } from "../../src/lib/submitPost";
+import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
 import { getPostDraft, clearPostDraft } from "../../src/utils/postDraftStore";
 import { MAX_CAPTION_LENGTH } from "../../src/config/constants";
 import { successHaptic, errorHaptic } from "../../src/utils/haptics";
@@ -237,6 +238,9 @@ export default function PostCompose() {
 
   async function post() {
     if (!user || !draft || !target) return;
+    // Route = how the flow was ENTERED, not what it links to: a pre-linked draft is
+    // the item-gated route; otherwise the post-first FAB (even if it links a place).
+    const source: "post_first" | "item_gated" = preLinked ? "item_gated" : "post_first";
     setPosting(true);
     try {
       const { error } = await submitPost({
@@ -249,12 +253,18 @@ export default function PostCompose() {
         verifiedAt: target.at,
         exploreItemId: target.kind === "linked" ? target.item.id : null,
         itemKind: target.kind === "linked" ? target.itemKind ?? null : null,
+        source,
       });
       if (error) {
         errorHaptic();
         showToast(error, "error");
         return;
       }
+      // Funnel bottom — pairs with post_started (camera mount) for abandonment.
+      logAnalyticsEvent(user.id, "post_completed", {
+        source,
+        linked: target.kind === "linked",
+      });
       clearPostDraft();
       successHaptic();
       showToast("Post created!", "success");
