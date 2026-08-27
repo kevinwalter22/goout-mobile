@@ -786,8 +786,10 @@ export function ExploreMapView({
                 style={{
                   flexDirection: "row",
                   alignItems: "center",
+                  flexWrap: "wrap",
                   gap: 8,
                   marginTop: 4,
+                  paddingRight: 24,
                 }}
               >
                 {selectedPostable && (
