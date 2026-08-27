@@ -326,7 +326,7 @@ export default function PostCompose() {
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: 20, gap: 16, alignItems: "center" }} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 20, gap: 16, alignItems: "center", paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
           {/* Big preview — mirrors the home-feed post (3:4). Dual shows the BeReal overlay. */}
           {draft && draft.mode === "dual" && draft.photos.length === 2 ? (
             <View style={{ width: "82%", aspectRatio: 3 / 4, borderRadius: 16, overflow: "hidden", backgroundColor: colors.surfaceVariant }}>
@@ -369,6 +369,8 @@ export default function PostCompose() {
               maxLength={MAX_CAPTION_LENGTH}
               multiline
               accessibilityLabel="Caption"
+              // Scroll the caption + Post button into view once the keyboard is up.
+              onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150)}
               style={{ padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, fontSize: 16, color: colors.text, backgroundColor: colors.inputBg, minHeight: 80, textAlignVertical: "top" }}
             />
           </View>
