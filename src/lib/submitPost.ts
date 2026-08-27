@@ -1,8 +1,8 @@
-// Post-first submit — mirrors the insert branching in app/checkin/camera.tsx
-// handlePost (rate-limit → upload → posts.insert → moderation → XP), but for the
-// NEW post-first flow. The existing item-gated /checkin/camera path is left
-// untouched; this is a parallel caller that feeds the same posts-table shape (§3
-// of docs/phase3_post_first.md), so both paths produce identical rows.
+// The unified post insert (Phase 3 · T5): rate-limit → upload → posts.insert →
+// moderation → XP. Both posting routes flow through here now — the post-first FAB
+// route and the item-gated route (event / postable pin → strict check-in → the same
+// /post/camera → /post/compose). The old /checkin/camera handlePost it was extracted
+// from has been retired. Feeds the posts-table shape in §3 of docs/phase3_post_first.md.
 //
 // Every post-first post carries the poster's real post-time coords in
 // verified_lat/lng/at (required by migration 173 for standalone "My Location"

@@ -204,14 +204,16 @@ export default function EventDetail() {
         logAnalyticsEvent(user.id, "post_started", { itemKind: item.kind });
       }
 
-      // Navigate to camera mode selector. Thread the verified coords +
-      // timestamp through so they reach the post insert (migration 137's
-      // BEFORE INSERT trigger requires them for any explore_item-linked
-      // post). Query params are strings; the camera will parse them back.
+      // Unified flow: route into the post-first camera with the place PRE-LINKED +
+      // pre-verified (strict check-in). Both posting routes now share one camera + one
+      // post screen. Verified coords/timestamp thread through so they reach the post
+      // insert (migration 137's trigger requires them for an explore_item-linked post).
       router.push({
-        pathname: "/checkin/[eventId]",
+        pathname: "/post/camera",
         params: {
-          eventId: item.id,
+          exploreItemId: item.id,
+          itemTitle: item.title,
+          itemLocationName: item.location_name ?? "",
           itemKind: item.kind,
           verified_lat: String(verifyResult.user_lat),
           verified_lng: String(verifyResult.user_lng),

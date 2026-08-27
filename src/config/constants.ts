@@ -2,10 +2,12 @@
 // Must match POSTABLE_NOW_CONFIG.defaultRadius (0.124 miles ≈ 200m) in exploreFilters.ts
 export const CHECK_IN_RADIUS_METERS = 200;
 
-// Post-first flow distance threshold in meters — more forgiving than
-// CHECK_IN_RADIUS_METERS since post-first location verification tolerates
-// GPS drift better than the strict check-in path (docs/phase3_post_first.md sec 1).
-export const POST_FIRST_RADIUS_METERS = 400;
+// Post-first flow distance threshold in meters. Originally 400m (forgiving) but
+// device testing showed that tagged too many places you're near-but-not-at, so it's
+// tightened to match the strict check-in radius. (Future idea: a relaxed radius for
+// outdoor activities/events + strict for indoor venues — needs an indoor/outdoor
+// signal on items.) docs/phase3_post_first.md sec 1.
+export const POST_FIRST_RADIUS_METERS = 200;
 
 // Maximum caption length for posts
 export const MAX_CAPTION_LENGTH = 100;
