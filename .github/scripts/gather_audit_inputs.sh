@@ -33,6 +33,9 @@ get () {
 # audit-curation-quality is deployed with this batch; until the gated prod
 # deploy lands it will 404, and the auditor notes it rather than failing.
 post audit-curation-quality
+# audit-posting-loop (Phase 3 · Act 1): 404s until its gated prod deploy lands,
+# same as above — the auditor notes it rather than failing.
+post audit-posting-loop
 post monitor-data-quality
 post monitor-pipeline-health
 post monitor-api-budgets

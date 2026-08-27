@@ -31,6 +31,8 @@ import { captureError } from "../../src/lib/logger";
 import { normalizePostImage } from "../../src/utils/imageTransform";
 import { setPostDraft } from "../../src/utils/postDraftStore";
 import { DualCameraPost } from "../../src/components/DualCameraPost";
+import { useAuth } from "../../src/hooks/useAuth";
+import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
 
 const MODE_OPTIONS: { key: CameraMode; label: string }[] = [
   { key: CAMERA_MODES.BACK, label: "Back" },
@@ -41,7 +43,12 @@ const MODE_OPTIONS: { key: CameraMode; label: string }[] = [
 export default function PostCamera() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [permission, requestPermission] = useCameraPermissions();
+  // Fire the posting-funnel entry exactly once per camera open. This is the ONE
+  // funnel top for every entry (FAB post-first, event button, map/card double-tap)
+  // — started − completed ≈ abandonment, broken down by route via metadata.source.
+  const postStartedRef = useRef(false);
 
   // Item-gated entry (unified in): a pre-linked, pre-verified place from the strict
   // check-in verify at the event / postable pin. Absent for the post-first FAB entry.
@@ -105,6 +112,15 @@ export default function PostCamera() {
   useEffect(() => {
     if (permission && !permission.granted) requestPermission();
   }, [permission, requestPermission]);
+
+  useEffect(() => {
+    if (postStartedRef.current || !user?.id) return;
+    postStartedRef.current = true;
+    logAnalyticsEvent(user.id, "post_started", {
+      source: isItemGated ? "item_gated" : "post_first",
+      itemKind: params.itemKind ?? null,
+    });
+  }, [user?.id, isItemGated, params.itemKind]);
 
   function selectMode(next: CameraMode) {
     setPhotos([]);

@@ -14,7 +14,11 @@ import { addActionBreadcrumb } from "./sentry";
 export type AnalyticsEventName =
   | "signup_complete"
   | "explore_open"
+  // Posting funnel (Phase 3 analytics): post_started fires on camera mount for
+  // BOTH routes (metadata.source = 'post_first' | 'item_gated'); post_completed
+  // fires on a successful insert. started − completed ≈ abandonment (per route).
   | "post_started"
+  | "post_completed"
   | "contacts_sync_started"
   | "contacts_sync_completed";
 
