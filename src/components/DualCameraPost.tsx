@@ -38,8 +38,13 @@ function snapToCorner(x: number, y: number, cW: number, cH: number) {
 }
 
 type DualCameraPostProps = {
-  backPhotoPath: string;
-  frontPhotoPath: string;
+  /** Storage paths (feed use) — resolved to public URLs via getImageUrl. */
+  backPhotoPath?: string;
+  frontPhotoPath?: string;
+  /** Direct URIs (e.g. a local capture preview, pre-upload) — used as-is, bypassing
+   *  getImageUrl. Take precedence over the *PhotoPath props when provided. */
+  backUri?: string;
+  frontUri?: string;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -57,6 +62,8 @@ type DualCameraPostProps = {
 export function DualCameraPost({
   backPhotoPath,
   frontPhotoPath,
+  backUri,
+  frontUri,
   style,
 }: DualCameraPostProps) {
   const [isBackMain, setIsBackMain] = useState(true);
@@ -64,9 +71,9 @@ export function DualCameraPost({
   // Crossfade: 0 = back is main, 1 = front is main
   const crossfadeAnim = useRef(new Animated.Value(0)).current;
 
-  // Get URLs once and keep them stable
-  const backUrl = getImageUrl(backPhotoPath);
-  const frontUrl = getImageUrl(frontPhotoPath);
+  // Direct URIs (local preview) win; otherwise resolve the storage path to a URL.
+  const backUrl = backUri ?? getImageUrl(backPhotoPath ?? "");
+  const frontUrl = frontUri ?? getImageUrl(frontPhotoPath ?? "");
 
   const handleSwap = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

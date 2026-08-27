@@ -11,18 +11,24 @@ import { Colors } from "../config/theme";
 // iOS-only paddingTop:8 set on tabBarStyle in app/(tabs)/_layout.tsx.
 const TAB_BAR_HEIGHT = 49 + (Platform.OS === "ios" ? 8 : 0);
 
-/** Purple-plus FAB, shared across every tab. Destination is /create-event until T5 flips it to post-first. */
+/** Purple-plus FAB, shared across every tab. Opens the post-first flow (T5);
+ *  "Create an event" now lives as a secondary link on the camera screen. */
 export function PostFab() {
   const insets = useSafeAreaInsets();
 
   return (
     <Pressable
-      onPress={() => router.push("/create-event")}
+      onPress={() => router.push("/post/camera")}
       accessibilityLabel="Create event"
       accessibilityRole="button"
       style={{
         position: "absolute",
-        bottom: 32 + TAB_BAR_HEIGHT + insets.bottom,
+        // Sits 12px above the tab bar. Tuned so that on the Explore/map view, when
+        // the preview card is up, the FAB lands in the card's bottom-right corner
+        // with bottom-gap == right-gap (~8pt each): card is bottom:14/right:16, FAB
+        // is right:24 (8pt inset from the card's right edge) and this offset puts its
+        // bottom edge ~8pt above the card's bottom edge. Per Kevin's screenshot.
+        bottom: 12 + TAB_BAR_HEIGHT + insets.bottom,
         right: 24,
         width: 56,
         height: 56,

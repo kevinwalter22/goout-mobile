@@ -7,6 +7,7 @@ import Mapbox, {
   SymbolLayer,
   CircleLayer,
   Images,
+  LocationPuck,
 } from "@rnmapbox/maps";
 import { Colors } from "../config/theme";
 import { aggregateToPlaces, placePriority } from "../lib/mapPlaces";
@@ -132,6 +133,13 @@ export function MapboxPlacesMap({
         style={{ flex: 1 }}
         styleURL={Mapbox.StyleURL.Street}
         scaleBarEnabled={false}
+        // Mapbox attribution + logo are REQUIRED to stay visible (ToS) but MAY be
+        // repositioned. Logo sits in the bottom-LEFT corner; the attribution "ⓘ" moves
+        // to the TOP-RIGHT — both clear of the bottom-right FAB. Do NOT disable them.
+        logoEnabled
+        attributionEnabled
+        logoPosition={{ bottom: 8, left: 8 }}
+        attributionPosition={{ top: -4, right: 0 }}
         onPress={() => {
           // Ignore the map-level tap that immediately follows a pin tap (they can
           // both fire), which would otherwise deselect what you just selected.
@@ -233,6 +241,12 @@ export function MapboxPlacesMap({
             }}
           />
         </ShapeSource>
+
+        {/* T7 — native blue current-location puck for normal users (was missing
+            after the @rnmapbox switch; only the override/dev purple dot existed).
+            Shown only when NOT using the override dot, so override/dev accounts (whose
+            device GPS differs from their forced coords) don't get two markers. */}
+        {!showUserDot && <LocationPuck visible puckBearing="heading" pulsing={{ isEnabled: true }} />}
 
         {/* "You are here" (review/override account). */}
         {showUserDot && userLocation && (

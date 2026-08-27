@@ -56,10 +56,10 @@ describe("verifyPostLocation", () => {
     expect(result.allowed).toBe(false);
   });
 
-  it("denies a user beyond the strict check-in radius but within the post-first radius", async () => {
+  it("denies a user beyond the radius — post-first now matches the strict check-in radius", async () => {
     mockUserAt(CHECK_IN_RADIUS_METERS + 50);
     const result = await verifyPostLocation(EVENT_LAT, EVENT_LON);
-    expect(result.allowed).toBe(true);
+    expect(result.allowed).toBe(false);
   });
 
   it("returns allowed, user_lat, user_lng, and verified_at when allowed", async () => {
@@ -89,11 +89,8 @@ describe("verifyCheckInLocation (unchanged, strict 200m radius)", () => {
     expect(result.allowed).toBe(false);
   });
 
-  it("denies a user within the post-first radius but outside the check-in radius", async () => {
-    mockUserAt(POST_FIRST_RADIUS_METERS - 1);
-    const result = await verifyCheckInLocation(EVENT_LAT, EVENT_LON);
-    expect(result.allowed).toBe(false);
-  });
+  // (Post-first now shares the strict 200m radius, so there is no longer a
+  // "within post-first but outside check-in" gap to assert.)
 
   it("returns allowed, user_lat, user_lng, and verified_at when allowed", async () => {
     mockUserAt(10);
