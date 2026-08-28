@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
-import { GestureDetector, Gesture } from "react-native-gesture-handler";
-import { runOnJS } from "react-native-reanimated";
 import Mapbox, {
   MapView,
   Camera,
@@ -42,9 +40,6 @@ const RING_CHARCOAL = "#4B5563";
 const RING_WIDTH = 3;
 const RING_WIDTH_BOLD = 5.5;
 
-// How close (screen px) a double-tap must land to a postable pin to count as a hit.
-const PIN_HIT_RADIUS = 30;
-
 type Props = {
   items: ExploreItem[]; // mappable items in scope (events + activities)
   initialCenter: { lat: number; lng: number };
@@ -57,7 +52,12 @@ type Props = {
   /** Fired when a place is tapped — gives the representative item for the preview. */
   onSelectItem: (item: ExploreItem | null) => void;
   itemById: Map<string, ExploreItem>;
-  /** Double-tap a postable pin → straight to the post camera (T8 parity). */
+  /**
+   * Reserved for the map post-shortcut. Posting from the map is driven by the
+   * preview card's "Post here now" button (ExploreMapView) — the native map surface
+   * does not reliably deliver a JS double-tap, so we do NOT bind one here. The
+   * list + card views (real RN views) keep their double-tap-to-camera.
+   */
   onCameraShortcut?: (item: ExploreItem) => void;
 };
 
@@ -70,8 +70,6 @@ function toFeatureCollection(
   userLocation: { lat: number; lng: number } | null,
 ) {
   const places = aggregateToPlaces(items);
-  const postableRepIds = new Set<string>();
-  const postablePlaces: { lng: number; lat: number; repId: string }[] = [];
   const fc = {
     type: "FeatureCollection" as const,
     features: places.map((p) => {
@@ -80,10 +78,6 @@ function toFeatureCollection(
       const postable = repItem
         ? computePostableNow(repItem, userLocation).isPostable
         : false;
-      if (postable) {
-        postableRepIds.add(repId);
-        postablePlaces.push({ lng: p.lng, lat: p.lat, repId });
-      }
       return {
         type: "Feature" as const,
         id: p.id,
@@ -105,7 +99,7 @@ function toFeatureCollection(
       };
     }),
   };
-  return { fc, places, postableRepIds, postablePlaces };
+  return { fc, places };
 }
 
 export function MapboxPlacesMap({
@@ -118,15 +112,13 @@ export function MapboxPlacesMap({
   onRegionChange,
   onSelectItem,
   itemById,
-  onCameraShortcut,
 }: Props) {
   const mapRef = useRef<MapView>(null);
-  const cameraRef = useRef<Camera>(null);
   // Timestamp of the last pin tap — used to swallow the map's deselect-on-tap that
   // can pair with a pin tap and undo the selection (the "took 3 tries" feel).
   const lastPinTapRef = useRef(0);
 
-  const { fc, postablePlaces } = useMemo(
+  const { fc } = useMemo(
     () => toFeatureCollection(items, itemById, userLocation),
     [items, itemById, userLocation],
   );
@@ -172,59 +164,6 @@ export function MapboxPlacesMap({
     return sel ? { type: "FeatureCollection" as const, features: [sel] } : EMPTY_FC;
   }, [fc, selectedItemId]);
 
-  // DOUBLE-TAP handling. The map's native onPress never fires twice for a double-tap
-  // (iOS's double-tap recognizer claims it), so detection MUST come from RNGH. And
-  // the native double-tap-zoom recognizer CANCELS RNGH's gesture — so we disable it
-  // (gestureSettings below) and re-implement zoom here. Net (matching Kevin's model):
-  // double-tap a postable pin → post; double-tap anywhere else → zoom in.
-  const handleDoubleTap = useCallback(
-    async (x: number, y: number) => {
-      const map: any = mapRef.current;
-      if (!map) return;
-      try {
-        // Postable-pin hit-test by projecting each postable place to the screen
-        // (few of them) — more reliable than a rendered-feature query for a tap.
-        if (onCameraShortcut) {
-          for (const pl of postablePlaces) {
-            const pt = await map.getPointInView([pl.lng, pl.lat]);
-            if (pt && Math.hypot(pt[0] - x, pt[1] - y) <= PIN_HIT_RADIUS) {
-              const item = itemById.get(pl.repId);
-              if (item) {
-                onCameraShortcut(item);
-                return;
-              }
-            }
-          }
-        }
-        // Not on a postable pin → zoom in toward the tap (native double-tap-zoom is
-        // disabled, so we drive the camera ourselves).
-        const coord = await map.getCoordinateFromView([x, y]);
-        const z = await map.getZoom();
-        if (coord && typeof z === "number") {
-          cameraRef.current?.setCamera({
-            centerCoordinate: coord,
-            zoomLevel: z + 1,
-            animationDuration: 220,
-          });
-        }
-      } catch {
-        // best-effort — the preview card's "Post here now" button + pinch-zoom remain
-      }
-    },
-    [postablePlaces, itemById, onCameraShortcut],
-  );
-
-  const doubleTap = useMemo(
-    () =>
-      Gesture.Tap()
-        .numberOfTaps(2)
-        .maxDuration(300)
-        .onEnd((e) => {
-          runOnJS(handleDoubleTap)(e.x, e.y);
-        }),
-    [handleDoubleTap],
-  );
-
   const handleIdle = async (feat: any) => {
     const p: any = feat?.properties || {};
     const bounds = p.visibleBounds as [[number, number], [number, number]] | undefined; // [[neLng,neLat],[swLng,swLat]]
@@ -242,9 +181,9 @@ export function MapboxPlacesMap({
       longitudeDelta: lngDelta || 0.08,
     });
 
-    // #2 — tie postable rings to pins that actually rendered. Query the place-pin
-    // layer (pass [] filter, NOT null — that was the earlier bug) for what survived
-    // collision at this camera; postableRingShape filters to this set.
+    // Tie postable rings to pins that actually rendered. Query the place-pin layer
+    // (pass [] filter, NOT null) for what survived collision at this camera;
+    // postableRingShape filters to this set so a ring declutters with its pin.
     try {
       const rendered = await (mapRef.current as any)?.queryRenderedFeaturesInRect(
         [],
@@ -270,184 +209,179 @@ export function MapboxPlacesMap({
   };
 
   return (
-    <GestureDetector gesture={doubleTap}>
-      <View style={{ flex: 1 }}>
-        <MapView
-          ref={mapRef}
-          style={{ flex: 1 }}
-          styleURL={Mapbox.StyleURL.Street}
-          scaleBarEnabled={false}
-          // Mapbox attribution + logo are REQUIRED to stay visible (ToS) but MAY be
-          // repositioned. Logo bottom-LEFT; the attribution "ⓘ" top-RIGHT — both clear
-          // of the bottom-right FAB. Do NOT disable them.
-          logoEnabled
-          attributionEnabled
-          logoPosition={{ bottom: 8, left: 8 }}
-          attributionPosition={{ top: -4, right: 0 }}
-          // Disable Mapbox's native double-tap-zoom: it competes with + cancels the
-          // RNGH double-tap (that's why the pin double-tap never fired). We re-drive
-          // zoom ourselves in handleDoubleTap. Pinch + two-finger zoom-out untouched.
-          gestureSettings={{ doubleTapToZoomInEnabled: false }}
-          onPress={() => {
-            // Ignore the map-level tap that immediately follows a pin tap (they can
-            // both fire), which would otherwise deselect what you just selected.
-            if (Date.now() - lastPinTapRef.current < 250) return;
-            onSelectItem(null);
+    <View style={{ flex: 1 }}>
+      <MapView
+        ref={mapRef}
+        style={{ flex: 1 }}
+        styleURL={Mapbox.StyleURL.Street}
+        scaleBarEnabled={false}
+        // Mapbox attribution + logo are REQUIRED to stay visible (ToS) but MAY be
+        // repositioned. Logo bottom-LEFT; the attribution "ⓘ" top-RIGHT — both clear
+        // of the bottom-right FAB. Do NOT disable them. Native double-tap-zoom is left
+        // ON (all standard map gestures work); posting from the map is the preview
+        // card's "Post here now" button.
+        logoEnabled
+        attributionEnabled
+        logoPosition={{ bottom: 8, left: 8 }}
+        attributionPosition={{ top: -4, right: 0 }}
+        onPress={() => {
+          // Ignore the map-level tap that immediately follows a pin tap (they can
+          // both fire), which would otherwise deselect what you just selected.
+          if (Date.now() - lastPinTapRef.current < 250) return;
+          onSelectItem(null);
+        }}
+        onMapIdle={handleIdle as any}
+      >
+        <Camera
+          defaultSettings={{
+            centerCoordinate: [initialCenter.lng, initialCenter.lat],
+            zoomLevel: initialZoom,
           }}
-          onMapIdle={handleIdle as any}
+          animationDuration={0}
+        />
+
+        {/* Bundled emoji-disc pins (static require assets — the reliable image path).
+            Referenced by name from the symbol layer via iconImage. */}
+        <Images
+          images={MAP_PIN_IMAGES}
+          onImageMissing={(name) => {
+            if (__DEV__) console.warn("[map] missing pin image for", name);
+          }}
+        />
+
+        {/* Postable halo — drawn UNDER the pins, only for non-selected postable pins
+            that are currently rendered (renderedIds), so it declutters with its pin.
+            Normal-width purple; the selected postable pin's (bolder) ring comes from
+            the selection layer instead. */}
+        <ShapeSource id="postable-ring-src" shape={postableRingShape}>
+          <CircleLayer
+            id="postable-ring"
+            style={{
+              circleRadius: RING_RADIUS,
+              circleColor: RING_INNER,
+              circleStrokeColor: RING_PURPLE,
+              circleStrokeWidth: RING_WIDTH,
+              circlePitchAlignment: "map",
+            }}
+          />
+        </ShapeSource>
+
+        <ShapeSource
+          id="places"
+          shape={fc}
+          onPress={handlePlacePress}
+          hitbox={{ width: 48, height: 48 }}
         >
-          <Camera
-            ref={cameraRef}
-            defaultSettings={{
-              centerCoordinate: [initialCenter.lng, initialCenter.lat],
-              zoomLevel: initialZoom,
+          {/* One symbol per place: emoji-disc icon + optional event-count badge.
+              iconAllowOverlap:false is the native collision that de-clutters when
+              zoomed out; symbolSortKey (=-priority) decides who survives. Postable
+              pins live here too, so they declutter exactly like everything else. */}
+          <SymbolLayer
+            id="place-pin"
+            style={{
+              iconImage: ["get", "icon"],
+              iconSize: 0.5, // 72px asset -> ~36pt pin
+              iconAllowOverlap: false,
+              iconOptional: false,
+              iconPadding: 4,
+              symbolSortKey: ["*", -1, ["get", "priority"]],
+              textField: [
+                "case",
+                [">", ["get", "count"], 1],
+                ["to-string", ["get", "count"]],
+                "",
+              ],
+              textSize: 11,
+              textColor: "#ffffff",
+              textHaloColor: Colors.primaryDark,
+              textHaloWidth: 2,
+              textOffset: [0.9, -0.9],
+              textAllowOverlap: true,
+              textOptional: true,
             }}
-            animationDuration={0}
           />
+        </ShapeSource>
 
-          {/* Bundled emoji-disc pins (static require assets — the reliable image
-              path). Referenced by name from the symbol layer via iconImage. */}
-          <Images
-            images={MAP_PIN_IMAGES}
-            onImageMissing={(name) => {
-              if (__DEV__) console.warn("[map] missing pin image for", name);
+        {/* Selection layer — always mounted (empty until a pin is tapped), drawn ON
+            TOP with the pin force-shown so a selected place stays put while you
+            preview it. ONE ring: bold purple if the selected place is postable, else
+            a charcoal focus ring — same size + inner as the postable halo. */}
+        <ShapeSource id="selected-place" shape={selectedShape}>
+          <CircleLayer
+            id="selected-ring"
+            style={{
+              circleRadius: RING_RADIUS,
+              circleColor: RING_INNER,
+              circleStrokeColor: [
+                "case",
+                ["==", ["get", "postable"], true],
+                RING_PURPLE,
+                RING_CHARCOAL,
+              ],
+              circleStrokeWidth: [
+                "case",
+                ["==", ["get", "postable"], true],
+                RING_WIDTH_BOLD,
+                RING_WIDTH,
+              ],
+              circlePitchAlignment: "map",
             }}
           />
+          <SymbolLayer
+            id="selected-pin"
+            style={{
+              iconImage: ["get", "icon"],
+              iconSize: 0.5,
+              iconAllowOverlap: true,
+              iconIgnorePlacement: true,
+              textField: [
+                "case",
+                [">", ["get", "count"], 1],
+                ["to-string", ["get", "count"]],
+                "",
+              ],
+              textSize: 11,
+              textColor: "#ffffff",
+              textHaloColor: Colors.primaryDark,
+              textHaloWidth: 2,
+              textOffset: [0.9, -0.9],
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+            }}
+          />
+        </ShapeSource>
 
-          {/* Postable halo — drawn UNDER the pins, only for non-selected postable
-              pins that are currently rendered (renderedIds), so it declutters with
-              its pin. Normal-width purple; the selected postable pin's (bolder) ring
-              comes from the selection layer instead. */}
-          <ShapeSource id="postable-ring-src" shape={postableRingShape}>
-            <CircleLayer
-              id="postable-ring"
-              style={{
-                circleRadius: RING_RADIUS,
-                circleColor: RING_INNER,
-                circleStrokeColor: RING_PURPLE,
-                circleStrokeWidth: RING_WIDTH,
-                circlePitchAlignment: "map",
-              }}
-            />
-          </ShapeSource>
+        {/* T7 — native blue current-location puck for normal users. Shown only when
+            NOT using the override dot, so override/dev accounts don't get two markers. */}
+        {!showUserDot && <LocationPuck visible puckBearing="heading" pulsing={{ isEnabled: true }} />}
 
+        {/* "You are here" (review/override account). */}
+        {showUserDot && userLocation && (
           <ShapeSource
-            id="places"
-            shape={fc}
-            onPress={handlePlacePress}
-            hitbox={{ width: 48, height: 48 }}
+            id="user"
+            shape={{
+              type: "FeatureCollection",
+              features: [
+                {
+                  type: "Feature",
+                  properties: {},
+                  geometry: { type: "Point", coordinates: [userLocation.lng, userLocation.lat] },
+                },
+              ],
+            }}
           >
-            {/* One symbol per place: emoji-disc icon + optional event-count badge.
-                iconAllowOverlap:false is the native collision that de-clutters when
-                zoomed out; symbolSortKey (=-priority) decides who survives. Postable
-                pins live here too, so they declutter exactly like everything else. */}
-            <SymbolLayer
-              id="place-pin"
-              style={{
-                iconImage: ["get", "icon"],
-                iconSize: 0.5, // 72px asset -> ~36pt pin
-                iconAllowOverlap: false,
-                iconOptional: false,
-                iconPadding: 4,
-                symbolSortKey: ["*", -1, ["get", "priority"]],
-                textField: [
-                  "case",
-                  [">", ["get", "count"], 1],
-                  ["to-string", ["get", "count"]],
-                  "",
-                ],
-                textSize: 11,
-                textColor: "#ffffff",
-                textHaloColor: Colors.primaryDark,
-                textHaloWidth: 2,
-                textOffset: [0.9, -0.9],
-                textAllowOverlap: true,
-                textOptional: true,
-              }}
-            />
-          </ShapeSource>
-
-          {/* Selection layer — always mounted (empty until a pin is tapped), drawn
-              ON TOP with the pin force-shown so a selected place stays put while you
-              preview it. ONE ring: bold purple if the selected place is postable,
-              else a charcoal focus ring — same size + inner as the postable halo. */}
-          <ShapeSource id="selected-place" shape={selectedShape}>
             <CircleLayer
-              id="selected-ring"
+              id="user-dot"
               style={{
-                circleRadius: RING_RADIUS,
-                circleColor: RING_INNER,
-                circleStrokeColor: [
-                  "case",
-                  ["==", ["get", "postable"], true],
-                  RING_PURPLE,
-                  RING_CHARCOAL,
-                ],
-                circleStrokeWidth: [
-                  "case",
-                  ["==", ["get", "postable"], true],
-                  RING_WIDTH_BOLD,
-                  RING_WIDTH,
-                ],
-                circlePitchAlignment: "map",
-              }}
-            />
-            <SymbolLayer
-              id="selected-pin"
-              style={{
-                iconImage: ["get", "icon"],
-                iconSize: 0.5,
-                iconAllowOverlap: true,
-                iconIgnorePlacement: true,
-                textField: [
-                  "case",
-                  [">", ["get", "count"], 1],
-                  ["to-string", ["get", "count"]],
-                  "",
-                ],
-                textSize: 11,
-                textColor: "#ffffff",
-                textHaloColor: Colors.primaryDark,
-                textHaloWidth: 2,
-                textOffset: [0.9, -0.9],
-                textAllowOverlap: true,
-                textIgnorePlacement: true,
+                circleRadius: 7,
+                circleColor: Colors.primary,
+                circleStrokeColor: "#ffffff",
+                circleStrokeWidth: 3,
               }}
             />
           </ShapeSource>
-
-          {/* T7 — native blue current-location puck for normal users. Shown only when
-              NOT using the override dot, so override/dev accounts don't get two markers. */}
-          {!showUserDot && <LocationPuck visible puckBearing="heading" pulsing={{ isEnabled: true }} />}
-
-          {/* "You are here" (review/override account). */}
-          {showUserDot && userLocation && (
-            <ShapeSource
-              id="user"
-              shape={{
-                type: "FeatureCollection",
-                features: [
-                  {
-                    type: "Feature",
-                    properties: {},
-                    geometry: { type: "Point", coordinates: [userLocation.lng, userLocation.lat] },
-                  },
-                ],
-              }}
-            >
-              <CircleLayer
-                id="user-dot"
-                style={{
-                  circleRadius: 7,
-                  circleColor: Colors.primary,
-                  circleStrokeColor: "#ffffff",
-                  circleStrokeWidth: 3,
-                }}
-              />
-            </ShapeSource>
-          )}
-        </MapView>
-      </View>
-    </GestureDetector>
+        )}
+      </MapView>
+    </View>
   );
 }
