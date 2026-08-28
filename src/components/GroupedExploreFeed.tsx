@@ -144,7 +144,10 @@ function OverflowItem({
               {item.category}
             </Text>
           )}
-          {formatRecurrence(item.recurrence) && (
+          {/* Recurrence cadence is an EVENTS-only concept — activities (evergreen
+              places) must never show a "Weekly/Monthly" badge even if bad upstream
+              data left a recurrence value on them. Gate on kind. (#4) */}
+          {item.kind === "event" && formatRecurrence(item.recurrence) && (
             <View
               style={{
                 flexDirection: "row",
