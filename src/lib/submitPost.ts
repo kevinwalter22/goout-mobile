@@ -30,6 +30,9 @@ export type SubmitPostInput = {
   exploreItemId: string | null;
   /** kind of the linked item (for the interaction log); ignored when My Location. */
   itemKind?: "event" | "activity" | null;
+  /** Which route the post came from (analytics) — 'post_first' (FAB) vs 'item_gated'
+   *  (event / postable pin → check-in). Persisted to posts.post_source (migration 175). */
+  source?: "post_first" | "item_gated";
 };
 
 export type SubmitPostResult = { postId: string | null; error: string | null };
@@ -101,6 +104,9 @@ export async function submitPost(input: SubmitPostInput): Promise<SubmitPostResu
       verified_lng: input.verifiedLng,
       verified_at: input.verifiedAt,
       event_id: null,
+      // Route provenance for posting analytics (nullable — pre-instrumentation
+      // rows stay null). See migration 175 + posting_loop_health().
+      post_source: input.source ?? null,
     };
 
     if (input.exploreItemId) {

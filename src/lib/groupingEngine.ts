@@ -352,7 +352,7 @@ export function groupItems(
       id: "postable_now",
       cardType: "postable_now",
       title: "Postable Now",
-      subtitle: "You're nearby — snap a photo!",
+      subtitle: "You're nearby — double-tap to post now!",
       items: postableNowItems.slice(0, config.maxItemsPerGroup),
       avgTop3Score: computeAvgTop3(postableNowItems),
       diversityCategory: "general",

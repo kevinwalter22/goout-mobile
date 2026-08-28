@@ -348,16 +348,22 @@ verifies on device).
   inside `<MapView>`; keep/retire the custom `user-dot`.
 - **acceptance (device):** a normal user sees the native blue location puck on the map.
 
-### T8 — [needs-device] Map postable-now + double-tap-to-camera (+ card shortcut)
+### T8 — [BUILT · needs-device] Map postable-now + double-tap-to-camera (+ card shortcut)
 - **why:** List has postable highlight + double-tap→camera; Card is highlight-only; Map has
   neither. Bring them to parity.
-- **files:** `ExploreMapView.tsx` / `MapboxPlacesMap.tsx` (compute postable state for pins +
-  wire tap/double-tap to `handleCameraShortcut`, which must be passed down from
-  `explore.tsx:881-918`); forward a camera callback through
-  `GroupedExploreFeed → GroupCard → GroupCarouselTile` for the card view.
-- **acceptance (device):** postable pins show the state on the map; tap/double-tap a postable
-  pin runs `verifyCheckInLocation` → `/checkin`; the card view's postable items get the same
-  shortcut.
+- **built:** `handleCameraShortcut` refactored to take the item OBJECT (not an id), so the
+  card carousel + map — whose items aren't guaranteed to be in `orderedItems` — resolve
+  locally. Card view: `onCameraShortcut` forwarded `GroupedExploreFeed → GroupCard →
+  GroupCarouselTile`; postable tiles get the POST NOW badge + purple border + the same 200ms
+  double-tap discriminator. Map: `MapboxPlacesMap` computes `computePostableNow` per pin →
+  a purple halo (own ShapeSource, drawn under pins) on postable places; a second tap on an
+  already-selected postable pin fires the shortcut (selection stays instant); the preview
+  card gains a POST NOW badge + a "Post here now ›" button (the reliable, discoverable path).
+- **route note:** post-T5 the shortcut goes to the unified `/post/camera` (item pre-linked +
+  verified), NOT the retired `/checkin`. Radius is the strict 200m (`POST_FIRST_RADIUS_METERS`).
+- **acceptance (device):** postable pins show a purple halo on the map; double-tapping a
+  postable pin (or tapping "Post here now" on the preview) runs `verifyCheckInLocation` →
+  `/post/camera`; the card carousel's postable tiles double-tap to camera the same way.
 
 ---
 
@@ -377,5 +383,6 @@ Foundation-first, exactly like Layer 2:
   friend signals on the map — later Phase-3 acts. This Act is the single-user post-first loop.
 - **Decisions (locked):** RPC distance cap = **30 km on search results only, never on
   posting** (§5, §5b); "Create an event" = **secondary de-emphasized link** on camera-select
-  (§2); `POST_FIRST_RADIUS_METERS = **400**` (§1).
+  (§2); `POST_FIRST_RADIUS_METERS = **200**` — tightened from 400 during T5 device testing
+  (400m tagged too many near-but-not-at places); now matches the strict check-in radius (§1).
 </content>

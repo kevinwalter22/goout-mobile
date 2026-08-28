@@ -40,6 +40,9 @@ interface GroupedExploreFeedProps {
   userLocation: { lat: number; lng: number } | null;
   onItemPress: (itemId: string) => void;
   onSuppressItem?: (itemId: string) => void;
+  /** Double-tap a postable-group tile → straight to the post camera (parity
+   *  with the list view). Only wired on `postable_now` groups. */
+  onCameraShortcut?: (item: ScoredItem) => void;
   onRefresh: () => void;
   refreshing: boolean;
   loading: boolean;
@@ -218,6 +221,7 @@ export function GroupedExploreFeed({
   userLocation,
   onItemPress,
   onSuppressItem,
+  onCameraShortcut,
   onRefresh,
   refreshing,
   loading,
@@ -256,6 +260,7 @@ export function GroupedExploreFeed({
               userLocation={userLocation}
               onItemPress={onItemPress}
               onLongPressItem={onSuppressItem}
+              onCameraShortcut={onCameraShortcut}
             />
           );
         case "overflow_header":
@@ -276,7 +281,7 @@ export function GroupedExploreFeed({
           return <OverflowItem item={item.item} onPress={onItemPress} onLongPress={onSuppressItem} />;
       }
     },
-    [userLocation, onItemPress, onSuppressItem, colors.textSecondary]
+    [userLocation, onItemPress, onSuppressItem, onCameraShortcut, colors.textSecondary]
   );
 
   const keyExtractor = useCallback((item: FeedItem) => item.key, []);

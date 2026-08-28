@@ -17,12 +17,14 @@ interface GroupCardProps {
   userLocation: { lat: number; lng: number } | null;
   onItemPress: (itemId: string) => void;
   onLongPressItem?: (itemId: string) => void;
+  /** Present on postable groups → each tile gets double-tap-to-camera. */
+  onCameraShortcut?: (item: ScoredItem) => void;
 }
 
 const TILE_WIDTH = 160;
 const TILE_GAP = 12;
 
-function GroupCardInner({ group, userLocation, onItemPress, onLongPressItem }: GroupCardProps) {
+function GroupCardInner({ group, userLocation, onItemPress, onLongPressItem, onCameraShortcut }: GroupCardProps) {
   const { colors } = useTheme();
   const isPostable = group.cardType === "postable_now";
 
@@ -31,11 +33,15 @@ function GroupCardInner({ group, userLocation, onItemPress, onLongPressItem }: G
       <GroupCarouselTile
         item={item}
         userLocation={userLocation}
+        // Every tile in a postable_now group is postable — pass the flag so the
+        // tile enables its POST NOW badge + double-tap shortcut.
+        isPostable={isPostable}
         onPress={onItemPress}
         onLongPress={onLongPressItem}
+        onCameraShortcut={onCameraShortcut}
       />
     ),
-    [userLocation, onItemPress, onLongPressItem]
+    [userLocation, isPostable, onItemPress, onLongPressItem, onCameraShortcut]
   );
 
   return (

@@ -208,17 +208,59 @@ async function autonomousLoadSection() {
   );
 }
 
+// ── E. Posting loop health (Phase 3 · Act 1) ─────────────────────────────────
+// "Are people actually posting?" — the deterministic weekly read on the crown-
+// jewel loop. Reuses the posting_loop_health() RPC (migration 175, the same
+// source the auditor scores) for this 7-day window vs. the prior one. Purely
+// informational (no flag) — it's a usage signal, not a cost breach. If the RPC
+// isn't on prod yet (before the gated deploy of 175), it errors → caught below.
+async function postingLoopSection() {
+  const rows = await sql(
+    `select
+       public.posting_loop_health(now() - interval '7 days',  now())                          as cur,
+       public.posting_loop_health(now() - interval '14 days', now() - interval '7 days')       as prev`
+  );
+  const r = rows?.[0];
+  if (!r) return "• Posting loop: no data.";
+  const cur = r.cur || {};
+  const prev = r.prev || {};
+  const cp = cur.posts || {};
+  const pp = prev.posts || {};
+  const cf = cur.funnel || {};
+  const total = cp.total ?? 0;
+  const prevTotal = pp.total ?? 0;
+  const arrow = total > prevTotal ? "▲" : total < prevTotal ? "▼" : "▬";
+  if (total === 0 && prevTotal === 0) {
+    return "• 🟣 *Posting loop:* no posts in the last 14 days (loop is live but unused — worth a look).";
+  }
+  const route = cp.by_route || {};
+  const link = cp.by_link || {};
+  const started = cf.started ?? 0;
+  const completed = cf.completed ?? 0;
+  const abandonPct = started > 0 ? Math.round(((started - completed) / started) * 100) : null;
+  const lines = [
+    `• 🟣 *Posts (7d):* ${total} ${arrow} (prev ${prevTotal}) · ${cp.distinct_posters ?? 0} poster${(cp.distinct_posters ?? 0) === 1 ? "" : "s"}`,
+    `• *Route:* ${route.post_first ?? 0} post-first · ${route.item_gated ?? 0} check-in${(route.unknown ?? 0) ? ` · ${route.unknown} pre-instrumentation` : ""}`,
+    `• *Link:* ${link.linked ?? 0} linked-at-place · ${link.my_location ?? 0} My-Location · ${cp.verified_at_event ?? 0} verified-at-event`,
+  ];
+  if (started > 0) {
+    lines.push(`• *Funnel:* ${started} opened → ${completed} posted${abandonPct != null ? ` (${abandonPct}% didn't finish)` : ""}`);
+  }
+  return lines.join("\n");
+}
+
 async function main() {
   if (!SUPABASE_ACCESS_TOKEN || !SUPABASE_PROD_PROJECT_REF || !SLACK_WEBHOOK) {
     console.log("cost_watch: required secrets missing — inert (no post).");
     return;
   }
 
-  const [supa, api, eas, load] = await Promise.all([
+  const [supa, api, eas, load, posting] = await Promise.all([
     supabaseSection().catch((e) => `• Supabase section failed: ${e.message}`),
     apiSection().catch((e) => `• API section failed: ${e.message}`),
     easSection().catch((e) => `• EAS section failed: ${e.message}`),
     autonomousLoadSection().catch((e) => `• Autonomous load failed: ${e.message}`),
+    postingLoopSection().catch((e) => `• Posting loop: unavailable (${String(e.message).slice(0, 80)}).`),
   ]);
 
   const header = flags.length
@@ -235,6 +277,9 @@ async function main() {
     "",
     "*EAS builds*",
     eas,
+    "",
+    "*Posting loop health (7d vs prior 7d)*",
+    posting,
     "",
     "*Subscription headroom (autonomous load)*",
     load,

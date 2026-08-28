@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
 import Mapbox, {
   MapView,
@@ -12,6 +12,7 @@ import Mapbox, {
 import { Colors } from "../config/theme";
 import { aggregateToPlaces, placePriority } from "../lib/mapPlaces";
 import { nearestRepId } from "../lib/mapTap";
+import { computePostableNow } from "../lib/postableNow";
 import { MAP_PIN_IMAGES } from "../utils/mapPinImages";
 import type { MapRegion } from "../utils/mapViewport";
 import type { ExploreItem } from "../types/database";
@@ -19,15 +20,25 @@ import type { ExploreItem } from "../types/database";
 // One-time SDK token (public — safe in the client). Restricted to the map SKU.
 Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || "");
 
-// Reused for the "nothing selected" state so the selection ShapeSource stays
-// mounted (updating a shape is far cheaper than mounting a native source+layer on
-// every tap — that was the ~1s selection lag).
+// Reused for the "nothing" state so a ShapeSource stays mounted (updating a shape
+// is far cheaper than mounting a native source+layer on every change).
 const EMPTY_FC = { type: "FeatureCollection" as const, features: [] };
 
 // Fallback pin for any emoji without a bundled image (📍 is always in the set) —
 // guarantees every place resolves to a real iconImage, so a pin is never missing.
 const FALLBACK_EMOJI = "📍";
 const iconFor = (emoji: string): string => (MAP_PIN_IMAGES[emoji] ? emoji : FALLBACK_EMOJI);
+
+// One ring language: every ring is the SAME size + SAME translucent inner; only the
+// stroke colour/width changes. Postable = brand purple ("you can post here"), and a
+// selected postable ring just gets BOLDER (never a second ring). Selected-but-not-
+// postable = a neutral charcoal focus ring (dark gray, not black).
+const RING_RADIUS = 22;
+const RING_INNER = "rgba(255,255,255,0.16)";
+const RING_PURPLE = Colors.primary;
+const RING_CHARCOAL = "#4B5563";
+const RING_WIDTH = 3;
+const RING_WIDTH_BOLD = 5.5;
 
 type Props = {
   items: ExploreItem[]; // mappable items in scope (events + activities)
@@ -41,15 +52,33 @@ type Props = {
   /** Fired when a place is tapped — gives the representative item for the preview. */
   onSelectItem: (item: ExploreItem | null) => void;
   itemById: Map<string, ExploreItem>;
+  /**
+   * Reserved for the map post-shortcut. Posting from the map is driven by the
+   * preview card's "Post here now" button (ExploreMapView) — the native map surface
+   * does not reliably deliver a JS double-tap, so we do NOT bind one here. The
+   * list + card views (real RN views) keep their double-tap-to-camera.
+   */
+  onCameraShortcut?: (item: ExploreItem) => void;
 };
 
-// GeoJSON FeatureCollection of PLACES (one feature per venue/coordinate).
-function toFeatureCollection(items: ExploreItem[]) {
+// GeoJSON FeatureCollection of PLACES (one feature per venue/coordinate). Each
+// feature carries `postable` — whether the user is at the place AND its
+// representative item is available to post right now (computePostableNow).
+function toFeatureCollection(
+  items: ExploreItem[],
+  itemById: Map<string, ExploreItem>,
+  userLocation: { lat: number; lng: number } | null,
+) {
   const places = aggregateToPlaces(items);
-  return {
-    fc: {
-      type: "FeatureCollection" as const,
-      features: places.map((p) => ({
+  const fc = {
+    type: "FeatureCollection" as const,
+    features: places.map((p) => {
+      const repId = p.itemIds[0];
+      const repItem = itemById.get(repId);
+      const postable = repItem
+        ? computePostableNow(repItem, userLocation).isPostable
+        : false;
+      return {
         type: "Feature" as const,
         id: p.id,
         geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
@@ -58,19 +87,19 @@ function toFeatureCollection(items: ExploreItem[]) {
           // icon = the emoji's bundled pin (or the fallback pin) — always a valid image key
           icon: iconFor(p.emoji),
           count: p.eventCount,
-          // Higher priority is placed FIRST and therefore WINS native collision
-          // when pins overlap. Events rank above venues, then by notability — so
-          // zoomed out you see the notable few, and the long tail fills in as the
-          // map de-densifies on zoom-in. (Mapbox draws lowest sort-key first, so
-          // the value is negated where it's used as symbolSortKey.)
+          // Higher priority is placed FIRST and therefore WINS native collision when
+          // pins overlap. Events rank above venues, then by notability — so zoomed out
+          // you see the notable few, and the long tail fills in on zoom-in. (Mapbox
+          // draws lowest sort-key first, so the value is negated as symbolSortKey.)
           priority: placePriority(p),
-          repId: p.itemIds[0],
+          repId,
           allIds: p.itemIds.join(","),
+          postable,
         },
-      })),
-    },
-    places,
+      };
+    }),
   };
+  return { fc, places };
 }
 
 export function MapboxPlacesMap({
@@ -85,18 +114,52 @@ export function MapboxPlacesMap({
   itemById,
 }: Props) {
   const mapRef = useRef<MapView>(null);
-  // Timestamp of the last pin tap — used to swallow the map's deselect-on-tap
-  // that can pair with a pin tap and undo the selection (the "took 3 tries" feel).
+  // Timestamp of the last pin tap — used to swallow the map's deselect-on-tap that
+  // can pair with a pin tap and undo the selection (the "took 3 tries" feel).
   const lastPinTapRef = useRef(0);
 
-  const { fc } = useMemo(() => toFeatureCollection(items), [items]);
+  const { fc } = useMemo(
+    () => toFeatureCollection(items, itemById, userLocation),
+    [items, itemById, userLocation],
+  );
 
-  // Selected place as a 1-feature shape (or empty). The source stays mounted; we
-  // only swap the shape, so the ring appears immediately on tap.
+  // Ids of place-pins that actually RENDERED (survived native collision) at the
+  // current camera — queried on idle. null = "not queried yet / just changed" →
+  // show all postable rings (avoids a first-paint gap); after the query it's the
+  // real rendered set, so a postable ring declutters WITH its pin (no orphan).
+  const [renderedIds, setRenderedIds] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    setRenderedIds(null); // new data → show all, next idle prunes to what rendered
+  }, [fc]);
+
+  const isSelected = useCallback(
+    (f: any) =>
+      !!selectedItemId &&
+      (f.properties.allIds as string).split(",").includes(selectedItemId),
+    [selectedItemId],
+  );
+
+  // Postable rings for NON-selected postable pins that are on-screen (renderedIds).
+  // No force-show: the pin lives in the collision-managed `places` layer and
+  // declutters normally; the ring is filtered to the same rendered set so it
+  // appears/disappears exactly with its pin.
+  const postableRingShape = useMemo(() => {
+    const features = fc.features.filter((f) => {
+      if (f.properties.postable !== true) return false;
+      if (renderedIds != null && !renderedIds.has(String(f.properties.id))) return false;
+      if (isSelected(f)) return false; // selected pin's ring is drawn by the selection layer
+      return true;
+    });
+    return features.length ? { type: "FeatureCollection" as const, features } : EMPTY_FC;
+  }, [fc, renderedIds, isSelected]);
+
+  // The selected place (1 feature or empty) — carries `postable` so its ring picks
+  // the right colour/width. The selected pin is force-shown (below) so it stays put
+  // while you're previewing it.
   const selectedShape = useMemo(() => {
     if (!selectedItemId) return EMPTY_FC;
     const sel = fc.features.find((f) =>
-      (f.properties.allIds as string).split(",").includes(selectedItemId)
+      (f.properties.allIds as string).split(",").includes(selectedItemId),
     );
     return sel ? { type: "FeatureCollection" as const, features: [sel] } : EMPTY_FC;
   }, [fc, selectedItemId]);
@@ -117,6 +180,25 @@ export function MapboxPlacesMap({
       latitudeDelta: latDelta || 0.08,
       longitudeDelta: lngDelta || 0.08,
     });
+
+    // Tie postable rings to pins that actually rendered. Query the place-pin layer
+    // (pass [] filter, NOT null) for what survived collision at this camera;
+    // postableRingShape filters to this set so a ring declutters with its pin.
+    try {
+      const rendered = await (mapRef.current as any)?.queryRenderedFeaturesInRect(
+        [],
+        [],
+        ["place-pin"],
+      );
+      const ids = new Set<string>();
+      for (const f of rendered?.features ?? []) {
+        const id = (f?.properties as any)?.id;
+        if (id != null) ids.add(String(id));
+      }
+      setRenderedIds(ids);
+    } catch {
+      // best-effort — leave the last set (or show-all null)
+    }
   };
 
   const handlePlacePress = (e: any) => {
@@ -134,8 +216,10 @@ export function MapboxPlacesMap({
         styleURL={Mapbox.StyleURL.Street}
         scaleBarEnabled={false}
         // Mapbox attribution + logo are REQUIRED to stay visible (ToS) but MAY be
-        // repositioned. Logo sits in the bottom-LEFT corner; the attribution "ⓘ" moves
-        // to the TOP-RIGHT — both clear of the bottom-right FAB. Do NOT disable them.
+        // repositioned. Logo bottom-LEFT; the attribution "ⓘ" top-RIGHT — both clear
+        // of the bottom-right FAB. Do NOT disable them. Native double-tap-zoom is left
+        // ON (all standard map gestures work); posting from the map is the preview
+        // card's "Post here now" button.
         logoEnabled
         attributionEnabled
         logoPosition={{ bottom: 8, left: 8 }}
@@ -156,14 +240,31 @@ export function MapboxPlacesMap({
           animationDuration={0}
         />
 
-        {/* Bundled emoji-disc pins (static require assets — the reliable image
-            path). Referenced by name from the symbol layer via iconImage. */}
+        {/* Bundled emoji-disc pins (static require assets — the reliable image path).
+            Referenced by name from the symbol layer via iconImage. */}
         <Images
           images={MAP_PIN_IMAGES}
           onImageMissing={(name) => {
             if (__DEV__) console.warn("[map] missing pin image for", name);
           }}
         />
+
+        {/* Postable halo — drawn UNDER the pins, only for non-selected postable pins
+            that are currently rendered (renderedIds), so it declutters with its pin.
+            Normal-width purple; the selected postable pin's (bolder) ring comes from
+            the selection layer instead. */}
+        <ShapeSource id="postable-ring-src" shape={postableRingShape}>
+          <CircleLayer
+            id="postable-ring"
+            style={{
+              circleRadius: RING_RADIUS,
+              circleColor: RING_INNER,
+              circleStrokeColor: RING_PURPLE,
+              circleStrokeWidth: RING_WIDTH,
+              circlePitchAlignment: "map",
+            }}
+          />
+        </ShapeSource>
 
         <ShapeSource
           id="places"
@@ -173,9 +274,8 @@ export function MapboxPlacesMap({
         >
           {/* One symbol per place: emoji-disc icon + optional event-count badge.
               iconAllowOverlap:false is the native collision that de-clutters when
-              zoomed out; symbolSortKey (=-priority) decides who survives — events
-              and notable venues win, the long tail fills in on zoom-in. The badge
-              rides on the same symbol (textOptional) so it never floats alone. */}
+              zoomed out; symbolSortKey (=-priority) decides who survives. Postable
+              pins live here too, so they declutter exactly like everything else. */}
           <SymbolLayer
             id="place-pin"
             style={{
@@ -202,19 +302,28 @@ export function MapboxPlacesMap({
           />
         </ShapeSource>
 
-        {/* Selection layer — always mounted (empty until a pin is tapped), drawn
-            ON TOP of the places layer. It carries BOTH the ring AND the selected
-            pin with collision disabled, so the selected place stays put when you
-            zoom out even if it would otherwise be collision-dropped. Deselecting
-            empties the shape, so the pin then follows normal collision again. */}
+        {/* Selection layer — always mounted (empty until a pin is tapped), drawn ON
+            TOP with the pin force-shown so a selected place stays put while you
+            preview it. ONE ring: bold purple if the selected place is postable, else
+            a charcoal focus ring — same size + inner as the postable halo. */}
         <ShapeSource id="selected-place" shape={selectedShape}>
           <CircleLayer
             id="selected-ring"
             style={{
-              circleRadius: 24,
-              circleColor: "rgba(124,58,237,0.12)",
-              circleStrokeColor: Colors.primaryDark,
-              circleStrokeWidth: 3,
+              circleRadius: RING_RADIUS,
+              circleColor: RING_INNER,
+              circleStrokeColor: [
+                "case",
+                ["==", ["get", "postable"], true],
+                RING_PURPLE,
+                RING_CHARCOAL,
+              ],
+              circleStrokeWidth: [
+                "case",
+                ["==", ["get", "postable"], true],
+                RING_WIDTH_BOLD,
+                RING_WIDTH,
+              ],
               circlePitchAlignment: "map",
             }}
           />
@@ -242,10 +351,8 @@ export function MapboxPlacesMap({
           />
         </ShapeSource>
 
-        {/* T7 — native blue current-location puck for normal users (was missing
-            after the @rnmapbox switch; only the override/dev purple dot existed).
-            Shown only when NOT using the override dot, so override/dev accounts (whose
-            device GPS differs from their forced coords) don't get two markers. */}
+        {/* T7 — native blue current-location puck for normal users. Shown only when
+            NOT using the override dot, so override/dev accounts don't get two markers. */}
         {!showUserDot && <LocationPuck visible puckBearing="heading" pulsing={{ isEnabled: true }} />}
 
         {/* "You are here" (review/override account). */}
