@@ -563,7 +563,7 @@ export default function Explore() {
   }, [searchText]);
 
   // Function to get current location (reusable for initial load, refresh, and periodic updates)
-  const updateLocation = useCallback(async () => {
+  const updateLocation = useCallback(async (force = false) => {
     try {
       const { granted } = await requestLocationPermission();
       if (!granted) return;
@@ -573,7 +573,13 @@ export default function Explore() {
 
       const next = { lat: latitude, lng: longitude };
       setUserLocation((prev) => {
-        if (prev && haversineMeters(prev, next) < 50) return prev;
+        // `force` bypasses the 50m jitter gate. That gate suppresses idle GPS
+        // jitter, but it's coarse against the 200m postable-now radius: a fresh
+        // focus-time fix that lands <50m from the last stored point gets swallowed,
+        // leaving the "Postable Now" badge trailing reality while the detail page
+        // (fresh GPS at tap time) already lets you post. Forcing on explore
+        // re-focus keeps the badge honest. (#10)
+        if (!force && prev && haversineMeters(prev, next) < 50) return prev;
         return next;
       });
       // Persist for the next cold start / GPS-off session so the feed stays
@@ -618,6 +624,22 @@ export default function Explore() {
       clearInterval(intervalId);
     };
   }, [updateLocation]);
+
+  // #10 — On every RE-focus of the Explore tab, take a fresh GPS fix that bypasses
+  // the 50m movement gate, so the "Postable Now" badge reflects the user's true
+  // position — matching the detail page's fresh-fix posting gate ("if I can post
+  // to it, it should show postable"). Skip the FIRST focus: the mount effect above
+  // already took the opening fix, so this avoids a duplicate read on cold open.
+  const didFirstFocusRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!didFirstFocusRef.current) {
+        didFirstFocusRef.current = true;
+        return;
+      }
+      void updateLocation(true);
+    }, [updateLocation]),
+  );
 
   // Fetch postable now candidates (independent of main sort/pagination/filters)
   // This ensures the Postable Now section is consistent regardless of sort option
