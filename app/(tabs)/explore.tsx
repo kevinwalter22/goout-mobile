@@ -485,7 +485,6 @@ export default function Explore() {
     loadMore,
     refresh,
     weather,
-    scoringEnabled,
   } = useRecommender(userLocation, {
     enableScoring: true,
     pageSizeOverride: viewMode === "cards" ? 200 : undefined,
@@ -541,6 +540,17 @@ export default function Explore() {
     return () => sub.remove();
   }, []);
 
+  // #7 — Search is a LIST-view affordance only. Card/carousel view is curated
+  // browse, so if the user switches to cards while a search is active, exit search
+  // (the search bar is not offered in cards).
+  useEffect(() => {
+    if (viewMode === "cards" && searchActive) {
+      setSearchActive(false);
+      setSearchText("");
+      setSearchQuery("");
+    }
+  }, [viewMode, searchActive]);
+
   // Debounce search text → trigger backend search query
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
@@ -553,7 +563,7 @@ export default function Explore() {
   }, [searchText]);
 
   // Function to get current location (reusable for initial load, refresh, and periodic updates)
-  const updateLocation = useCallback(async () => {
+  const updateLocation = useCallback(async (force = false) => {
     try {
       const { granted } = await requestLocationPermission();
       if (!granted) return;
@@ -563,7 +573,13 @@ export default function Explore() {
 
       const next = { lat: latitude, lng: longitude };
       setUserLocation((prev) => {
-        if (prev && haversineMeters(prev, next) < 50) return prev;
+        // `force` bypasses the 50m jitter gate. That gate suppresses idle GPS
+        // jitter, but it's coarse against the 200m postable-now radius: a fresh
+        // focus-time fix that lands <50m from the last stored point gets swallowed,
+        // leaving the "Postable Now" badge trailing reality while the detail page
+        // (fresh GPS at tap time) already lets you post. Forcing on explore
+        // re-focus keeps the badge honest. (#10)
+        if (!force && prev && haversineMeters(prev, next) < 50) return prev;
         return next;
       });
       // Persist for the next cold start / GPS-off session so the feed stays
@@ -608,6 +624,22 @@ export default function Explore() {
       clearInterval(intervalId);
     };
   }, [updateLocation]);
+
+  // #10 — On every RE-focus of the Explore tab, take a fresh GPS fix that bypasses
+  // the 50m movement gate, so the "Postable Now" badge reflects the user's true
+  // position — matching the detail page's fresh-fix posting gate ("if I can post
+  // to it, it should show postable"). Skip the FIRST focus: the mount effect above
+  // already took the opening fix, so this avoids a duplicate read on cold open.
+  const didFirstFocusRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!didFirstFocusRef.current) {
+        didFirstFocusRef.current = true;
+        return;
+      }
+      void updateLocation(true);
+    }, [updateLocation]),
+  );
 
   // Fetch postable now candidates (independent of main sort/pagination/filters)
   // This ensures the Postable Now section is consistent regardless of sort option
@@ -989,47 +1021,20 @@ export default function Explore() {
           style={{ width: 120, height: 48, marginLeft: -8 }}
           resizeMode="contain"
         />
-        {/* Weather indicator (when scoring is enabled) */}
-        {scoringEnabled && weather && (
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 4,
-              paddingHorizontal: 8,
-              paddingVertical: 4,
-              borderRadius: 12,
-              backgroundColor: colors.surfaceVariant,
-            }}
-          >
-            <Ionicons
-              name={
-                weather.isRaining
-                  ? "rainy"
-                  : weather.isSunny
-                  ? "sunny"
-                  : "partly-sunny"
-              }
-              size={16}
-              color={colors.textSecondary}
-            />
-            <Text style={{ fontSize: 12, color: colors.textSecondary }}>
-              {Math.round(weather.temperature)}°F
-            </Text>
-          </View>
-        )}
-      </View>
-
-      {/* Region (metro) switcher — hard-scopes the feed to one city. Opens
-          locked when no region is resolvable so the feed is never unscoped. */}
-      <View style={{ paddingHorizontal: 16, paddingTop: 8, backgroundColor: colors.background }}>
-        <RegionPicker
-          regions={regions}
-          activeRegion={activeRegion}
-          onSelect={setRegion}
-          forceOpen={needsPicker}
-          hasLocation={!!userLocation}
-        />
+        {/* #9 — Location selector moved up here (where the weather pill used to
+            be) and the weather pill dropped. This consolidates the header and lets
+            us remove the dedicated region row that used to sit below. The picker is
+            the metro switcher — hard-scopes the feed to one city; opens locked when
+            no region is resolvable so the feed is never unscoped. */}
+        <View>
+          <RegionPicker
+            regions={regions}
+            activeRegion={activeRegion}
+            onSelect={setRegion}
+            forceOpen={needsPicker}
+            hasLocation={!!userLocation}
+          />
+        </View>
       </View>
 
       {/* Action Bar: Kind filter pills + View mode icons + Filter button */}
@@ -1139,8 +1144,9 @@ export default function Explore() {
             </Text>
           )}
 
-          {/* Search icon — only shown when not already searching */}
-          {!searchActive && (
+          {/* Search icon — LIST view only. Card/carousel view is curated browse,
+              not search, so we don't offer a search affordance there (#7). */}
+          {!searchActive && viewMode === "list" && (
             <Pressable
               onPress={() => setSearchActive(true)}
               hitSlop={8}

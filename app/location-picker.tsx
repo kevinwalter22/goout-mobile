@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import MapView, { Marker, PROVIDER_DEFAULT } from "react-native-maps";
+import Mapbox, { MapView, Camera, ShapeSource, CircleLayer, LocationPuck } from "@rnmapbox/maps";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,10 +9,20 @@ import { Colors } from "../src/config/theme";
 import { resolveLocationPicker, cancelLocationPicker } from "../src/utils/locationPickerStore";
 import { requestLocationPermission, getCurrentLocation } from "../src/utils/location";
 
+// One-time SDK token (public — safe in the client), same as the explore map.
+Mapbox.setAccessToken(process.env.EXPO_PUBLIC_MAPBOX_TOKEN || "");
+
 const DEFAULT_LAT = 40.7128;
 const DEFAULT_LNG = -74.006;
-const DEFAULT_DELTA = 0.05;
+const PICKER_ZOOM = 14; // ~DEFAULT_DELTA 0.05 equivalent
 
+// #6 — Mapbox pin-drop (was react-native-maps / Apple Maps). TAP-TO-DROP only,
+// no draggable pin: a draggable @rnmapbox annotation fights the native map pan
+// (the RNGH-over-native-map class of flakiness we hit on the explore map), so we
+// keep the interaction rock-solid — tap the map to set the pin. The pin is a
+// ShapeSource + CircleLayer (repositions instantly on shape update, no native
+// annotation reposition bugs). The callback-store contract + both callers
+// (create-event, edit-event) are unchanged: we still report {lat, lng}.
 export default function LocationPicker() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
@@ -22,7 +32,7 @@ export default function LocationPicker() {
   const initialLng = lngParam ? parseFloat(lngParam) : DEFAULT_LNG;
 
   const [pinCoord, setPinCoord] = useState({ latitude: initialLat, longitude: initialLng });
-  const mapRef = useRef<MapView>(null);
+  const cameraRef = useRef<Camera>(null);
 
   useEffect(() => {
     // Only auto-center if no prior pin coords were passed
@@ -34,15 +44,35 @@ export default function LocationPicker() {
       const { latitude, longitude, error } = await getCurrentLocation();
       if (error) return;
       setPinCoord({ latitude, longitude });
-      mapRef.current?.animateToRegion(
-        { latitude, longitude, latitudeDelta: DEFAULT_DELTA, longitudeDelta: DEFAULT_DELTA },
-        400,
-      );
+      cameraRef.current?.setCamera({
+        centerCoordinate: [longitude, latitude],
+        zoomLevel: PICKER_ZOOM,
+        animationDuration: 400,
+      });
     })();
   }, []);
 
-  function handleDragEnd(e: { nativeEvent: { coordinate: { latitude: number; longitude: number } } }) {
-    setPinCoord(e.nativeEvent.coordinate);
+  // 1-feature pin shape (Mapbox wants [lng, lat]). Updating the shape repositions
+  // the pin cleanly — no draggable annotation involved.
+  const pinShape = useMemo(
+    () => ({
+      type: "FeatureCollection" as const,
+      features: [
+        {
+          type: "Feature" as const,
+          properties: {},
+          geometry: { type: "Point" as const, coordinates: [pinCoord.longitude, pinCoord.latitude] },
+        },
+      ],
+    }),
+    [pinCoord.latitude, pinCoord.longitude],
+  );
+
+  function handleMapPress(e: any) {
+    const coords = e?.geometry?.coordinates as [number, number] | undefined;
+    if (!coords) return;
+    const [lng, lat] = coords;
+    setPinCoord({ latitude: lat, longitude: lng });
   }
 
   function handleConfirm() {
@@ -90,24 +120,40 @@ export default function LocationPicker() {
 
       {/* Map */}
       <MapView
-        ref={mapRef}
-        provider={PROVIDER_DEFAULT}
         style={{ flex: 1 }}
-        initialRegion={{
-          latitude: initialLat,
-          longitude: initialLng,
-          latitudeDelta: DEFAULT_DELTA,
-          longitudeDelta: DEFAULT_DELTA,
-        }}
-        showsUserLocation={true}
-        onPress={(e) => setPinCoord(e.nativeEvent.coordinate)}
+        styleURL={Mapbox.StyleURL.Street}
+        scaleBarEnabled={false}
+        // Mapbox attribution + logo are ToS-required (may be repositioned, not hidden).
+        logoEnabled
+        attributionEnabled
+        logoPosition={{ bottom: 8, left: 8 }}
+        attributionPosition={{ top: 8, right: 8 }}
+        onPress={handleMapPress}
       >
-        <Marker
-          coordinate={pinCoord}
-          draggable
-          onDragEnd={handleDragEnd}
-          pinColor={Colors.primary}
+        <Camera
+          ref={cameraRef}
+          defaultSettings={{ centerCoordinate: [initialLng, initialLat], zoomLevel: PICKER_ZOOM }}
+          animationDuration={0}
         />
+
+        <LocationPuck visible puckBearing="heading" pulsing={{ isEnabled: true }} />
+
+        {/* Selected-location pin: halo + dot. Repositions on tap via shape update. */}
+        <ShapeSource id="picker-pin" shape={pinShape}>
+          <CircleLayer
+            id="picker-pin-halo"
+            style={{ circleRadius: 16, circleColor: "rgba(124,58,237,0.18)", circlePitchAlignment: "map" }}
+          />
+          <CircleLayer
+            id="picker-pin-dot"
+            style={{
+              circleRadius: 8,
+              circleColor: Colors.primary,
+              circleStrokeColor: "#ffffff",
+              circleStrokeWidth: 3,
+            }}
+          />
+        </ShapeSource>
       </MapView>
 
       {/* Instruction hint */}
@@ -123,7 +169,7 @@ export default function LocationPicker() {
         }}
         pointerEvents="none"
       >
-        <Text style={{ color: "#fff", fontSize: 13 }}>Drag the pin or tap to reposition</Text>
+        <Text style={{ color: "#fff", fontSize: 13 }}>Tap the map to set the location</Text>
       </View>
 
       {/* Confirm button */}
