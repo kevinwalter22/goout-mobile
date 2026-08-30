@@ -41,6 +41,7 @@ import { useEngagementTracking } from "../../src/hooks/useEngagementTracking";
 import { addNavigationBreadcrumb } from "../../src/lib/sentry";
 import { getCategoryPlaceholder } from "../../src/utils/categoryPlaceholder";
 import { logAnalyticsEvent } from "../../src/lib/analyticsLogger";
+import { consumeFeedDirty } from "../../src/lib/feedRefresh";
 import { formatOpeningHours } from "../../src/utils/formatOpeningHours";
 import { sanitizeTimeText } from "../../src/utils/formatTimeText";
 import { useItemSuppressions } from "../../src/hooks/useItemSuppressions";
@@ -633,12 +634,15 @@ export default function Explore() {
   const didFirstFocusRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
+      // A create/mutation elsewhere marked the feed stale → refetch once so the new
+      // item appears without a manual reload (not on every ordinary tab switch).
+      if (consumeFeedDirty()) refresh();
       if (!didFirstFocusRef.current) {
         didFirstFocusRef.current = true;
         return;
       }
       void updateLocation(true);
-    }, [updateLocation]),
+    }, [updateLocation, refresh]),
   );
 
   // Fetch postable now candidates (independent of main sort/pagination/filters)
