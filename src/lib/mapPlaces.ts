@@ -26,6 +26,9 @@ export type PlaceFeature = {
   hasActivity: boolean; // is this also a browsable venue
   notability: number; // max notability at the place (venue LOD)
   itemIds: string[]; // every item at this place (for the tap sheet)
+  // A user-created item's cover photo, used as the map pin (Option A) instead of a
+  // generic emoji. Null for ingested items (they keep the emoji-disc pins).
+  coverImage: string | null;
 };
 
 const nota = (it: ExploreItem): number => (it as any).notability_score ?? 0;
@@ -58,17 +61,27 @@ export function aggregateToPlaces(items: ExploreItem[]): PlaceFeature[] {
       [...activities].sort(byNotaDesc)[0] ?? [...events].sort(byNotaDesc)[0];
     if (!rep) continue;
 
+    // User-created items get a photo pin from their cover (Option A). Fall back to a
+    // clean location pin — NOT the Twemoji calendar 📅, which always renders "JUL 17".
+    const repIsUserMade = !!(rep as any).created_by_user_id;
+    const cover = repIsUserMade
+      ? (((rep as any).image_thumb_url as string) || ((rep as any).image_url as string) || null)
+      : null;
+    let emoji = emojiForItem(rep);
+    if (repIsUserMade && !cover && emoji === "📅") emoji = "📍";
+
     out.push({
       id: key,
       lat: rep.lat as number,
       lng: rep.lng as number,
-      emoji: emojiForItem(rep),
+      emoji,
       title: rep.title,
       eventCount,
       hasEvents: eventCount > 0,
       hasActivity: activities.length > 0,
       notability: group.reduce((m, i) => Math.max(m, nota(i)), 0),
       itemIds: group.map((i) => i.id),
+      coverImage: cover,
     });
   }
   return out;

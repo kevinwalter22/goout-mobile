@@ -70,6 +70,10 @@ function toFeatureCollection(
   userLocation: { lat: number; lng: number } | null,
 ) {
   const places = aggregateToPlaces(items);
+  // Remote pin images for user-created items with a cover photo (Option A). Registered
+  // in <Images> under the place id; the symbol layer coalesces to the emoji pin when a
+  // place has no cover. Only user items get these, so the set stays small.
+  const coverImages: Record<string, { uri: string }> = {};
   const fc = {
     type: "FeatureCollection" as const,
     features: places.map((p) => {
@@ -78,6 +82,8 @@ function toFeatureCollection(
       const postable = repItem
         ? computePostableNow(repItem, userLocation).isPostable
         : false;
+      const hasCover = !!p.coverImage;
+      if (hasCover) coverImages[p.id] = { uri: p.coverImage as string };
       return {
         type: "Feature" as const,
         id: p.id,
@@ -86,6 +92,8 @@ function toFeatureCollection(
           id: p.id,
           // icon = the emoji's bundled pin (or the fallback pin) — always a valid image key
           icon: iconFor(p.emoji),
+          // cover-photo image id (= place id) when the user-created rep has a cover
+          ...(hasCover ? { coverKey: p.id } : {}),
           count: p.eventCount,
           // Higher priority is placed FIRST and therefore WINS native collision when
           // pins overlap. Events rank above venues, then by notability — so zoomed out
@@ -99,7 +107,7 @@ function toFeatureCollection(
       };
     }),
   };
-  return { fc, places };
+  return { fc, places, coverImages };
 }
 
 export function MapboxPlacesMap({
@@ -118,7 +126,7 @@ export function MapboxPlacesMap({
   // can pair with a pin tap and undo the selection (the "took 3 tries" feel).
   const lastPinTapRef = useRef(0);
 
-  const { fc } = useMemo(
+  const { fc, coverImages } = useMemo(
     () => toFeatureCollection(items, itemById, userLocation),
     [items, itemById, userLocation],
   );
@@ -243,7 +251,7 @@ export function MapboxPlacesMap({
         {/* Bundled emoji-disc pins (static require assets — the reliable image path).
             Referenced by name from the symbol layer via iconImage. */}
         <Images
-          images={MAP_PIN_IMAGES}
+          images={{ ...MAP_PIN_IMAGES, ...coverImages }}
           onImageMissing={(name) => {
             if (__DEV__) console.warn("[map] missing pin image for", name);
           }}
@@ -279,8 +287,12 @@ export function MapboxPlacesMap({
           <SymbolLayer
             id="place-pin"
             style={{
-              iconImage: ["get", "icon"],
-              iconSize: 0.5, // 72px asset -> ~36pt pin
+              // Prefer a user cover-photo pin (registered under the place id) when the
+              // place has one; otherwise the emoji-disc pin. (Option A)
+              iconImage: ["coalesce", ["get", "coverKey"], ["get", "icon"]],
+              // Emoji discs are 72px @0.5 (~36pt). Cover photos are larger source
+              // images, so scale them down more to land near the same on-screen size.
+              iconSize: ["case", ["has", "coverKey"], 0.22, 0.5],
               iconAllowOverlap: false,
               iconOptional: false,
               iconPadding: 4,
@@ -330,8 +342,8 @@ export function MapboxPlacesMap({
           <SymbolLayer
             id="selected-pin"
             style={{
-              iconImage: ["get", "icon"],
-              iconSize: 0.5,
+              iconImage: ["coalesce", ["get", "coverKey"], ["get", "icon"]],
+              iconSize: ["case", ["has", "coverKey"], 0.22, 0.5],
               iconAllowOverlap: true,
               iconIgnorePlacement: true,
               textField: [
