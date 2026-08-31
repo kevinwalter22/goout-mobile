@@ -631,18 +631,24 @@ export default function Explore() {
   // position — matching the detail page's fresh-fix posting gate ("if I can post
   // to it, it should show postable"). Skip the FIRST focus: the mount effect above
   // already took the opening fix, so this avoids a duplicate read on cold open.
+  // `refresh` is NOT stable (it depends on filters/executeQuery), so it must NOT go in
+  // the focus-effect dep array: an unstable callback makes useFocusEffect re-run on
+  // every render, and updateLocation(true) then forces a location change → re-render →
+  // re-run → infinite loop (OOM). Call refresh via a ref so the effect stays stable.
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
   const didFirstFocusRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
       // A create/mutation elsewhere marked the feed stale → refetch once so the new
       // item appears without a manual reload (not on every ordinary tab switch).
-      if (consumeFeedDirty()) refresh();
+      if (consumeFeedDirty()) refreshRef.current();
       if (!didFirstFocusRef.current) {
         didFirstFocusRef.current = true;
         return;
       }
       void updateLocation(true);
-    }, [updateLocation, refresh]),
+    }, [updateLocation]),
   );
 
   // Fetch postable now candidates (independent of main sort/pagination/filters)
