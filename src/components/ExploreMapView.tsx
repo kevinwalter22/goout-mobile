@@ -392,10 +392,32 @@ export function ExploreMapView({
           activities = activityData || [];
         }
 
+        // The creator's OWN items always appear on their map, regardless of the time
+        // window and eligibility gates that scope the general fetch — a user must see
+        // what they just created. (A "starts now" event falls just before the map's
+        // starts_at lower bound by the time you look, so it would otherwise never show,
+        // even though list/card display it via their 3h grace.) Still scoped to the
+        // viewport + the active kind filter; dedup drops any overlap with the fetches.
+        let ownItems: any[] = [];
+        if (userId) {
+          let ownQuery = supabase
+            .from("explore_items")
+            .select("*")
+            .eq("created_by_user_id", userId)
+            .is("deleted_at", null)
+            .not("lat", "is", null)
+            .not("lng", "is", null);
+          if (kindFilter === "event" || kindFilter === "activity") {
+            ownQuery = ownQuery.eq("kind", kindFilter);
+          }
+          const { data: ownData } = await applyBbox(ownQuery).limit(200);
+          ownItems = ownData || [];
+        }
+
         // Deduplicate — recurring items can match both the dated-event and
         // recurring queries, and the activities query can overlap the recurring one.
         const seen = new Set<string>();
-        const deduped = [...events, ...activities].filter((item) => {
+        const deduped = [...events, ...activities, ...ownItems].filter((item) => {
           if (seen.has(item.id)) return false;
           seen.add(item.id);
           return true;

@@ -259,7 +259,11 @@ const ExploreCard = React.memo(function ExploreCard({
                   {item.category}
                 </Text>
               )}
-              {item.recurrence && !["none", ""].includes(item.recurrence) && (
+              {/* Recurrence cadence is EVENTS-only — activities (evergreen places) must
+                  never show a cadence badge even if bad upstream data left a recurrence
+                  value (many do: daily/weekdays/weekly). This is the LIST-view row; the
+                  card view's badge is guarded the same way in GroupedExploreFeed. (#4) */}
+              {item.kind === "event" && item.recurrence && !["none", ""].includes(item.recurrence) && (
                 <View
                   style={{
                     flexDirection: "row",
