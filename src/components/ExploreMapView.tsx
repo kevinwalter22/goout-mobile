@@ -232,6 +232,13 @@ export function ExploreMapView({
         const timeRange = getTimeWindowRange();
         const startDate = timeRange?.start || nowDate;
         const endDate = timeRange?.end || horizonEnd;
+        // Never show already-over events on the map: clamp the dated-event lower bound
+        // to now-3h (the same grace list/card use), even when the window (e.g. "today")
+        // starts at midnight. Otherwise an event that started AND ended earlier today
+        // lingers on the map while list/card correctly drop it.
+        const eventStartFloor = new Date(
+          Math.max(startDate.getTime(), Date.now() - 3 * 60 * 60 * 1000),
+        );
 
         // Category filter
         const categoryValues = getCategoryFilter();
@@ -329,7 +336,7 @@ export function ExploreMapView({
             .eq("kind", "event")
             .is("deleted_at", null)
             .eq("is_admin_suppressed", false)
-            .gte("starts_at", startDate.toISOString())
+            .gte("starts_at", eventStartFloor.toISOString())
             .lte("starts_at", endDate.toISOString())
             .not("lat", "is", null)
             .not("lng", "is", null)
