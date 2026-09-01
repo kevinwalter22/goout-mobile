@@ -410,6 +410,10 @@ export function ExploreMapView({
           if (kindFilter === "event" || kindFilter === "activity") {
             ownQuery = ownQuery.eq("kind", kindFilter);
           }
+          // Match the list/card time rule so an OVER event doesn't linger on the map:
+          // undated items always show; dated ones only from the 3h past-grace onward.
+          const ownGraceCutoff = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+          ownQuery = ownQuery.or(`starts_at.is.null,starts_at.gte.${ownGraceCutoff}`);
           const { data: ownData } = await applyBbox(ownQuery).limit(200);
           ownItems = ownData || [];
         }
