@@ -191,6 +191,11 @@ function isCarouselExcluded(item: ScoredItem): boolean {
 function carouselRankValue(item: ScoredItem): number {
   const eligibility = (item as any).is_carousel_eligible;
   if (eligibility !== null && eligibility !== undefined) {
+    // Proximity-weighted local-first score (mig 182): blended notability decayed by
+    // distance-from-town-center, per-intent decay (food/drink tight, destinations wide).
+    // Falls back to raw blended for rows not yet re-blended under 182.
+    const rankScore = (item as any).carousel_rank_score;
+    if (typeof rankScore === "number") return rankScore;
     const blended = (item as any).blended_notability;
     return typeof blended === "number" ? blended : -Infinity;
   }
