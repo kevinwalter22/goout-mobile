@@ -166,9 +166,15 @@ Deno.serve(async (req) => {
     if (!dryRun && upserts.length > 0) {
       const { error: upErr } = await supabase.from("model_notability").upsert(upserts, { onConflict: "item_id" });
       if (upErr) return json({ error: `write failed: ${upErr.message}` }, 500);
-      // Best-effort budget accounting (cents), non-fatal.
+      // Best-effort budget accounting (cents), non-fatal. The supabase-js builder is a
+      // thenable that RESOLVES with { error } (it does not reject), and on the Deno
+      // `npm:` build it has no `.catch` method — `.catch(...)` there throws
+      // "supabase.rpc(...).catch is not a function" AFTER the upsert already committed,
+      // turning every real (non-dry-run) run into a 500. Guard with try/catch instead.
       const cents = Math.ceil((inTok / 1e6 * 5 + outTok / 1e6 * 25) * 100);
-      await supabase.rpc("increment_api_usage", { p_service: BUDGET_SERVICE, p_count: cents }).catch(() => {});
+      try {
+        await supabase.rpc("increment_api_usage", { p_service: BUDGET_SERVICE, p_count: cents });
+      } catch { /* budget accounting is non-fatal */ }
     }
 
     return json({
