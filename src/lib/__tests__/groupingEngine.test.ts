@@ -813,6 +813,32 @@ describe("two-surface carousel curation (docs/intent_taxonomy.md §9)", () => {
     expect(biteGroup!.items.map((i) => i.id)).toEqual(["bite-gem", "bite-fine"]);
   });
 
+  it("ranks by proximity-weighted carousel_rank_score, not raw blended (mig 182)", () => {
+    // A far notable place with a HIGHER blended must rank BELOW a near notable place
+    // whose distance-decayed rank_score is higher — local-first selection.
+    const farNotable = makeScoredItem({
+      id: "bite-far",
+      title: "Famous Spot 15mi Away",
+      is_carousel_eligible: true,
+      blended_notability: 8.0,
+      carousel_rank_score: 1.0, // decayed by distance
+      model_verdict: "notable",
+      intents: [{ slug: "get_a_bite", name: "Get a Bite", is_primary: true }],
+    } as any);
+    const nearNotable = makeScoredItem({
+      id: "bite-near",
+      title: "Good Local Spot 2mi Away",
+      is_carousel_eligible: true,
+      blended_notability: 5.0,
+      carousel_rank_score: 4.5, // barely decayed
+      model_verdict: "notable",
+      intents: [{ slug: "get_a_bite", name: "Get a Bite", is_primary: true }],
+    } as any);
+    const result = groupItemsByIntent([farNotable, nearNotable]);
+    const biteGroup = result.find((g) => g.id === "intent_get_a_bite");
+    expect(biteGroup!.items.map((i) => i.id)).toEqual(["bite-near", "bite-far"]);
+  });
+
   it("keeps restaurants and low-blend chains out of Grab a Drink", () => {
     const result = groupItemsByIntent([eventide, crumbl]);
     const drinkGroup = result.find((g) => g.id === "intent_grab_a_drink");
