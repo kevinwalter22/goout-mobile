@@ -98,14 +98,13 @@ jobs:
             [ "$scored" = "0" ] && break
             sleep 2
           done
-          # 2. Run the blend per launched region so carousels populate.
-          for region in portland-me; do
-            code=$(curl -s -X POST "$PROD_URL/rest/v1/rpc/refresh_carousel_eligibility" \
-              -H "Authorization: Bearer $KEY" -H "apikey: $KEY" -H "Content-Type: application/json" \
-              -d "{\"p_region_slug\":\"$region\"}" -o /dev/null -w "%{http_code}")
-            echo "blend $region: HTTP $code"
-            [ "$code" -ge 400 ] && { echo "::error::blend failed for $region"; exit 1; } || true
-          done
+          # 2. Run the de-biased blend for ALL active regions (was Portland-only — which
+          #    is why Warwick/Potsdam carousels never populated). One RPC loops them.
+          code=$(curl -s -X POST "$PROD_URL/rest/v1/rpc/refresh_all_carousel_eligibility" \
+            -H "Authorization: Bearer $KEY" -H "apikey: $KEY" -H "Content-Type: application/json" \
+            -d "{}" -o /dev/null -w "%{http_code}")
+          echo "blend all regions: HTTP $code"
+          [ "$code" -ge 400 ] && { echo "::error::blend (all regions) failed"; exit 1; } || true
           echo "✅ Prod curation bootstrapped: catalog scored + carousels blended."
 
       - uses: actions/setup-node@v4
