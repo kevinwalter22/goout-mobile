@@ -198,6 +198,18 @@ function carouselRankValue(item: ScoredItem): number {
 }
 
 /**
+ * Notable-first display tier (mig 181): genuine gems (model verdict `notable`) lead the
+ * carousel; real-but-ordinary places (`fine`/`unsure`) trail. Sorted ABOVE blended so a
+ * thin market (Potsdam) still reads curated-at-the-top — a padding item can never sit
+ * above a gem, even if its Google rating out-blends the gem's. `model_verdict` is
+ * denormalized onto the row by refresh_carousel_eligibility; null (uncurated intents/
+ * regions, or pre-blend) → tier 0, which leaves the old blended-only order untouched.
+ */
+function carouselNotableTier(item: ScoredItem): number {
+  return (item as any).model_verdict === "notable" ? 1 : 0;
+}
+
+/**
  * Intent grouping (docs/intent_taxonomy.md §4/§7 task 3): each item's PRIMARY
  * intent is its home carousel, plus up to ONE secondary — capping total
  * carousel appearances at 2. Items with no item_intents rows appear nowhere.
@@ -241,6 +253,10 @@ export function groupItemsByIntent(
         const bTime = b.starts_at ? new Date(b.starts_at).getTime() : Infinity;
         return aTime - bTime;
       }
+      // Gems first (mig 181), then blended within each tier — so a carousel reads
+      // curated-at-the-top even where notability is thin.
+      const tierDelta = carouselNotableTier(b) - carouselNotableTier(a);
+      if (tierDelta !== 0) return tierDelta;
       return carouselRankValue(b) - carouselRankValue(a);
     });
 
