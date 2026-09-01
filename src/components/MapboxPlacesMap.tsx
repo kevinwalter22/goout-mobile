@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef } from "react";
 import { View } from "react-native";
 import Mapbox, {
   MapView,
@@ -13,7 +13,7 @@ import { Colors } from "../config/theme";
 import { aggregateToPlaces, placePriority } from "../lib/mapPlaces";
 import { nearestRepId } from "../lib/mapTap";
 import { computePostableNow } from "../lib/postableNow";
-import { MAP_PIN_IMAGES } from "../utils/mapPinImages";
+import { MAP_PIN_IMAGES, RING_PIN_IMAGES } from "../utils/mapPinImages";
 import type { MapRegion } from "../utils/mapViewport";
 import type { ExploreItem } from "../types/database";
 
@@ -123,35 +123,9 @@ export function MapboxPlacesMap({
     [items, itemById, userLocation],
   );
 
-  // Ids of place-pins that actually RENDERED (survived native collision) at the
-  // current camera — queried on idle. null = "not queried yet / just changed" →
-  // show all postable rings (avoids a first-paint gap); after the query it's the
-  // real rendered set, so a postable ring declutters WITH its pin (no orphan).
-  const [renderedIds, setRenderedIds] = useState<Set<string> | null>(null);
-  useEffect(() => {
-    setRenderedIds(null); // new data → show all, next idle prunes to what rendered
-  }, [fc]);
-
-  const isSelected = useCallback(
-    (f: any) =>
-      !!selectedItemId &&
-      (f.properties.allIds as string).split(",").includes(selectedItemId),
-    [selectedItemId],
-  );
-
-  // Postable rings for NON-selected postable pins that are on-screen (renderedIds).
-  // No force-show: the pin lives in the collision-managed `places` layer and
-  // declutters normally; the ring is filtered to the same rendered set so it
-  // appears/disappears exactly with its pin.
-  const postableRingShape = useMemo(() => {
-    const features = fc.features.filter((f) => {
-      if (f.properties.postable !== true) return false;
-      if (renderedIds != null && !renderedIds.has(String(f.properties.id))) return false;
-      if (isSelected(f)) return false; // selected pin's ring is drawn by the selection layer
-      return true;
-    });
-    return features.length ? { type: "FeatureCollection" as const, features } : EMPTY_FC;
-  }, [fc, renderedIds, isSelected]);
+  // Postable pins carry their ring baked into the icon (RING_PIN_IMAGES), so icon+ring
+  // are ONE collision-managed symbol — they condense at the ring's radius like every
+  // other pin and can never desync. No separate ring layer / rendered-set bookkeeping.
 
   // The selected place (1 feature or empty) — carries `postable` so its ring picks
   // the right colour/width. The selected pin is force-shown (below) so it stays put
@@ -164,7 +138,7 @@ export function MapboxPlacesMap({
     return sel ? { type: "FeatureCollection" as const, features: [sel] } : EMPTY_FC;
   }, [fc, selectedItemId]);
 
-  const handleIdle = async (feat: any) => {
+  const handleIdle = (feat: any) => {
     const p: any = feat?.properties || {};
     const bounds = p.visibleBounds as [[number, number], [number, number]] | undefined; // [[neLng,neLat],[swLng,swLat]]
     const center = (feat.geometry?.coordinates as [number, number]) || [initialCenter.lng, initialCenter.lat];
@@ -180,25 +154,6 @@ export function MapboxPlacesMap({
       latitudeDelta: latDelta || 0.08,
       longitudeDelta: lngDelta || 0.08,
     });
-
-    // Tie postable rings to pins that actually rendered. Query the place-pin layer
-    // (pass [] filter, NOT null) for what survived collision at this camera;
-    // postableRingShape filters to this set so a ring declutters with its pin.
-    try {
-      const rendered = await (mapRef.current as any)?.queryRenderedFeaturesInRect(
-        [],
-        [],
-        ["place-pin"],
-      );
-      const ids = new Set<string>();
-      for (const f of rendered?.features ?? []) {
-        const id = (f?.properties as any)?.id;
-        if (id != null) ids.add(String(id));
-      }
-      setRenderedIds(ids);
-    } catch {
-      // best-effort — leave the last set (or show-all null)
-    }
   };
 
   const handlePlacePress = (e: any) => {
@@ -240,31 +195,14 @@ export function MapboxPlacesMap({
           animationDuration={0}
         />
 
-        {/* Bundled emoji-disc pins (static require assets — the reliable image path).
-            Referenced by name from the symbol layer via iconImage. */}
+        {/* Bundled emoji-disc pins + their postable (ring-baked) variants — static
+            require assets. Referenced by name from the symbol layer via iconImage. */}
         <Images
-          images={MAP_PIN_IMAGES}
+          images={{ ...MAP_PIN_IMAGES, ...RING_PIN_IMAGES }}
           onImageMissing={(name) => {
             if (__DEV__) console.warn("[map] missing pin image for", name);
           }}
         />
-
-        {/* Postable halo — drawn UNDER the pins, only for non-selected postable pins
-            that are currently rendered (renderedIds), so it declutters with its pin.
-            Normal-width purple; the selected postable pin's (bolder) ring comes from
-            the selection layer instead. */}
-        <ShapeSource id="postable-ring-src" shape={postableRingShape}>
-          <CircleLayer
-            id="postable-ring"
-            style={{
-              circleRadius: RING_RADIUS,
-              circleColor: RING_INNER,
-              circleStrokeColor: RING_PURPLE,
-              circleStrokeWidth: RING_WIDTH,
-              circlePitchAlignment: "map",
-            }}
-          />
-        </ShapeSource>
 
         <ShapeSource
           id="places"
@@ -279,8 +217,17 @@ export function MapboxPlacesMap({
           <SymbolLayer
             id="place-pin"
             style={{
-              iconImage: ["get", "icon"],
-              iconSize: 0.5, // 72px asset -> ~36pt pin
+              // Postable pins use the ring-baked variant → icon+ring are ONE symbol, so
+              // they collide/condense at the ring's radius and can never desync. Others
+              // use the plain pin. Base 72px & ringed 100px both render at iconSize 0.5,
+              // so the inner icon stays the same size; the ring adds ~4pt around it.
+              iconImage: [
+                "case",
+                ["==", ["get", "postable"], true],
+                ["concat", ["get", "icon"], "|ring"],
+                ["get", "icon"],
+              ],
+              iconSize: 0.5,
               iconAllowOverlap: false,
               iconOptional: false,
               iconPadding: 4,

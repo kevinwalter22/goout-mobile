@@ -47,4 +47,53 @@ export const MAP_PIN_IMAGES: Record<string, ImageSourcePropType> = {
   "📍": require("../../assets/mappins/1f4cd.png"),
 };
 
+// Postable variants: the same pin with the purple "postable now" ring baked in, so a
+// postable pin renders as ONE symbol (icon+ring) that collides atomically at the ring's
+// radius — no separate CircleLayer, no icon/ring desync. Keyed as `${emoji}|ring`; the
+// map layer builds the key via concat(icon, "|ring"). Ring geometry matches the old
+// CircleLayer exactly (radius 22 / width 3 screen, #7B3FF2). Auto-generated alongside
+// the base pins.
+export const RING_PIN_IMAGES: Record<string, ImageSourcePropType> = {
+  "🍺|ring": require("../../assets/mappins/ring/1f37a.png"),
+  "🍸|ring": require("../../assets/mappins/ring/1f378.png"),
+  "🍷|ring": require("../../assets/mappins/ring/1f377.png"),
+  "🍽️|ring": require("../../assets/mappins/ring/1f37d.png"),
+  "☕|ring": require("../../assets/mappins/ring/2615.png"),
+  "🥐|ring": require("../../assets/mappins/ring/1f950.png"),
+  "🍦|ring": require("../../assets/mappins/ring/1f366.png"),
+  "🦪|ring": require("../../assets/mappins/ring/1f9aa.png"),
+  "🪩|ring": require("../../assets/mappins/ring/1faa9.png"),
+  "🎭|ring": require("../../assets/mappins/ring/1f3ad.png"),
+  "🖼️|ring": require("../../assets/mappins/ring/1f5bc.png"),
+  "🏛️|ring": require("../../assets/mappins/ring/1f3db.png"),
+  "🎬|ring": require("../../assets/mappins/ring/1f3ac.png"),
+  "📚|ring": require("../../assets/mappins/ring/1f4da.png"),
+  "📖|ring": require("../../assets/mappins/ring/1f4d6.png"),
+  "🎵|ring": require("../../assets/mappins/ring/1f3b5.png"),
+  "💪|ring": require("../../assets/mappins/ring/1f4aa.png"),
+  "🧘|ring": require("../../assets/mappins/ring/1f9d8.png"),
+  "💆|ring": require("../../assets/mappins/ring/1f486.png"),
+  "💅|ring": require("../../assets/mappins/ring/1f485.png"),
+  "🏅|ring": require("../../assets/mappins/ring/1f3c5.png"),
+  "⚽|ring": require("../../assets/mappins/ring/26bd.png"),
+  "🎳|ring": require("../../assets/mappins/ring/1f3b3.png"),
+  "⛳|ring": require("../../assets/mappins/ring/26f3.png"),
+  "🎡|ring": require("../../assets/mappins/ring/1f3a1.png"),
+  "🏊|ring": require("../../assets/mappins/ring/1f3ca.png"),
+  "🌳|ring": require("../../assets/mappins/ring/1f333.png"),
+  "🥾|ring": require("../../assets/mappins/ring/1f97e.png"),
+  "🏞️|ring": require("../../assets/mappins/ring/1f3de.png"),
+  "🏕️|ring": require("../../assets/mappins/ring/1f3d5.png"),
+  "⛵|ring": require("../../assets/mappins/ring/26f5.png"),
+  "🏖️|ring": require("../../assets/mappins/ring/1f3d6.png"),
+  "🌾|ring": require("../../assets/mappins/ring/1f33e.png"),
+  "🧺|ring": require("../../assets/mappins/ring/1f9fa.png"),
+  "🌷|ring": require("../../assets/mappins/ring/1f337.png"),
+  "🗽|ring": require("../../assets/mappins/ring/1f5fd.png"),
+  "🛍️|ring": require("../../assets/mappins/ring/1f6cd.png"),
+  "🎪|ring": require("../../assets/mappins/ring/1f3aa.png"),
+  "📅|ring": require("../../assets/mappins/ring/1f4c5.png"),
+  "📍|ring": require("../../assets/mappins/ring/1f4cd.png"),
+};
+
 export const MAP_PIN_EMOJIS: string[] = Object.keys(MAP_PIN_IMAGES);
