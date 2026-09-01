@@ -789,6 +789,30 @@ describe("two-surface carousel curation (docs/intent_taxonomy.md §9)", () => {
     ]);
   });
 
+  it("ranks notable gems first even when a fine place has a higher blended (mig 181)", () => {
+    // A genuine gem (verdict `notable`) with the LOWER blended must still lead the
+    // higher-blended `fine` place — so a thin market reads curated-at-the-top.
+    const gem = makeScoredItem({
+      id: "bite-gem",
+      title: "Beloved Local Gem",
+      is_carousel_eligible: true,
+      blended_notability: 4.2,
+      model_verdict: "notable",
+      intents: [{ slug: "get_a_bite", name: "Get a Bite", is_primary: true }],
+    } as any);
+    const fineButHighGoogle = makeScoredItem({
+      id: "bite-fine",
+      title: "Fine High-Rated Spot",
+      is_carousel_eligible: true,
+      blended_notability: 4.9, // out-blends the gem, but only `fine`
+      model_verdict: "fine",
+      intents: [{ slug: "get_a_bite", name: "Get a Bite", is_primary: true }],
+    } as any);
+    const result = groupItemsByIntent([fineButHighGoogle, gem]);
+    const biteGroup = result.find((g) => g.id === "intent_get_a_bite");
+    expect(biteGroup!.items.map((i) => i.id)).toEqual(["bite-gem", "bite-fine"]);
+  });
+
   it("keeps restaurants and low-blend chains out of Grab a Drink", () => {
     const result = groupItemsByIntent([eventide, crumbl]);
     const drinkGroup = result.find((g) => g.id === "intent_grab_a_drink");

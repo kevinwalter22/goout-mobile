@@ -278,6 +278,9 @@ async function ensureCarouselEligibleItems(
 interface CarouselCuration {
   is_carousel_eligible: boolean | null;
   blended_notability: number | null;
+  // Denormalized model verdict (mig 181) — DISPLAY ORDER only; the grouping engine
+  // sorts notable-first above blended so carousels read gems-first.
+  model_verdict: string | null;
 }
 
 function attachCarouselCuration(item: any): any {
@@ -286,6 +289,7 @@ function attachCarouselCuration(item: any): any {
     ...item,
     is_carousel_eligible: row.is_carousel_eligible ?? null,
     blended_notability: row.blended_notability ?? null,
+    model_verdict: row.model_verdict ?? null,
   };
 }
 
