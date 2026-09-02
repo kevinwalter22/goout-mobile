@@ -11,12 +11,17 @@ const BUCKET = "posts";
 /** Upload the composited pin PNG; returns its public URL (or null on failure). */
 export async function uploadEventPinImage(
   localUri: string,
+  userId: string,
   eventId: string,
 ): Promise<string | null> {
   try {
     const res = await fetch(localUri);
     const bytes = await res.arrayBuffer();
-    const path = `event-pins/${eventId}.png`;
+    // MUST live under events/<userId>/ — the posts-bucket RLS INSERT policies only allow
+    // writes where the first path segment is the caller's uid OR is 'events' with the uid
+    // as the second segment (mig 075 + the events-folder policy). A bare event-pins/<id>.png
+    // matches neither and is silently denied. Keep the pin beside the event's cover photo.
+    const path = `events/${userId}/${eventId}-pin.png`;
     const { error } = await supabase.storage
       .from(BUCKET)
       .upload(path, bytes, { contentType: "image/png", upsert: true });
