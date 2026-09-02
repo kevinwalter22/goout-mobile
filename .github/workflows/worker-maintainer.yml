@@ -117,7 +117,7 @@ jobs:
       # Keep the produced report as a downloadable artifact (audit trail).
       - name: Upload report (audit trail)
         if: ${{ always() && hashFiles('chief-report.md') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: maintainer-report
           path: chief-report.md
