@@ -70,6 +70,9 @@ function toFeatureCollection(
   userLocation: { lat: number; lng: number } | null,
 ) {
   const places = aggregateToPlaces(items);
+  // Plan B: per-place photo-pin images (user-created events). Keyed by a stable name and
+  // registered into the Mapbox <Images> set so the symbol layer can reference them by name.
+  const photoImages: Record<string, { uri: string }> = {};
   const fc = {
     type: "FeatureCollection" as const,
     features: places.map((p) => {
@@ -78,6 +81,14 @@ function toFeatureCollection(
       const postable = repItem
         ? computePostableNow(repItem, userLocation).isPostable
         : false;
+      // A user-created event with a pre-rendered pin shows its PHOTO disc; register the
+      // remote image and reference it by name. Empty string => emoji pin (also the
+      // fallback while the pin is still rendering / not yet composited).
+      let pinImage = "";
+      if (p.pinImageUrl) {
+        pinImage = `pin:${p.id}`;
+        photoImages[pinImage] = { uri: p.pinImageUrl };
+      }
       return {
         type: "Feature" as const,
         id: p.id,
@@ -86,6 +97,8 @@ function toFeatureCollection(
           id: p.id,
           // icon = the emoji's bundled pin (or the fallback pin) — always a valid image key
           icon: iconFor(p.emoji),
+          // photo-pin image name (user events) or "" for emoji pins
+          pinImage,
           count: p.eventCount,
           // Higher priority is placed FIRST and therefore WINS native collision when
           // pins overlap. Events rank above venues, then by notability — so zoomed out
@@ -99,7 +112,7 @@ function toFeatureCollection(
       };
     }),
   };
-  return { fc, places };
+  return { fc, places, photoImages };
 }
 
 export function MapboxPlacesMap({
@@ -118,7 +131,7 @@ export function MapboxPlacesMap({
   // can pair with a pin tap and undo the selection (the "took 3 tries" feel).
   const lastPinTapRef = useRef(0);
 
-  const { fc } = useMemo(
+  const { fc, photoImages } = useMemo(
     () => toFeatureCollection(items, itemById, userLocation),
     [items, itemById, userLocation],
   );
@@ -198,7 +211,7 @@ export function MapboxPlacesMap({
         {/* Bundled emoji-disc pins + their postable (ring-baked) variants — static
             require assets. Referenced by name from the symbol layer via iconImage. */}
         <Images
-          images={{ ...MAP_PIN_IMAGES, ...RING_PIN_IMAGES }}
+          images={{ ...MAP_PIN_IMAGES, ...RING_PIN_IMAGES, ...photoImages }}
           onImageMissing={(name) => {
             if (__DEV__) console.warn("[map] missing pin image for", name);
           }}
@@ -223,6 +236,10 @@ export function MapboxPlacesMap({
               // so the inner icon stays the same size; the ring adds ~4pt around it.
               iconImage: [
                 "case",
+                // Plan B: user-created event with a rendered photo pin → its photo disc
+                ["!=", ["get", "pinImage"], ""],
+                ["get", "pinImage"],
+                // else emoji pin, postable variant carries the ring
                 ["==", ["get", "postable"], true],
                 ["concat", ["get", "icon"], "|ring"],
                 ["get", "icon"],
@@ -277,7 +294,12 @@ export function MapboxPlacesMap({
           <SymbolLayer
             id="selected-pin"
             style={{
-              iconImage: ["get", "icon"],
+              iconImage: [
+                "case",
+                ["!=", ["get", "pinImage"], ""],
+                ["get", "pinImage"],
+                ["get", "icon"],
+              ],
               iconSize: 0.5,
               iconAllowOverlap: true,
               iconIgnorePlacement: true,
