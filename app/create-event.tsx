@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   Alert,
   Image,
@@ -22,8 +22,6 @@ import { markFeedDirty } from "../src/lib/feedRefresh";
 import { useUnsavedChangesGuard } from "../src/hooks/useUnsavedChangesGuard";
 import { AddressAutocomplete, type AddressSuggestion } from "../src/components/AddressAutocomplete";
 import { setLocationPickerCallback } from "../src/utils/locationPickerStore";
-import { MapPinComposite } from "../src/components/MapPinComposite";
-import { uploadEventPinImage, setEventPinImageUrl } from "../src/lib/eventPin";
 
 export default function CreateEvent() {
   const insets = useSafeAreaInsets();
@@ -32,24 +30,9 @@ export default function CreateEvent() {
 
   // Cover image
   const [imageUri, setImageUri] = useState<string | null>(null);
-
-  // Plan B: render + cache this user event's photo-bubble pin once at create time.
-  const [pinPhotoUri, setPinPhotoUri] = useState<string | null>(null);
-  const [finishing, setFinishing] = useState(false);
-  const pinResolveRef = useRef<((uri: string | null) => void) | null>(null);
-
-  function renderPinPng(photoUri: string): Promise<string | null> {
-    return new Promise((resolve) => {
-      pinResolveRef.current = resolve;
-      setPinPhotoUri(photoUri); // mounts the hidden MapPinComposite → captures → resolves
-    });
-  }
-  function handlePinCaptured(uri: string | null) {
-    const resolve = pinResolveRef.current;
-    pinResolveRef.current = null;
-    setPinPhotoUri(null);
-    resolve?.(uri);
-  }
+  // Plan B photo-bubble pins are generated SERVER-SIDE (generate-event-pins cron) — the
+  // create flow just uploads the cover photo; the pin renders + caches hands-off within a
+  // couple minutes and the map swaps the emoji fallback for the photo.
 
   function showImageOptions() {
     Alert.alert(
@@ -117,7 +100,7 @@ export default function CreateEvent() {
   const [showEndPicker, setShowEndPicker] = useState(false);
 
   const hasLocation = selectedCoords !== null || address.trim().length > 0;
-  const canSubmit = title.trim().length > 0 && !loading && !finishing && hasLocation;
+  const canSubmit = title.trim().length > 0 && !loading && hasLocation;
 
   const isDirty =
     title.trim().length > 0 ||
@@ -151,23 +134,6 @@ export default function CreateEvent() {
     });
 
     if (result) {
-      // Plan B: composite + cache this event's photo-bubble pin (render-once). Best-effort —
-      // a pin failure never blocks creation; the map shows the emoji fallback until rendered.
-      if (imageUri) {
-        setFinishing(true);
-        try {
-          const pngUri = await renderPinPng(imageUri);
-          if (pngUri) {
-            const url = await uploadEventPinImage(
-              pngUri,
-              (result as any).created_by_user_id,
-              (result as any).id,
-            );
-            if (url) await setEventPinImageUrl((result as any).id, url);
-          }
-        } catch { /* pin is cosmetic */ }
-        setFinishing(false);
-      }
       const status = (result as any).review_status;
       if (status === "quarantined") {
         Alert.alert(
@@ -235,7 +201,7 @@ export default function CreateEvent() {
             }}
           >
             <Text style={{ color: "#fff", fontWeight: "600" }}>
-              {loading || finishing ? "Creating..." : "Create"}
+              {loading ? "Creating..." : "Create"}
             </Text>
           </Pressable>
         </View>
@@ -709,38 +675,6 @@ export default function CreateEvent() {
         {/* Bottom padding for scroll */}
         <View style={{ height: 40 }} />
       </ScrollView>
-
-      {/* Plan B: visible "creating your pin" overlay. MapPinComposite MUST render on-screen
-          for react-native-view-shot to capture real pixels — an off-screen / opacity:0 view
-          captures blank, which silently fails the composite. This also doubles as a signal
-          that the Plan B bundle is running: if you see this overlay, the new code is live. */}
-      {pinPhotoUri && (
-        <View
-          style={{
-            position: "absolute",
-            top: 0, left: 0, right: 0, bottom: 0,
-            alignItems: "center", justifyContent: "center",
-            backgroundColor: "rgba(0,0,0,0.45)",
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: colors.background,
-              borderWidth: 1,
-              borderColor: colors.border,
-              paddingVertical: 28,
-              paddingHorizontal: 36,
-              borderRadius: 20,
-              alignItems: "center",
-            }}
-          >
-            <MapPinComposite photoUri={pinPhotoUri} ringState="yours" onCapture={handlePinCaptured} />
-            <Text style={{ marginTop: 14, color: colors.text, fontWeight: "600" }}>
-              Creating your pin…
-            </Text>
-          </View>
-        </View>
-      )}
     </KeyboardAvoidingView>
   );
 }
