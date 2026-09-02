@@ -38,25 +38,40 @@ export function MapPinComposite({ photoUri, ringState = "yours", onCapture }: Pr
   const [loaded, setLoaded] = useState(false);
   const [done, setDone] = useState(false);
 
+  const finish = useCallback(
+    (uri: string | null) => {
+      setDone((d) => {
+        if (!d) onCapture(uri);
+        return true;
+      });
+    },
+    [onCapture],
+  );
+
   const capture = useCallback(async () => {
-    if (!viewShotRef.current || !loaded || done) return;
+    if (!viewShotRef.current || done) return;
     try {
       const uri = await viewShotRef.current.capture?.();
-      setDone(true);
-      onCapture(uri ?? null);
+      finish(uri ?? null);
     } catch {
-      setDone(true);
-      onCapture(null);
+      finish(null);
     }
-  }, [loaded, done, onCapture]);
+  }, [done, finish]);
 
   // Capture once the photo has loaded (a short delay lets the mask/ring paint first).
   useEffect(() => {
     if (loaded && !done) {
-      const t = setTimeout(capture, 400);
+      const t = setTimeout(capture, 350);
       return () => clearTimeout(t);
     }
   }, [loaded, done, capture]);
+
+  // Safety net: never hang the create flow. If the image never loads (or capture never
+  // fires), give up after 4s and emit null so the caller proceeds with the emoji fallback.
+  useEffect(() => {
+    const hard = setTimeout(() => finish(null), 4000);
+    return () => clearTimeout(hard);
+  }, [finish]);
 
   return (
     <ViewShot
