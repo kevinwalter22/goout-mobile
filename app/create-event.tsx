@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Alert,
   Image,
@@ -22,6 +22,8 @@ import { markFeedDirty } from "../src/lib/feedRefresh";
 import { useUnsavedChangesGuard } from "../src/hooks/useUnsavedChangesGuard";
 import { AddressAutocomplete, type AddressSuggestion } from "../src/components/AddressAutocomplete";
 import { setLocationPickerCallback } from "../src/utils/locationPickerStore";
+import { MapPinComposite } from "../src/components/MapPinComposite";
+import { uploadEventPinImage, setEventPinImageUrl } from "../src/lib/eventPin";
 
 export default function CreateEvent() {
   const insets = useSafeAreaInsets();
@@ -30,6 +32,24 @@ export default function CreateEvent() {
 
   // Cover image
   const [imageUri, setImageUri] = useState<string | null>(null);
+
+  // Plan B: render + cache this user event's photo-bubble pin once at create time.
+  const [pinPhotoUri, setPinPhotoUri] = useState<string | null>(null);
+  const [finishing, setFinishing] = useState(false);
+  const pinResolveRef = useRef<((uri: string | null) => void) | null>(null);
+
+  function renderPinPng(photoUri: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      pinResolveRef.current = resolve;
+      setPinPhotoUri(photoUri); // mounts the hidden MapPinComposite → captures → resolves
+    });
+  }
+  function handlePinCaptured(uri: string | null) {
+    const resolve = pinResolveRef.current;
+    pinResolveRef.current = null;
+    setPinPhotoUri(null);
+    resolve?.(uri);
+  }
 
   function showImageOptions() {
     Alert.alert(
@@ -97,7 +117,7 @@ export default function CreateEvent() {
   const [showEndPicker, setShowEndPicker] = useState(false);
 
   const hasLocation = selectedCoords !== null || address.trim().length > 0;
-  const canSubmit = title.trim().length > 0 && !loading && hasLocation;
+  const canSubmit = title.trim().length > 0 && !loading && !finishing && hasLocation;
 
   const isDirty =
     title.trim().length > 0 ||
@@ -131,6 +151,19 @@ export default function CreateEvent() {
     });
 
     if (result) {
+      // Plan B: composite + cache this event's photo-bubble pin (render-once). Best-effort —
+      // a pin failure never blocks creation; the map shows the emoji fallback until rendered.
+      if (imageUri) {
+        setFinishing(true);
+        try {
+          const pngUri = await renderPinPng(imageUri);
+          if (pngUri) {
+            const url = await uploadEventPinImage(pngUri, (result as any).id);
+            if (url) await setEventPinImageUrl((result as any).id, url);
+          }
+        } catch { /* pin is cosmetic */ }
+        setFinishing(false);
+      }
       const status = (result as any).review_status;
       if (status === "quarantined") {
         Alert.alert(
@@ -198,7 +231,7 @@ export default function CreateEvent() {
             }}
           >
             <Text style={{ color: "#fff", fontWeight: "600" }}>
-              {loading ? "Creating..." : "Create"}
+              {loading || finishing ? "Creating..." : "Create"}
             </Text>
           </Pressable>
         </View>
@@ -672,6 +705,17 @@ export default function CreateEvent() {
         {/* Bottom padding for scroll */}
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Plan B: hidden off-screen renderer that composites the event photo into a circular
+          pin PNG once (react-native-view-shot), then handlePinCaptured uploads + caches it. */}
+      {pinPhotoUri && (
+        <View
+          style={{ position: "absolute", left: -1000, top: -1000, opacity: 0 }}
+          pointerEvents="none"
+        >
+          <MapPinComposite photoUri={pinPhotoUri} ringState="yours" onCapture={handlePinCaptured} />
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
