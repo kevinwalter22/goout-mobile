@@ -88,8 +88,37 @@ jobs:
             | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{process.stdout.write(JSON.parse(d)[0].value)}catch{process.exit(1)}})")
           if [ -z "$KEY" ]; then echo "::error::could not read service_role_key from prod app_config"; exit 1; fi
           echo "::add-mask::$KEY"
-          # 1. Score the full catalog (cached; loop until nothing left to score).
-          for i in $(seq 1 30); do
+          MGMT="https://api.supabase.com/v1/projects/${PROD_REF}/database/query"
+          # 0. ONE-TIME corrected re-score (Wave 2 model-town fix). score-notability now
+          #    judges each item by ITS OWN town; existing prod verdicts were cached under the
+          #    buggy region-blind town, and force=false alone will NOT correct them. So on
+          #    this promotion we clear the cached ACTIVITY verdicts for active regions once —
+          #    the score loop below then re-scores them with corrected towns, and the blend
+          #    recomputes carousels to match what was verified on staging. Guarded by an
+          #    app_config marker so it runs ONLY on this promotion, never on later deploys
+          #    (source_signature caching keeps those cheap). Clearing model_notability does
+          #    NOT change live carousels — is_carousel_eligible/carousel_rank_score only flip
+          #    when the blend re-runs at the end, so carousels transition old→corrected
+          #    atomically at deploy-end, never empty mid-flight.
+          RESCORE_MARK=$(curl -s -X POST "$MGMT" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H "Content-Type: application/json" \
+            -d "{\"query\":\"select value from app_config where key = 'wave2_corrected_rescore_done'\"}" \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const v=JSON.parse(d);process.stdout.write(v&&v[0]?String(v[0].value):'')}catch{process.stdout.write('')}})")
+          if [ -z "$RESCORE_MARK" ]; then
+            echo "One-time Wave-2 corrected re-score: clearing cached activity verdicts for active regions…"
+            DEL=$(curl -s -X POST "$MGMT" \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H "Content-Type: application/json" \
+              -d "{\"query\":\"delete from model_notability mn using explore_items ei, region r where mn.item_id = ei.id and ei.region_id = r.id and r.is_active and ei.kind::text = 'activity'\"}" \
+              -o /dev/null -w "%{http_code}")
+            echo "clear cached activity verdicts: HTTP $DEL"
+            [ "$DEL" -ge 400 ] && { echo "::error::verdict clear failed"; exit 1; } || true
+          else
+            echo "Wave-2 corrected re-score already applied ($RESCORE_MARK) — incremental scoring only."
+          fi
+          # 1. Score the catalog (loop until nothing left). After the one-time clear this
+          #    re-scores the cleared activities with CORRECTED towns; on later deploys it is
+          #    the cheap incremental pass (already-scored => scored=0 => breaks pass 1).
+          for i in $(seq 1 40); do
             resp=$(curl -s -X POST "$PROD_URL/functions/v1/score-notability" \
               -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{"limit":300}')
             scored=$(echo "$resp" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{process.stdout.write(String(JSON.parse(d).scored))}catch{process.stdout.write('ERR')}})")
@@ -98,14 +127,22 @@ jobs:
             [ "$scored" = "0" ] && break
             sleep 2
           done
-          # 2. Run the de-biased blend for ALL active regions (was Portland-only — which
-          #    is why Warwick/Potsdam carousels never populated). One RPC loops them.
+          # 2. Run the de-biased, distance-aware blend for ALL active regions (was Portland-
+          #    only — why Warwick/Potsdam carousels never populated). One RPC loops them.
           code=$(curl -s -X POST "$PROD_URL/rest/v1/rpc/refresh_all_carousel_eligibility" \
             -H "Authorization: Bearer $KEY" -H "apikey: $KEY" -H "Content-Type: application/json" \
             -d "{}" -o /dev/null -w "%{http_code}")
           echo "blend all regions: HTTP $code"
           [ "$code" -ge 400 ] && { echo "::error::blend (all regions) failed"; exit 1; } || true
-          echo "✅ Prod curation bootstrapped: catalog scored + carousels blended."
+          # 3. Mark the one-time corrected re-score done so later deploys skip the clear.
+          if [ -z "$RESCORE_MARK" ]; then
+            curl -s -X POST "$MGMT" \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H "Content-Type: application/json" \
+              -d "{\"query\":\"insert into app_config(key,value) select 'wave2_corrected_rescore_done', now()::text where not exists (select 1 from app_config where key = 'wave2_corrected_rescore_done')\"}" \
+              -o /dev/null
+            echo "marked Wave-2 corrected re-score complete"
+          fi
+          echo "✅ Prod curation bootstrapped: catalog scored (corrected towns) + carousels blended."
 
       - uses: actions/setup-node@v4
         with:
