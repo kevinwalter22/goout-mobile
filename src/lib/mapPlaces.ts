@@ -26,6 +26,9 @@ export type PlaceFeature = {
   hasActivity: boolean; // is this also a browsable venue
   notability: number; // max notability at the place (venue LOD)
   itemIds: string[]; // every item at this place (for the tap sheet)
+  // Plan B: pre-rendered circular photo-pin URL for a user-created event (else null →
+  // emoji pin). Set only when the representative item is user-made and has been composited.
+  pinImageUrl: string | null;
 };
 
 const nota = (it: ExploreItem): number => (it as any).notability_score ?? 0;
@@ -64,6 +67,11 @@ export function aggregateToPlaces(items: ExploreItem[]): PlaceFeature[] {
     let emoji = emojiForItem(rep);
     if (repIsUserMade && emoji === "📅") emoji = "📍";
 
+    // Plan B: a user-created event with a pre-rendered pin shows its PHOTO disc; otherwise
+    // the emoji pin (also the fallback while the pin is still rendering). Only user-made
+    // items carry a pin image — ingested places always keep emoji pins.
+    const pinImageUrl = repIsUserMade ? ((rep as any).pin_image_url ?? null) : null;
+
     out.push({
       id: key,
       lat: rep.lat as number,
@@ -75,6 +83,7 @@ export function aggregateToPlaces(items: ExploreItem[]): PlaceFeature[] {
       hasActivity: activities.length > 0,
       notability: group.reduce((m, i) => Math.max(m, nota(i)), 0),
       itemIds: group.map((i) => i.id),
+      pinImageUrl,
     });
   }
   return out;

@@ -30,6 +30,9 @@ export default function CreateEvent() {
 
   // Cover image
   const [imageUri, setImageUri] = useState<string | null>(null);
+  // Plan B photo-bubble pins are generated SERVER-SIDE (generate-event-pins cron) — the
+  // create flow just uploads the cover photo; the pin renders + caches hands-off within a
+  // couple minutes and the map swaps the emoji fallback for the photo.
 
   function showImageOptions() {
     Alert.alert(
