@@ -158,7 +158,11 @@ export default function CreateEvent() {
         try {
           const pngUri = await renderPinPng(imageUri);
           if (pngUri) {
-            const url = await uploadEventPinImage(pngUri, (result as any).id);
+            const url = await uploadEventPinImage(
+              pngUri,
+              (result as any).created_by_user_id,
+              (result as any).id,
+            );
             if (url) await setEventPinImageUrl((result as any).id, url);
           }
         } catch { /* pin is cosmetic */ }

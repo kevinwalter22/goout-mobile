@@ -58,10 +58,11 @@ export function MapPinComposite({ photoUri, ringState = "yours", onCapture }: Pr
     }
   }, [done, finish]);
 
-  // Capture once the photo has loaded (a short delay lets the mask/ring paint first).
+  // Capture once the photo has loaded — 500ms (the delay the working DualCameraComposite
+  // uses) so the masked photo + ring are fully painted before ViewShot captures.
   useEffect(() => {
     if (loaded && !done) {
-      const t = setTimeout(capture, 350);
+      const t = setTimeout(capture, 500);
       return () => clearTimeout(t);
     }
   }, [loaded, done, capture]);
