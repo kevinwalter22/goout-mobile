@@ -706,14 +706,35 @@ export default function CreateEvent() {
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      {/* Plan B: hidden off-screen renderer that composites the event photo into a circular
-          pin PNG once (react-native-view-shot), then handlePinCaptured uploads + caches it. */}
+      {/* Plan B: visible "creating your pin" overlay. MapPinComposite MUST render on-screen
+          for react-native-view-shot to capture real pixels — an off-screen / opacity:0 view
+          captures blank, which silently fails the composite. This also doubles as a signal
+          that the Plan B bundle is running: if you see this overlay, the new code is live. */}
       {pinPhotoUri && (
         <View
-          style={{ position: "absolute", left: -1000, top: -1000, opacity: 0 }}
-          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: 0, left: 0, right: 0, bottom: 0,
+            alignItems: "center", justifyContent: "center",
+            backgroundColor: "rgba(0,0,0,0.45)",
+          }}
         >
-          <MapPinComposite photoUri={pinPhotoUri} ringState="yours" onCapture={handlePinCaptured} />
+          <View
+            style={{
+              backgroundColor: colors.background,
+              borderWidth: 1,
+              borderColor: colors.border,
+              paddingVertical: 28,
+              paddingHorizontal: 36,
+              borderRadius: 20,
+              alignItems: "center",
+            }}
+          >
+            <MapPinComposite photoUri={pinPhotoUri} ringState="yours" onCapture={handlePinCaptured} />
+            <Text style={{ marginTop: 14, color: colors.text, fontWeight: "600" }}>
+              Creating your pin…
+            </Text>
+          </View>
         </View>
       )}
     </KeyboardAvoidingView>
