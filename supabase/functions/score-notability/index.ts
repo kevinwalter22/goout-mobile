@@ -59,12 +59,17 @@ function parseArray(text: string): any[] {
 
 async function scoreBatch(
   apiKey: string,
-  town: string,
-  batch: Array<{ title: string; sub: string }>,
+  batch: Array<{ title: string; sub: string; town: string }>,
 ): Promise<{ arr: any[]; inTok: number; outTok: number }> {
-  const list = batch.map((it, i) => `${i + 1}. ${it.title} | ${it.sub}`).join("\n");
+  // Each line carries its OWN town, so items from different regions in one batch are
+  // each judged in their own town. (Previously a single run-level town — items[0]'s —
+  // was applied to the whole run; region-blind runs then scored e.g. a Portland place
+  // as if it were in Chester NY, and the hallucination guard denied it `notable`.)
+  const list = batch
+    .map((it, i) => `${i + 1}. ${it.title} | ${it.sub} | ${it.town || "unknown town"}`)
+    .join("\n");
   const user =
-    `Town: ${town}.\nJudge these ${batch.length} items. Return ONLY a JSON array of exactly ${batch.length} objects in the SAME order, no prose.\n\n${list}`;
+    `Judge these ${batch.length} items. Each line is: "N. Name | subcategory | town". Judge each item BY ITS OWN TOWN (the third field) — would a knowledgeable local in THAT town recommend it. Return ONLY a JSON array of exactly ${batch.length} objects in the SAME order, no prose.\n\n${list}`;
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -126,7 +131,6 @@ Deno.serve(async (req) => {
 
     const started = Date.now();
     let scored = 0, inTok = 0, outTok = 0;
-    const town = items[0]?.town || "this town";
     const upserts: any[] = [];
 
     for (let b = 0; b < items.length; b += batchSize) {
@@ -134,7 +138,7 @@ Deno.serve(async (req) => {
       const batch = items.slice(b, b + batchSize);
       let res;
       try {
-        res = await scoreBatch(apiKey, town, batch.map((it: any) => ({ title: it.title, sub: it.sub_category ?? "" })));
+        res = await scoreBatch(apiKey, batch.map((it: any) => ({ title: it.title, sub: it.sub_category ?? "", town: it.town ?? "" })));
       } catch (e) {
         captureEdgeException(e, { fn: "score-notability", batch: b });
         continue; // skip a bad batch; it will be re-selected next run
@@ -162,9 +166,15 @@ Deno.serve(async (req) => {
     if (!dryRun && upserts.length > 0) {
       const { error: upErr } = await supabase.from("model_notability").upsert(upserts, { onConflict: "item_id" });
       if (upErr) return json({ error: `write failed: ${upErr.message}` }, 500);
-      // Best-effort budget accounting (cents), non-fatal.
+      // Best-effort budget accounting (cents), non-fatal. The supabase-js builder is a
+      // thenable that RESOLVES with { error } (it does not reject), and on the Deno
+      // `npm:` build it has no `.catch` method — `.catch(...)` there throws
+      // "supabase.rpc(...).catch is not a function" AFTER the upsert already committed,
+      // turning every real (non-dry-run) run into a 500. Guard with try/catch instead.
       const cents = Math.ceil((inTok / 1e6 * 5 + outTok / 1e6 * 25) * 100);
-      await supabase.rpc("increment_api_usage", { p_service: BUDGET_SERVICE, p_count: cents }).catch(() => {});
+      try {
+        await supabase.rpc("increment_api_usage", { p_service: BUDGET_SERVICE, p_count: cents });
+      } catch { /* budget accounting is non-fatal */ }
     }
 
     return json({

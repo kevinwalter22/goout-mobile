@@ -191,10 +191,27 @@ function isCarouselExcluded(item: ScoredItem): boolean {
 function carouselRankValue(item: ScoredItem): number {
   const eligibility = (item as any).is_carousel_eligible;
   if (eligibility !== null && eligibility !== undefined) {
+    // Proximity-weighted local-first score (mig 182): blended notability decayed by
+    // distance-from-town-center, per-intent decay (food/drink tight, destinations wide).
+    // Falls back to raw blended for rows not yet re-blended under 182.
+    const rankScore = (item as any).carousel_rank_score;
+    if (typeof rankScore === "number") return rankScore;
     const blended = (item as any).blended_notability;
     return typeof blended === "number" ? blended : -Infinity;
   }
   return item.notability_score ?? 0;
+}
+
+/**
+ * Notable-first display tier (mig 181): genuine gems (model verdict `notable`) lead the
+ * carousel; real-but-ordinary places (`fine`/`unsure`) trail. Sorted ABOVE blended so a
+ * thin market (Potsdam) still reads curated-at-the-top — a padding item can never sit
+ * above a gem, even if its Google rating out-blends the gem's. `model_verdict` is
+ * denormalized onto the row by refresh_carousel_eligibility; null (uncurated intents/
+ * regions, or pre-blend) → tier 0, which leaves the old blended-only order untouched.
+ */
+function carouselNotableTier(item: ScoredItem): number {
+  return (item as any).model_verdict === "notable" ? 1 : 0;
 }
 
 /**
@@ -241,6 +258,10 @@ export function groupItemsByIntent(
         const bTime = b.starts_at ? new Date(b.starts_at).getTime() : Infinity;
         return aTime - bTime;
       }
+      // Gems first (mig 181), then blended within each tier — so a carousel reads
+      // curated-at-the-top even where notability is thin.
+      const tierDelta = carouselNotableTier(b) - carouselNotableTier(a);
+      if (tierDelta !== 0) return tierDelta;
       return carouselRankValue(b) - carouselRankValue(a);
     });
 

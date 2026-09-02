@@ -18,6 +18,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { useTheme } from "../src/contexts/ThemeContext";
 import { Colors } from "../src/config/theme";
 import { useCreateEvent } from "../src/hooks/useCreateEvent";
+import { markFeedDirty } from "../src/lib/feedRefresh";
 import { useUnsavedChangesGuard } from "../src/hooks/useUnsavedChangesGuard";
 import { AddressAutocomplete, type AddressSuggestion } from "../src/components/AddressAutocomplete";
 import { setLocationPickerCallback } from "../src/utils/locationPickerStore";
@@ -138,6 +139,7 @@ export default function CreateEvent() {
           [{ text: "OK", onPress: () => { allowNextBack(); router.back(); } }],
         );
       } else {
+        markFeedDirty(); // so the new event shows on the explore feed without a manual reload
         allowNextBack();
         router.back();
       }

@@ -232,6 +232,13 @@ export function ExploreMapView({
         const timeRange = getTimeWindowRange();
         const startDate = timeRange?.start || nowDate;
         const endDate = timeRange?.end || horizonEnd;
+        // Never show already-over events on the map: clamp the dated-event lower bound
+        // to now-3h (the same grace list/card use), even when the window (e.g. "today")
+        // starts at midnight. Otherwise an event that started AND ended earlier today
+        // lingers on the map while list/card correctly drop it.
+        const eventStartFloor = new Date(
+          Math.max(startDate.getTime(), Date.now() - 3 * 60 * 60 * 1000),
+        );
 
         // Category filter
         const categoryValues = getCategoryFilter();
@@ -329,7 +336,7 @@ export function ExploreMapView({
             .eq("kind", "event")
             .is("deleted_at", null)
             .eq("is_admin_suppressed", false)
-            .gte("starts_at", startDate.toISOString())
+            .gte("starts_at", eventStartFloor.toISOString())
             .lte("starts_at", endDate.toISOString())
             .not("lat", "is", null)
             .not("lng", "is", null)
@@ -392,10 +399,36 @@ export function ExploreMapView({
           activities = activityData || [];
         }
 
+        // The creator's OWN items always appear on their map, regardless of the time
+        // window and eligibility gates that scope the general fetch — a user must see
+        // what they just created. (A "starts now" event falls just before the map's
+        // starts_at lower bound by the time you look, so it would otherwise never show,
+        // even though list/card display it via their 3h grace.) Still scoped to the
+        // viewport + the active kind filter; dedup drops any overlap with the fetches.
+        let ownItems: any[] = [];
+        if (userId) {
+          let ownQuery = supabase
+            .from("explore_items")
+            .select("*")
+            .eq("created_by_user_id", userId)
+            .is("deleted_at", null)
+            .not("lat", "is", null)
+            .not("lng", "is", null);
+          if (kindFilter === "event" || kindFilter === "activity") {
+            ownQuery = ownQuery.eq("kind", kindFilter);
+          }
+          // Match the list/card time rule so an OVER event doesn't linger on the map:
+          // undated items always show; dated ones only from the 3h past-grace onward.
+          const ownGraceCutoff = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+          ownQuery = ownQuery.or(`starts_at.is.null,starts_at.gte.${ownGraceCutoff}`);
+          const { data: ownData } = await applyBbox(ownQuery).limit(200);
+          ownItems = ownData || [];
+        }
+
         // Deduplicate — recurring items can match both the dated-event and
         // recurring queries, and the activities query can overlap the recurring one.
         const seen = new Set<string>();
-        const deduped = [...events, ...activities].filter((item) => {
+        const deduped = [...events, ...activities, ...ownItems].filter((item) => {
           if (seen.has(item.id)) return false;
           seen.add(item.id);
           return true;

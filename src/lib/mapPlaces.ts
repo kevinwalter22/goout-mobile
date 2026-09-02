@@ -58,11 +58,17 @@ export function aggregateToPlaces(items: ExploreItem[]): PlaceFeature[] {
       [...activities].sort(byNotaDesc)[0] ?? [...events].sort(byNotaDesc)[0];
     if (!rep) continue;
 
+    // User-created items fall back to a clean location pin — NOT the Twemoji calendar
+    // 📅, which always renders "JUL 17". (Cover-photo pins need Option B; see PR notes.)
+    const repIsUserMade = !!(rep as any).created_by_user_id;
+    let emoji = emojiForItem(rep);
+    if (repIsUserMade && emoji === "📅") emoji = "📍";
+
     out.push({
       id: key,
       lat: rep.lat as number,
       lng: rep.lng as number,
-      emoji: emojiForItem(rep),
+      emoji,
       title: rep.title,
       eventCount,
       hasEvents: eventCount > 0,

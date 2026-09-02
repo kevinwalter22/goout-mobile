@@ -278,6 +278,12 @@ async function ensureCarouselEligibleItems(
 interface CarouselCuration {
   is_carousel_eligible: boolean | null;
   blended_notability: number | null;
+  // Denormalized model verdict (mig 181) — DISPLAY ORDER only; the grouping engine
+  // sorts notable-first above the rank score so carousels read gems-first.
+  model_verdict: string | null;
+  // Proximity-weighted local-first carousel score (mig 182) — drives the eligibility
+  // cut + carousel display order (under the notable-first tier).
+  carousel_rank_score: number | null;
 }
 
 function attachCarouselCuration(item: any): any {
@@ -286,6 +292,8 @@ function attachCarouselCuration(item: any): any {
     ...item,
     is_carousel_eligible: row.is_carousel_eligible ?? null,
     blended_notability: row.blended_notability ?? null,
+    model_verdict: row.model_verdict ?? null,
+    carousel_rank_score: row.carousel_rank_score ?? null,
   };
 }
 
