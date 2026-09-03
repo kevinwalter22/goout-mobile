@@ -90,9 +90,24 @@ export default function Profile() {
     }, [lastSyncedAt, needsSync, contactsSyncEnabled])
   );
 
+  // Returning to the profile while the check-in map is open (back from a post/settings/new
+  // post) lands at the top with the scroll locked — strands the user. Restore the map into
+  // view on focus. (scrollToEnd is programmatic, so it works even with scrollEnabled=false.)
+  useFocusEffect(
+    useCallback(() => {
+      if (postsView === "map") {
+        const t = setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: false }), 80);
+        return () => clearTimeout(t);
+      }
+    }, [postsView])
+  );
+
   // Listen for scroll-to-top events
   useEffect(() => {
     const handleScrollToTop = () => {
+      // Explicit "go to top" (tab re-tap) also exits the map back to the grid, so the scroll
+      // isn't left locked at the top.
+      setPostsView("grid");
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     };
 
