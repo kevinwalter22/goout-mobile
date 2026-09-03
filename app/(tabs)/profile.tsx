@@ -90,10 +90,18 @@ export default function Profile() {
     }, [lastSyncedAt, needsSync, contactsSyncEnabled])
   );
 
+  // Option B: back always lands on the gallery. Reset to the grid whenever the profile
+  // refocuses (return from a post / settings / Explore tab), so a returning user never lands
+  // in the inline map view — the simple, robust "no locked-map trap" guarantee.
+  useFocusEffect(
+    useCallback(() => {
+      setPostsView("grid");
+    }, [])
+  );
+
   // Listen for scroll-to-top events
   useEffect(() => {
     const handleScrollToTop = () => {
-      // Tab re-tap also closes the check-in map overlay, back to the profile.
       setPostsView("grid");
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     };
@@ -270,25 +278,6 @@ export default function Profile() {
     </View>
   );
 
-  // Compact identity strip shown in map mode so it still reads as "your profile".
-  const renderCompactProfile = () => (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        paddingHorizontal: 16,
-        paddingTop: 10,
-        paddingBottom: 6,
-      }}
-    >
-      <Avatar avatarUrl={profile?.avatar_url} size={40} />
-      <Text style={{ fontSize: 16, fontWeight: "700", color: colors.text }}>
-        {profile?.username || "You"}
-      </Text>
-    </View>
-  );
-
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Header with logo and settings */}
@@ -314,8 +303,6 @@ export default function Profile() {
         </Pressable>
       </View>
 
-      {/* GALLERY MODE — the full scrollable profile. */}
-      {postsView !== "map" && (
       <ScrollView ref={scrollViewRef} style={{ flex: 1 }}>
         <View style={{ padding: 24 }}>
         <View style={{ gap: 24 }}>
@@ -667,7 +654,7 @@ export default function Profile() {
           </View>
         )}
 
-        {/* Posts — gallery (map view is the top-level branch below, mirroring Explore). */}
+        {/* Posts — gallery ↔ inline map toggle (Option B: the map lives inline in this scroll). */}
         <View style={{ marginTop: 32 }}>
           {renderPostsHeader()}
 
@@ -677,6 +664,10 @@ export default function Profile() {
             <Text style={{ textAlign: "center", color: colors.textSecondary, paddingVertical: 32 }}>
               No posts yet. Check in at an event to create your first post!
             </Text>
+          ) : postsView === "map" ? (
+            /* Option B: inline mini-map. Fixed height (not full-screen), lives in the scroll.
+               Back always lands on the gallery (reset-on-focus below), so no locked-map trap. */
+            <PostsMap posts={ownMapPosts} height={440} emptyLabel="No check-ins with a location yet" />
           ) : (
             <View
               style={{
@@ -711,17 +702,6 @@ export default function Profile() {
         </View>
       </View>
       </ScrollView>
-      )}
-
-      {/* MAP MODE — mirrors the Explore list/map switch: a fixed body (no ScrollView) so the
-          map owns pan/zoom and returning to the profile in map mode re-shows it correctly. */}
-      {postsView === "map" && (
-        <View style={{ flex: 1 }}>
-          {renderCompactProfile()}
-          <View style={{ paddingHorizontal: 16 }}>{renderPostsHeader()}</View>
-          <PostsMap posts={ownMapPosts} fill emptyLabel="No check-ins with a location yet" />
-        </View>
-      )}
 
       {/* Modals */}
       <UserSearchSheet
