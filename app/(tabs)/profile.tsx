@@ -103,11 +103,12 @@ export default function Profile() {
   useFocusEffect(
     useCallback(() => {
       if (mapReturnRef.current) {
+        // Returning from a post opened out of the map: restore the map body + re-open that
+        // place's sheet. It's a fixed body, so it's framed by construction — no scroll to fix.
         const placeId = mapReturnRef.current;
         mapReturnRef.current = null;
         setPostsView("map");
         setMapSelId(placeId);
-        setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 60);
       } else {
         setPostsView("grid");
         setMapSelId(null);
@@ -275,14 +276,7 @@ export default function Profile() {
         {(["grid", "map"] as const).map((v) => (
           <Pressable
             key={v}
-            onPress={() => {
-              setPostsView(v);
-              // Frame the inline map in the viewport before the scroll locks, so panning
-              // starts on a full map (not a sliver). setTimeout lets the map lay out first.
-              if (v === "map") {
-                setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 60);
-              }
-            }}
+            onPress={() => setPostsView(v)}
             accessibilityRole="button"
             accessibilityLabel={v === "grid" ? "Grid view" : "Map view"}
             style={{
@@ -328,9 +322,26 @@ export default function Profile() {
         </Pressable>
       </View>
 
-      {/* Scroll locks in map view so pan/zoom gestures go to the map (not the page). The
-          reset-on-focus above handles the return trip — back always lands on the gallery. */}
-      <ScrollView ref={scrollViewRef} style={{ flex: 1 }} scrollEnabled={postsView !== "map"}>
+      {postsView === "map" ? (
+        /* Map mode mirrors the Explore tab: a fixed sibling body (the "Your Posts" toggle bar +
+           a full-bleed map), NOT nested in the scroll. Nothing to scroll means nothing to get
+           stuck on nav-return, and the map is framed by construction — the robust fix for the
+           "back lands at the top" issue. Grid mode below is the normal scrollable profile. */
+        <View style={{ flex: 1 }}>
+          <View style={{ paddingHorizontal: 24, paddingTop: 16 }}>{renderPostsHeader()}</View>
+          <PostsMap
+            posts={ownMapPosts}
+            fill
+            emptyLabel="No check-ins with a location yet"
+            selectedPlaceId={mapSelId}
+            onSelectedPlaceIdChange={setMapSelId}
+            onDrillToPost={(placeId) => {
+              mapReturnRef.current = placeId;
+            }}
+          />
+        </View>
+      ) : (
+      <ScrollView ref={scrollViewRef} style={{ flex: 1 }}>
         <View style={{ padding: 24 }}>
         <View style={{ gap: 24 }}>
           {/* Avatar with upload button */}
@@ -681,7 +692,7 @@ export default function Profile() {
           </View>
         )}
 
-        {/* Posts — gallery ↔ inline map toggle (Option B: the map lives inline in this scroll). */}
+        {/* Posts — grid gallery. The map is the fixed sibling body above (Explore-mirror). */}
         <View style={{ marginTop: 32 }}>
           {renderPostsHeader()}
 
@@ -691,19 +702,6 @@ export default function Profile() {
             <Text style={{ textAlign: "center", color: colors.textSecondary, paddingVertical: 32 }}>
               No posts yet. Check in at an event to create your first post!
             </Text>
-          ) : postsView === "map" ? (
-            /* Option B: inline mini-map. Fixed height (not full-screen), lives in the scroll.
-               Back always lands on the gallery (reset-on-focus below), so no locked-map trap. */
-            <PostsMap
-              posts={ownMapPosts}
-              height={440}
-              emptyLabel="No check-ins with a location yet"
-              selectedPlaceId={mapSelId}
-              onSelectedPlaceIdChange={setMapSelId}
-              onDrillToPost={(placeId) => {
-                mapReturnRef.current = placeId;
-              }}
-            />
           ) : (
             <View
               style={{
@@ -738,6 +736,7 @@ export default function Profile() {
         </View>
       </View>
       </ScrollView>
+      )}
 
       {/* Modals */}
       <UserSearchSheet
