@@ -114,6 +114,10 @@ export default function Profile() {
         InteractionManager.runAfterInteractions(() => {
           scrollViewRef.current?.scrollToEnd({ animated: false });
           setMapSelId(placeId);
+          // The first pass can fall a hair short while the screen + re-opening sheet settle, so
+          // the map lands slightly lower than on a fresh toggle. Re-frame once more after settle
+          // so back-nav lands on the EXACT same spot as pressing the toggle.
+          setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: false }), 180);
         });
       } else {
         setPostsView("grid");
