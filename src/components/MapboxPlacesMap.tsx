@@ -11,7 +11,6 @@ import Mapbox, {
 } from "@rnmapbox/maps";
 import { Colors } from "../config/theme";
 import { aggregateToPlaces, placePriority } from "../lib/mapPlaces";
-import type { PostPlace } from "../lib/mapPosts";
 import { nearestRepId } from "../lib/mapTap";
 import { computePostableNow } from "../lib/postableNow";
 import { MAP_PIN_IMAGES, RING_PIN_IMAGES } from "../utils/mapPinImages";
@@ -60,31 +59,7 @@ type Props = {
    * list + card views (real RN views) keep their double-tap-to-camera.
    */
   onCameraShortcut?: (item: ExploreItem) => void;
-  /** Social map: check-in place bubbles (friends+you), rendered as a separate photo layer. */
-  postPlaces?: PostPlace[];
-  /** Fired when a check-in bubble is tapped — opens the who's-been-here sheet. */
-  onSelectPostPlace?: (place: PostPlace) => void;
 };
-
-// GeoJSON for check-in places (one bubble per cluster; the most-recent post's photo pin +
-// a count). Its own layer because posts sit at jittery GPS coords, not venue coordinates.
-function toPostFeatureCollection(postPlaces: PostPlace[]) {
-  const images: Record<string, { uri: string }> = {};
-  const features = postPlaces.map((p) => {
-    let pinImage = "";
-    if (p.pinImageUrl) {
-      pinImage = `postpin:${p.id}`;
-      images[pinImage] = { uri: p.pinImageUrl };
-    }
-    return {
-      type: "Feature" as const,
-      id: p.id,
-      geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
-      properties: { id: p.id, pinImage, count: p.count },
-    };
-  });
-  return { fc: { type: "FeatureCollection" as const, features }, images };
-}
 
 // GeoJSON FeatureCollection of PLACES (one feature per venue/coordinate). Each
 // feature carries `postable` — whether the user is at the place AND its
@@ -150,8 +125,6 @@ export function MapboxPlacesMap({
   onRegionChange,
   onSelectItem,
   itemById,
-  postPlaces = [],
-  onSelectPostPlace,
 }: Props) {
   const mapRef = useRef<MapView>(null);
   // Timestamp of the last pin tap — used to swallow the map's deselect-on-tap that
@@ -162,17 +135,6 @@ export function MapboxPlacesMap({
     () => toFeatureCollection(items, itemById, userLocation),
     [items, itemById, userLocation],
   );
-
-  // Social map: check-in place bubbles (photo pin + count) on their own layer.
-  const { fc: postFc, images: postImages } = useMemo(
-    () => toPostFeatureCollection(postPlaces),
-    [postPlaces],
-  );
-  const postPlaceById = useMemo(() => {
-    const m = new Map<string, PostPlace>();
-    for (const p of postPlaces) m.set(p.id, p);
-    return m;
-  }, [postPlaces]);
 
   // Postable pins carry their ring baked into the icon (RING_PIN_IMAGES), so icon+ring
   // are ONE collision-managed symbol — they condense at the ring's radius like every
@@ -214,14 +176,6 @@ export function MapboxPlacesMap({
     if (item) onSelectItem(item); // a resolved pin tap always selects; never deselects
   };
 
-  const handlePostPress = (e: any) => {
-    lastPinTapRef.current = Date.now();
-    const f = e?.features?.[0];
-    const id = f?.properties?.id ?? f?.id;
-    const place = id != null ? postPlaceById.get(String(id)) : undefined;
-    if (place && onSelectPostPlace) onSelectPostPlace(place);
-  };
-
   return (
     <View style={{ flex: 1 }}>
       <MapView
@@ -257,7 +211,7 @@ export function MapboxPlacesMap({
         {/* Bundled emoji-disc pins + their postable (ring-baked) variants — static
             require assets. Referenced by name from the symbol layer via iconImage. */}
         <Images
-          images={{ ...MAP_PIN_IMAGES, ...RING_PIN_IMAGES, ...photoImages, ...postImages }}
+          images={{ ...MAP_PIN_IMAGES, ...RING_PIN_IMAGES, ...photoImages }}
           onImageMissing={(name) => {
             if (__DEV__) console.warn("[map] missing pin image for", name);
           }}
@@ -304,46 +258,6 @@ export function MapboxPlacesMap({
               textSize: 11,
               textColor: "#ffffff",
               textHaloColor: Colors.primaryDark,
-              textHaloWidth: 2,
-              textOffset: [0.9, -0.9],
-              textAllowOverlap: true,
-              textOptional: true,
-            }}
-          />
-        </ShapeSource>
-
-        {/* Social map: check-in place bubbles — their own layer (posts sit at jittery GPS
-            coords, not venue coords). Photo disc of the most-recent check-in + a count
-            badge; tap opens the who's-been-here sheet. Falls back to 📍 until the pin
-            renders (generate-post-pins cron, ~2 min). */}
-        <ShapeSource
-          id="post-places"
-          shape={postFc}
-          onPress={handlePostPress}
-          hitbox={{ width: 44, height: 44 }}
-        >
-          <SymbolLayer
-            id="post-pin"
-            style={{
-              iconImage: [
-                "case",
-                ["!=", ["get", "pinImage"], ""],
-                ["get", "pinImage"],
-                "📍",
-              ],
-              iconSize: 0.5,
-              iconAllowOverlap: false,
-              iconOptional: false,
-              iconPadding: 4,
-              textField: [
-                "case",
-                [">", ["get", "count"], 1],
-                ["to-string", ["get", "count"]],
-                "",
-              ],
-              textSize: 11,
-              textColor: "#ffffff",
-              textHaloColor: Colors.primary,
               textHaloWidth: 2,
               textOffset: [0.9, -0.9],
               textAllowOverlap: true,

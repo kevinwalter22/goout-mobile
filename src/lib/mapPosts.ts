@@ -32,6 +32,33 @@ export type PostPlace = {
 };
 
 /**
+ * Convert raw post rows (from useUserPosts / usePosts — the SAME queries the grid/feed use,
+ * so the map inherits their exact visibility) into plottable MapPosts. Keeps only approved,
+ * geolocated check-ins. `fallbackUsername` labels rows that don't carry a joined profile
+ * (e.g. a single user's own posts on their profile).
+ */
+export function postsToMapPosts(rows: any[], opts?: { fallbackUsername?: string }): MapPost[] {
+  return (rows || [])
+    .filter(
+      (p) =>
+        p?.verified_lat != null &&
+        p?.verified_lng != null &&
+        (p?.moderation_status ?? "approved") === "approved",
+    )
+    .map((p) => ({
+      id: p.id,
+      userId: p.user_id,
+      username: p.username ?? p.author?.username ?? opts?.fallbackUsername ?? null,
+      avatarUrl: p.avatar_url ?? p.author?.avatar_url ?? null,
+      caption: p.caption ?? null,
+      pinImageUrl: p.pin_image_url ?? null,
+      lat: Number(p.verified_lat),
+      lng: Number(p.verified_lng),
+      createdAt: p.created_at,
+    }));
+}
+
+/**
  * Collapse check-ins into one bubble per place. Input SHOULD be most-recent-first
  * (map_posts_in_view returns created_at DESC); the representative pin is the first (newest)
  * post in each cluster, and posts stay newest-first for the sheet.
