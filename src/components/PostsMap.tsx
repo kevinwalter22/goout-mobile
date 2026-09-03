@@ -25,10 +25,13 @@ function centroid(places: PostPlace[]): [number, number] {
 export function PostsMap({
   posts,
   height = 420,
+  fill = false,
   emptyLabel = "No check-ins yet",
 }: {
   posts: MapPost[];
   height?: number;
+  /** Fill the available space (flex:1) instead of a fixed height — for a full-screen map. */
+  fill?: boolean;
   emptyLabel?: string;
 }) {
   const { colors } = useTheme();
@@ -85,13 +88,10 @@ export function PostsMap({
     return (
       <View
         style={{
-          height,
+          ...(fill ? { flex: 1 } : { height, borderRadius: 12, borderWidth: 1, borderColor: colors.border }),
           alignItems: "center",
           justifyContent: "center",
           backgroundColor: colors.background,
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: 12,
         }}
       >
         <Text style={{ color: colors.textSecondary }}>{emptyLabel}</Text>
@@ -100,7 +100,7 @@ export function PostsMap({
   }
 
   return (
-    <View style={{ height, borderRadius: 12, overflow: "hidden" }}>
+    <View style={fill ? { flex: 1 } : { height, borderRadius: 12, overflow: "hidden" }}>
       <MapView
         style={{ flex: 1 }}
         styleURL={Mapbox.StyleURL.Street}

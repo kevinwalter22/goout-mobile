@@ -90,23 +90,10 @@ export default function Profile() {
     }, [lastSyncedAt, needsSync, contactsSyncEnabled])
   );
 
-  // Returning to the profile while the check-in map is open (back from a post/settings/new
-  // post) lands at the top with the scroll locked — strands the user. Restore the map into
-  // view on focus. (scrollToEnd is programmatic, so it works even with scrollEnabled=false.)
-  useFocusEffect(
-    useCallback(() => {
-      if (postsView === "map") {
-        const t = setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: false }), 80);
-        return () => clearTimeout(t);
-      }
-    }, [postsView])
-  );
-
   // Listen for scroll-to-top events
   useEffect(() => {
     const handleScrollToTop = () => {
-      // Explicit "go to top" (tab re-tap) also exits the map back to the grid, so the scroll
-      // isn't left locked at the top.
+      // Tab re-tap also closes the check-in map overlay, back to the profile.
       setPostsView("grid");
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     };
@@ -270,10 +257,7 @@ export default function Profile() {
         </Pressable>
       </View>
 
-      {/* Lock the profile scroll while the check-in map is showing, so the map owns pan/zoom
-          gestures instead of the ScrollView stealing them. Toggling to map also scrolls the
-          section into view so it's fully visible while locked. */}
-      <ScrollView ref={scrollViewRef} style={{ flex: 1 }} scrollEnabled={postsView !== "map"}>
+      <ScrollView ref={scrollViewRef} style={{ flex: 1 }}>
         <View style={{ padding: 24 }}>
         <View style={{ gap: 24 }}>
           {/* Avatar with upload button */}
@@ -641,13 +625,7 @@ export default function Profile() {
               {(["grid", "map"] as const).map((v) => (
                 <Pressable
                   key={v}
-                  onPress={() => {
-                    setPostsView(v);
-                    // Bring the (now-fixed) map fully into view before the scroll locks.
-                    if (v === "map") {
-                      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 60);
-                    }
-                  }}
+                  onPress={() => setPostsView(v)}
                   accessibilityRole="button"
                   accessibilityLabel={v === "grid" ? "Grid view" : "Map view"}
                   style={{
@@ -673,8 +651,6 @@ export default function Profile() {
             <Text style={{ textAlign: "center", color: colors.textSecondary, paddingVertical: 32 }}>
               No posts yet. Check in at an event to create your first post!
             </Text>
-          ) : postsView === "map" ? (
-            <PostsMap posts={ownMapPosts} emptyLabel="No check-ins with a location yet" />
           ) : (
             <View
               style={{
@@ -801,6 +777,50 @@ export default function Profile() {
         </View>
       </Modal>
       </ScrollView>
+
+      {/* Check-in MAP — a fixed full-screen overlay (not inline in the ScrollView). This is
+          the robust fix for the scroll-trap: there's no scroll to be stuck in, the whole map
+          is always visible, and it persists correctly across navigation (state-driven, so
+          returning to the profile in map mode re-shows the full map). */}
+      {postsView === "map" && (
+        <View
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: colors.background,
+          }}
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingHorizontal: 16,
+              paddingTop: insets.top + 12,
+              paddingBottom: 12,
+              borderBottomWidth: 1,
+              borderBottomColor: colors.border,
+              backgroundColor: colors.background,
+            }}
+          >
+            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
+              Your check-ins ({ownMapPosts.length})
+            </Text>
+            <Pressable
+              onPress={() => setPostsView("grid")}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Close map"
+            >
+              <Ionicons name="close" size={26} color={colors.text} />
+            </Pressable>
+          </View>
+          <PostsMap posts={ownMapPosts} fill emptyLabel="No check-ins with a location yet" />
+        </View>
+      )}
     </View>
   );
 }
