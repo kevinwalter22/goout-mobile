@@ -13,8 +13,6 @@ import { getFallbackImage } from "../lib/categoryFallbackImages";
 import { MapboxPlacesMap } from "./MapboxPlacesMap";
 import { computePostableNow } from "../lib/postableNow";
 import { regionToZoom } from "../lib/mapClustering";
-import { aggregatePostsToPlaces, type MapPost, type PostPlace } from "../lib/mapPosts";
-import { WhoBeenHereSheet } from "./WhoBeenHereSheet";
 import type { ExploreItem } from "../types/database";
 import type {
   KindFilter,
@@ -133,9 +131,6 @@ export function ExploreMapView({
   // True when the viewport is zoomed out past the county-scale ceiling — we stop
   // querying and prompt the user to zoom in rather than scan a whole state.
   const [zoomedOut, setZoomedOut] = useState(false);
-  // Social map: friends+you check-in posts (map_posts_in_view), aggregated into place bubbles.
-  const [mapPosts, setMapPosts] = useState<MapPost[]>([]);
-  const [selectedPostPlace, setSelectedPostPlace] = useState<PostPlace | null>(null);
 
   // Generate a cache key from all filter values
   const filterCacheKey = useMemo(
@@ -444,35 +439,6 @@ export function ExploreMapView({
         // vanish when the viewport center moved during a pan.
         setMapItems(deduped);
 
-        // Social map: friends+you check-in posts for this scope (last 30 days). Scoped
-        // server-side by map_posts_in_view (post RLS is public-read, so the friends filter
-        // MUST live in the RPC). Best-effort — check-ins are additive, never fail the map.
-        try {
-          // Cast: map_posts_in_view isn't in the stale generated types yet (see CLAUDE.md).
-          const { data: postRows } = await (supabase.rpc as any)("map_posts_in_view", {
-            p_min_lat: scope.latMin,
-            p_max_lat: scope.latMax,
-            p_min_lng: scope.lngMin,
-            p_max_lng: scope.lngMax,
-            p_since_days: 30,
-          });
-          setMapPosts(
-            ((postRows as any[]) || []).map((r: any) => ({
-              id: r.id,
-              userId: r.user_id,
-              username: r.username ?? null,
-              avatarUrl: r.avatar_url ?? null,
-              caption: r.caption ?? null,
-              pinImageUrl: r.pin_image_url ?? null,
-              lat: Number(r.lat),
-              lng: Number(r.lng),
-              createdAt: r.created_at,
-            })),
-          );
-        } catch {
-          /* additive layer — ignore */
-        }
-
         // Remember the scope we fetched so panning within it skips the refetch.
         lastFetchRef.current = {
           filterKey: filterCacheKey,
@@ -541,9 +507,6 @@ export function ExploreMapView({
     () => mapItems.filter((item) => item.lat != null && item.lng != null),
     [mapItems]
   );
-
-  // Social map: aggregate check-ins into one bubble per place (latest photo + count).
-  const postPlaces = useMemo(() => aggregatePostsToPlaces(mapPosts), [mapPosts]);
 
   // Derive selected item from ID (keeps marker rendering stable)
   const selectedItem = useMemo(
@@ -647,14 +610,6 @@ export function ExploreMapView({
         onSelectItem={selectItem}
         itemById={itemById}
         onCameraShortcut={onCameraShortcut}
-        postPlaces={postPlaces}
-        onSelectPostPlace={setSelectedPostPlace}
-      />
-
-      {/* Social map: who's-been-here sheet for a tapped check-in place */}
-      <WhoBeenHereSheet
-        place={selectedPostPlace}
-        onClose={() => setSelectedPostPlace(null)}
       />
 
       {/* Zoom-out ceiling: prompt to zoom in rather than scan a whole state */}

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -18,6 +18,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../src/hooks/useAuth";
 import { useFriendsList } from "../../src/hooks/useFriendsList";
 import { useUserPosts } from "../../src/hooks/useUserPosts";
+import { PostsMap } from "../../src/components/PostsMap";
+import { postsToMapPosts } from "../../src/lib/mapPosts";
 import { UserSearchSheet } from "../../src/components/UserSearchSheet";
 import { FriendsSheet } from "../../src/components/FriendsSheet";
 import { FriendRequestsSheet } from "../../src/components/FriendRequestsSheet";
@@ -47,6 +49,10 @@ export default function Profile() {
   const { recommendations, loading: recsLoading, sendRequest, refresh: refreshRecs } = useFriendRecommendations(5);
   const { syncing: contactSyncing, needsSync, lastSyncedAt, contactsSyncEnabled, syncNow } = useContactSync();
   const { posts, loading: postsLoading, removePost, refresh: refreshPosts } = useUserPosts(user?.id || null);
+  // Social map: your check-in history as a map (grid ↔ map toggle). All-time — a life-log
+  // of everywhere you've genuinely been. Same posts as the grid, just plotted.
+  const [postsView, setPostsView] = useState<"grid" | "map">("grid");
+  const ownMapPosts = useMemo(() => postsToMapPosts(posts, { fallbackUsername: "You" }), [posts]);
   const { plans, loading: plansLoading, refresh: refreshPlans } = useUpcomingPlans(user?.id);
   const { showToast } = useToast();
   const { colors } = useTheme();
@@ -600,11 +606,42 @@ export default function Profile() {
           </View>
         )}
 
-        {/* Posts grid */}
+        {/* Posts — grid ↔ map. The map is a life-log: everywhere you've genuinely been. */}
         <View style={{ marginTop: 32 }}>
-          <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 16, color: colors.text }}>
-            Your Posts ({posts.length})
-          </Text>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 16,
+            }}
+          >
+            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
+              Your Posts ({posts.length})
+            </Text>
+            <View style={{ flexDirection: "row", backgroundColor: colors.border, borderRadius: 8, padding: 2 }}>
+              {(["grid", "map"] as const).map((v) => (
+                <Pressable
+                  key={v}
+                  onPress={() => setPostsView(v)}
+                  accessibilityRole="button"
+                  accessibilityLabel={v === "grid" ? "Grid view" : "Map view"}
+                  style={{
+                    paddingVertical: 6,
+                    paddingHorizontal: 14,
+                    borderRadius: 6,
+                    backgroundColor: postsView === v ? colors.background : "transparent",
+                  }}
+                >
+                  <Ionicons
+                    name={v === "grid" ? "grid" : "map"}
+                    size={16}
+                    color={postsView === v ? Colors.primary : colors.textSecondary}
+                  />
+                </Pressable>
+              ))}
+            </View>
+          </View>
 
           {postsLoading ? (
             <ActivityIndicator />
@@ -612,6 +649,8 @@ export default function Profile() {
             <Text style={{ textAlign: "center", color: colors.textSecondary, paddingVertical: 32 }}>
               No posts yet. Check in at an event to create your first post!
             </Text>
+          ) : postsView === "map" ? (
+            <PostsMap posts={ownMapPosts} emptyLabel="No check-ins with a location yet" />
           ) : (
             <View
               style={{
