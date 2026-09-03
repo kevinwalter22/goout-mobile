@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
   Alert,
+  InteractionManager,
   Pressable,
   Text,
   View,
@@ -103,12 +104,17 @@ export default function Profile() {
   useFocusEffect(
     useCallback(() => {
       if (mapReturnRef.current) {
-        // Returning from a post opened out of the map: restore the map body + re-open that
-        // place's sheet. It's a fixed body, so it's framed by construction — no scroll to fix.
+        // Emulate the map toggle on the way back — but frame the map AFTER the nav transition
+        // settles (runAfterInteractions), not on a raw timer that fires mid-animation. The list
+        // no longer collapses on refresh (loader is first-load only, below), so the scroll holds
+        // and scrollToEnd lands on the framed map; then we re-open that place's sheet.
         const placeId = mapReturnRef.current;
         mapReturnRef.current = null;
         setPostsView("map");
-        setMapSelId(placeId);
+        InteractionManager.runAfterInteractions(() => {
+          scrollViewRef.current?.scrollToEnd({ animated: false });
+          setMapSelId(placeId);
+        });
       } else {
         setPostsView("grid");
         setMapSelId(null);
@@ -276,7 +282,14 @@ export default function Profile() {
         {(["grid", "map"] as const).map((v) => (
           <Pressable
             key={v}
-            onPress={() => setPostsView(v)}
+            onPress={() => {
+              setPostsView(v);
+              // Frame the inline map in the viewport before the scroll locks, so panning
+              // starts on a full map (not a sliver). setTimeout lets the map lay out first.
+              if (v === "map") {
+                setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 60);
+              }
+            }}
             accessibilityRole="button"
             accessibilityLabel={v === "grid" ? "Grid view" : "Map view"}
             style={{
@@ -322,26 +335,9 @@ export default function Profile() {
         </Pressable>
       </View>
 
-      {postsView === "map" ? (
-        /* Map mode mirrors the Explore tab: a fixed sibling body (the "Your Posts" toggle bar +
-           a full-bleed map), NOT nested in the scroll. Nothing to scroll means nothing to get
-           stuck on nav-return, and the map is framed by construction — the robust fix for the
-           "back lands at the top" issue. Grid mode below is the normal scrollable profile. */
-        <View style={{ flex: 1 }}>
-          <View style={{ paddingHorizontal: 24, paddingTop: 16 }}>{renderPostsHeader()}</View>
-          <PostsMap
-            posts={ownMapPosts}
-            fill
-            emptyLabel="No check-ins with a location yet"
-            selectedPlaceId={mapSelId}
-            onSelectedPlaceIdChange={setMapSelId}
-            onDrillToPost={(placeId) => {
-              mapReturnRef.current = placeId;
-            }}
-          />
-        </View>
-      ) : (
-      <ScrollView ref={scrollViewRef} style={{ flex: 1 }}>
+      {/* Scroll locks in map view so pan/zoom gestures go to the map (not the page). The
+          reset-on-focus above handles the return trip — back always lands on the gallery. */}
+      <ScrollView ref={scrollViewRef} style={{ flex: 1 }} scrollEnabled={postsView !== "map"}>
         <View style={{ padding: 24 }}>
         <View style={{ gap: 24 }}>
           {/* Avatar with upload button */}
@@ -692,16 +688,33 @@ export default function Profile() {
           </View>
         )}
 
-        {/* Posts — grid gallery. The map is the fixed sibling body above (Explore-mirror). */}
+        {/* Posts — gallery ↔ inline map toggle (Option B: the map lives inline in this scroll). */}
         <View style={{ marginTop: 32 }}>
           {renderPostsHeader()}
 
-          {postsLoading ? (
+          {/* Loader ONLY on the first load. On a refresh (posts already present) we keep the
+              grid/map mounted — otherwise the content collapses to a spinner and the scroll
+              snaps to the top, which is exactly what broke the back-from-map framing. */}
+          {postsLoading && posts.length === 0 ? (
             <ActivityIndicator />
           ) : posts.length === 0 ? (
             <Text style={{ textAlign: "center", color: colors.textSecondary, paddingVertical: 32 }}>
               No posts yet. Check in at an event to create your first post!
             </Text>
+          ) : postsView === "map" ? (
+            /* Inline map — lives in the scroll (the toggle frames it via scrollToEnd; the scroll
+               locks while it's shown so pan/zoom go to the map). Back from a drilled post restores
+               THIS view (map + sheet) via the focus effect above; other refocuses reset to grid. */
+            <PostsMap
+              posts={ownMapPosts}
+              height={440}
+              emptyLabel="No check-ins with a location yet"
+              selectedPlaceId={mapSelId}
+              onSelectedPlaceIdChange={setMapSelId}
+              onDrillToPost={(placeId) => {
+                mapReturnRef.current = placeId;
+              }}
+            />
           ) : (
             <View
               style={{
@@ -736,7 +749,6 @@ export default function Profile() {
         </View>
       </View>
       </ScrollView>
-      )}
 
       {/* Modals */}
       <UserSearchSheet
