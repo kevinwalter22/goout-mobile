@@ -52,6 +52,11 @@ export default function Profile() {
   // Social map: your check-in history as a map (grid ↔ map toggle). All-time — a life-log
   // of everywhere you've genuinely been. Same posts as the grid, just plotted.
   const [postsView, setPostsView] = useState<"grid" | "map">("grid");
+  // Controlled who's-been-here selection so we can re-open the exact place on back-nav.
+  const [mapSelId, setMapSelId] = useState<string | null>(null);
+  // When the user drills from the map into a post, we stash the place id here so the next
+  // profile-focus restores map + that place's sheet (instead of the default reset-to-grid).
+  const mapReturnRef = useRef<string | null>(null);
   const ownMapPosts = useMemo(() => postsToMapPosts(posts, { fallbackUsername: "You" }), [posts]);
   const { plans, loading: plansLoading, refresh: refreshPlans } = useUpcomingPlans(user?.id);
   const { showToast } = useToast();
@@ -90,19 +95,32 @@ export default function Profile() {
     }, [lastSyncedAt, needsSync, contactsSyncEnabled])
   );
 
-  // Option B: back always lands on the gallery. Reset to the grid whenever the profile
-  // refocuses (return from a post / settings / Explore tab), so a returning user never lands
-  // in the inline map view — the simple, robust "no locked-map trap" guarantee.
+  // Back-navigation behavior on the posts section:
+  //  - Returning from a post the user OPENED from the map pull-up → pop back to exactly that
+  //    view: map + the same place's check-ins re-overlaid (mapReturnRef carries the place id).
+  //  - Any other refocus (Settings, Explore tab, cold focus) → land on the gallery. This is the
+  //    simple "no locked-map trap" guarantee — a returning user never lands stuck in the map.
   useFocusEffect(
     useCallback(() => {
-      setPostsView("grid");
+      if (mapReturnRef.current) {
+        const placeId = mapReturnRef.current;
+        mapReturnRef.current = null;
+        setPostsView("map");
+        setMapSelId(placeId);
+        setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 60);
+      } else {
+        setPostsView("grid");
+        setMapSelId(null);
+      }
     }, [])
   );
 
   // Listen for scroll-to-top events
   useEffect(() => {
     const handleScrollToTop = () => {
+      mapReturnRef.current = null;
       setPostsView("grid");
+      setMapSelId(null);
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     };
 
@@ -676,7 +694,16 @@ export default function Profile() {
           ) : postsView === "map" ? (
             /* Option B: inline mini-map. Fixed height (not full-screen), lives in the scroll.
                Back always lands on the gallery (reset-on-focus below), so no locked-map trap. */
-            <PostsMap posts={ownMapPosts} height={440} emptyLabel="No check-ins with a location yet" />
+            <PostsMap
+              posts={ownMapPosts}
+              height={440}
+              emptyLabel="No check-ins with a location yet"
+              selectedPlaceId={mapSelId}
+              onSelectedPlaceIdChange={setMapSelId}
+              onDrillToPost={(placeId) => {
+                mapReturnRef.current = placeId;
+              }}
+            />
           ) : (
             <View
               style={{
