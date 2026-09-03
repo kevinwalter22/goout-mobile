@@ -257,7 +257,14 @@ export default function Profile() {
         {(["grid", "map"] as const).map((v) => (
           <Pressable
             key={v}
-            onPress={() => setPostsView(v)}
+            onPress={() => {
+              setPostsView(v);
+              // Frame the inline map in the viewport before the scroll locks, so panning
+              // starts on a full map (not a sliver). setTimeout lets the map lay out first.
+              if (v === "map") {
+                setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 60);
+              }
+            }}
             accessibilityRole="button"
             accessibilityLabel={v === "grid" ? "Grid view" : "Map view"}
             style={{
@@ -303,7 +310,9 @@ export default function Profile() {
         </Pressable>
       </View>
 
-      <ScrollView ref={scrollViewRef} style={{ flex: 1 }}>
+      {/* Scroll locks in map view so pan/zoom gestures go to the map (not the page). The
+          reset-on-focus above handles the return trip — back always lands on the gallery. */}
+      <ScrollView ref={scrollViewRef} style={{ flex: 1 }} scrollEnabled={postsView !== "map"}>
         <View style={{ padding: 24 }}>
         <View style={{ gap: 24 }}>
           {/* Avatar with upload button */}
