@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { Image, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, {
   runOnJS,
@@ -77,9 +76,11 @@ function Row({ post, colors, onPress }: { post: MapPost; colors: any; onPress: (
 export function WhoBeenHereSheet({
   place,
   onClose,
+  onOpenPost,
 }: {
   place: PostPlace | null;
   onClose: () => void;
+  onOpenPost: (post: MapPost) => void;
 }) {
   const { colors } = useTheme();
   const visible = !!place;
@@ -153,15 +154,7 @@ export function WhoBeenHereSheet({
           </GestureDetector>
           <ScrollView>
             {(place?.posts || []).map((p) => (
-              <Row
-                key={p.id}
-                post={p}
-                colors={colors}
-                onPress={() => {
-                  onClose();
-                  router.push(`/post/${p.id}` as any);
-                }}
-              />
+              <Row key={p.id} post={p} colors={colors} onPress={() => onOpenPost(p)} />
             ))}
           </ScrollView>
         </Animated.View>

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Text, View } from "react-native";
+import { router } from "expo-router";
 import Mapbox, { MapView, Camera, ShapeSource, SymbolLayer, Images } from "@rnmapbox/maps";
 import { Colors } from "../config/theme";
 import { useTheme } from "../contexts/ThemeContext";
@@ -27,15 +28,31 @@ export function PostsMap({
   height = 420,
   fill = false,
   emptyLabel = "No check-ins yet",
+  selectedPlaceId,
+  onSelectedPlaceIdChange,
+  onDrillToPost,
 }: {
   posts: MapPost[];
   height?: number;
   /** Fill the available space (flex:1) instead of a fixed height — for a full-screen map. */
   fill?: boolean;
   emptyLabel?: string;
+  /** Controlled selection — the place id whose who's-been-here sheet is open. Pass this + the
+   *  change handler to let a parent restore the exact view (map + sheet) on back-navigation.
+   *  Omit both for the default self-managed behavior. */
+  selectedPlaceId?: string | null;
+  onSelectedPlaceIdChange?: (id: string | null) => void;
+  /** Fired just before navigating into a post from the sheet, with the place id being left. */
+  onDrillToPost?: (placeId: string) => void;
 }) {
   const { colors } = useTheme();
-  const [selected, setSelected] = useState<PostPlace | null>(null);
+  const [internalSelId, setInternalSelId] = useState<string | null>(null);
+  const controlled = selectedPlaceId !== undefined;
+  const selId: string | null = controlled ? (selectedPlaceId ?? null) : internalSelId;
+  const setSelId = (id: string | null) => {
+    if (onSelectedPlaceIdChange) onSelectedPlaceIdChange(id);
+    if (!controlled) setInternalSelId(id);
+  };
 
   const places = useMemo(() => aggregatePostsToPlaces(posts), [posts]);
   const byId = useMemo(() => {
@@ -43,6 +60,16 @@ export function PostsMap({
     for (const p of places) m.set(p.id, p);
     return m;
   }, [places]);
+  const selected = selId != null ? byId.get(selId) ?? null : null;
+
+  // Drilling into a post: remember the place (so the parent can restore this view on back),
+  // close the sheet BEFORE navigating (a RN Modal left open would float over the post screen),
+  // then push the post.
+  const openPost = (post: MapPost) => {
+    if (selId) onDrillToPost?.(selId);
+    setSelId(null);
+    router.push(`/post/${post.id}` as any);
+  };
 
   // Fit ALL of the user's pins in view on load (not a fixed zoom on the centroid, which
   // lands "in the middle of nowhere" when pins are spread out). defaultSettings applies once
@@ -109,7 +136,7 @@ export function PostsMap({
         attributionEnabled
         logoPosition={{ bottom: 8, left: 8 }}
         attributionPosition={{ bottom: 8, right: 8 }}
-        onPress={() => setSelected(null)}
+        onPress={() => setSelId(null)}
       >
         <Camera defaultSettings={cameraDefault as any} animationDuration={0} />
         <Images images={{ "📍": MAP_PIN_IMAGES["📍"], ...images }} />
@@ -121,7 +148,7 @@ export function PostsMap({
             const f = e?.features?.[0];
             const id = f?.properties?.id ?? f?.id;
             const place = id != null ? byId.get(String(id)) : undefined;
-            if (place) setSelected(place);
+            if (place) setSelId(place.id);
           }}
         >
           <SymbolLayer
@@ -144,7 +171,7 @@ export function PostsMap({
           />
         </ShapeSource>
       </MapView>
-      <WhoBeenHereSheet place={selected} onClose={() => setSelected(null)} />
+      <WhoBeenHereSheet place={selected} onClose={() => setSelId(null)} onOpenPost={openPost} />
     </View>
   );
 }
