@@ -104,21 +104,16 @@ export default function Profile() {
   useFocusEffect(
     useCallback(() => {
       if (mapReturnRef.current) {
-        // Emulate the map toggle on the way back — but frame the map AFTER the nav transition
-        // settles (runAfterInteractions), not on a raw timer that fires mid-animation. The list
-        // no longer collapses on refresh (loader is first-load only, below), so the scroll holds
-        // and scrollToEnd lands on the framed map; then we re-open that place's sheet.
+        // Coming back from a post opened out of the map. The map view AND the scroll position are
+        // already preserved — the tab stayed mounted and the list no longer collapses on refresh —
+        // so the map is still framed exactly where the toggle left it. We deliberately DON'T
+        // re-scroll (that racing scrollToEnd was the source of the inconsistent, glitchy framing).
+        // All we do is re-open that place's sheet, and only after the pop transition settles, so
+        // it's a single clean slide-up with nothing competing against it.
         const placeId = mapReturnRef.current;
         mapReturnRef.current = null;
         setPostsView("map");
-        InteractionManager.runAfterInteractions(() => {
-          scrollViewRef.current?.scrollToEnd({ animated: false });
-          setMapSelId(placeId);
-          // The first pass can fall a hair short while the screen + re-opening sheet settle, so
-          // the map lands slightly lower than on a fresh toggle. Re-frame once more after settle
-          // so back-nav lands on the EXACT same spot as pressing the toggle.
-          setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: false }), 180);
-        });
+        InteractionManager.runAfterInteractions(() => setMapSelId(placeId));
       } else {
         setPostsView("grid");
         setMapSelId(null);
