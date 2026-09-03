@@ -40,7 +40,28 @@ export function PostsMap({
     for (const p of places) m.set(p.id, p);
     return m;
   }, [places]);
-  const center = useMemo(() => centroid(places), [places]);
+
+  // Fit ALL of the user's pins in view on load (not a fixed zoom on the centroid, which
+  // lands "in the middle of nowhere" when pins are spread out). defaultSettings applies once
+  // on mount — and the map only mounts once posts are loaded (it's behind the toggle), so the
+  // bounds are real. Single pin → center on it at a close zoom.
+  const cameraDefault = useMemo(() => {
+    if (places.length >= 2) {
+      const lats = places.map((p) => p.lat);
+      const lngs = places.map((p) => p.lng);
+      return {
+        bounds: {
+          ne: [Math.max(...lngs), Math.max(...lats)],
+          sw: [Math.min(...lngs), Math.min(...lats)],
+          paddingTop: 70,
+          paddingBottom: 70,
+          paddingLeft: 50,
+          paddingRight: 50,
+        },
+      };
+    }
+    return { centerCoordinate: centroid(places), zoomLevel: 14 };
+  }, [places]);
 
   const { fc, images } = useMemo(() => {
     const imgs: Record<string, { uri: string }> = {};
@@ -90,7 +111,7 @@ export function PostsMap({
         attributionPosition={{ bottom: 8, right: 8 }}
         onPress={() => setSelected(null)}
       >
-        <Camera defaultSettings={{ centerCoordinate: center, zoomLevel: 11 }} animationDuration={0} />
+        <Camera defaultSettings={cameraDefault as any} animationDuration={0} />
         <Images images={{ "📍": MAP_PIN_IMAGES["📍"], ...images }} />
         <ShapeSource
           id="postsmap-src"

@@ -255,7 +255,10 @@ export default function Profile() {
         </Pressable>
       </View>
 
-      <ScrollView ref={scrollViewRef} style={{ flex: 1 }}>
+      {/* Lock the profile scroll while the check-in map is showing, so the map owns pan/zoom
+          gestures instead of the ScrollView stealing them. Toggling to map also scrolls the
+          section into view so it's fully visible while locked. */}
+      <ScrollView ref={scrollViewRef} style={{ flex: 1 }} scrollEnabled={postsView !== "map"}>
         <View style={{ padding: 24 }}>
         <View style={{ gap: 24 }}>
           {/* Avatar with upload button */}
@@ -623,7 +626,13 @@ export default function Profile() {
               {(["grid", "map"] as const).map((v) => (
                 <Pressable
                   key={v}
-                  onPress={() => setPostsView(v)}
+                  onPress={() => {
+                    setPostsView(v);
+                    // Bring the (now-fixed) map fully into view before the scroll locks.
+                    if (v === "map") {
+                      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 60);
+                    }
+                  }}
                   accessibilityRole="button"
                   accessibilityLabel={v === "grid" ? "Grid view" : "Map view"}
                   style={{

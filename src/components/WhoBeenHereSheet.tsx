@@ -1,5 +1,6 @@
 import { Image, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { useTheme } from "../contexts/ThemeContext";
 import type { PostPlace, MapPost } from "../lib/mapPosts";
 
@@ -17,10 +18,15 @@ function relativeTime(iso: string): string {
   return d < 7 ? `${d}d ago` : new Date(iso).toLocaleDateString();
 }
 
-function Row({ post, colors }: { post: MapPost; colors: any }) {
+function Row({ post, colors, onPress }: { post: MapPost; colors: any; onPress: () => void }) {
   const thumb = post.pinImageUrl || post.avatarUrl || null;
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 12 }}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="View post"
+      style={{ flexDirection: "row", alignItems: "center", paddingVertical: 10, gap: 12 }}
+    >
       {thumb ? (
         <Image
           source={{ uri: thumb }}
@@ -47,7 +53,8 @@ function Row({ post, colors }: { post: MapPost; colors: any }) {
         )}
       </View>
       <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{relativeTime(post.createdAt)}</Text>
-    </View>
+      <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+    </Pressable>
   );
 }
 
@@ -88,7 +95,15 @@ export function WhoBeenHereSheet({
         </View>
         <ScrollView>
           {(place?.posts || []).map((p) => (
-            <Row key={p.id} post={p} colors={colors} />
+            <Row
+              key={p.id}
+              post={p}
+              colors={colors}
+              onPress={() => {
+                onClose();
+                router.push(`/post/${p.id}` as any);
+              }}
+            />
           ))}
         </ScrollView>
       </View>
