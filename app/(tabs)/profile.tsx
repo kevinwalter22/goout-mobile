@@ -232,6 +232,63 @@ export default function Profile() {
     );
   }
 
+  // "Your Posts (N)" + gallery↔map toggle — shared by the gallery ScrollView and the map body.
+  const renderPostsHeader = () => (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 16,
+      }}
+    >
+      <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
+        Your Posts ({posts.length})
+      </Text>
+      <View style={{ flexDirection: "row", backgroundColor: colors.border, borderRadius: 8, padding: 2 }}>
+        {(["grid", "map"] as const).map((v) => (
+          <Pressable
+            key={v}
+            onPress={() => setPostsView(v)}
+            accessibilityRole="button"
+            accessibilityLabel={v === "grid" ? "Grid view" : "Map view"}
+            style={{
+              paddingVertical: 6,
+              paddingHorizontal: 14,
+              borderRadius: 6,
+              backgroundColor: postsView === v ? colors.background : "transparent",
+            }}
+          >
+            <Ionicons
+              name={v === "grid" ? "grid" : "map"}
+              size={16}
+              color={postsView === v ? Colors.primary : colors.textSecondary}
+            />
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+
+  // Compact identity strip shown in map mode so it still reads as "your profile".
+  const renderCompactProfile = () => (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        paddingHorizontal: 16,
+        paddingTop: 10,
+        paddingBottom: 6,
+      }}
+    >
+      <Avatar avatarUrl={profile?.avatar_url} size={40} />
+      <Text style={{ fontSize: 16, fontWeight: "700", color: colors.text }}>
+        {profile?.username || "You"}
+      </Text>
+    </View>
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Header with logo and settings */}
@@ -257,6 +314,8 @@ export default function Profile() {
         </Pressable>
       </View>
 
+      {/* GALLERY MODE — the full scrollable profile. */}
+      {postsView !== "map" && (
       <ScrollView ref={scrollViewRef} style={{ flex: 1 }}>
         <View style={{ padding: 24 }}>
         <View style={{ gap: 24 }}>
@@ -608,42 +667,9 @@ export default function Profile() {
           </View>
         )}
 
-        {/* Posts — grid ↔ map. The map is a life-log: everywhere you've genuinely been. */}
+        {/* Posts — gallery (map view is the top-level branch below, mirroring Explore). */}
         <View style={{ marginTop: 32 }}>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 16,
-            }}
-          >
-            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
-              Your Posts ({posts.length})
-            </Text>
-            <View style={{ flexDirection: "row", backgroundColor: colors.border, borderRadius: 8, padding: 2 }}>
-              {(["grid", "map"] as const).map((v) => (
-                <Pressable
-                  key={v}
-                  onPress={() => setPostsView(v)}
-                  accessibilityRole="button"
-                  accessibilityLabel={v === "grid" ? "Grid view" : "Map view"}
-                  style={{
-                    paddingVertical: 6,
-                    paddingHorizontal: 14,
-                    borderRadius: 6,
-                    backgroundColor: postsView === v ? colors.background : "transparent",
-                  }}
-                >
-                  <Ionicons
-                    name={v === "grid" ? "grid" : "map"}
-                    size={16}
-                    color={postsView === v ? Colors.primary : colors.textSecondary}
-                  />
-                </Pressable>
-              ))}
-            </View>
-          </View>
+          {renderPostsHeader()}
 
           {postsLoading ? (
             <ActivityIndicator />
@@ -684,6 +710,18 @@ export default function Profile() {
           )}
         </View>
       </View>
+      </ScrollView>
+      )}
+
+      {/* MAP MODE — mirrors the Explore list/map switch: a fixed body (no ScrollView) so the
+          map owns pan/zoom and returning to the profile in map mode re-shows it correctly. */}
+      {postsView === "map" && (
+        <View style={{ flex: 1 }}>
+          {renderCompactProfile()}
+          <View style={{ paddingHorizontal: 16 }}>{renderPostsHeader()}</View>
+          <PostsMap posts={ownMapPosts} fill emptyLabel="No check-ins with a location yet" />
+        </View>
+      )}
 
       {/* Modals */}
       <UserSearchSheet
@@ -776,51 +814,6 @@ export default function Profile() {
           </View>
         </View>
       </Modal>
-      </ScrollView>
-
-      {/* Check-in MAP — a fixed full-screen overlay (not inline in the ScrollView). This is
-          the robust fix for the scroll-trap: there's no scroll to be stuck in, the whole map
-          is always visible, and it persists correctly across navigation (state-driven, so
-          returning to the profile in map mode re-shows the full map). */}
-      {postsView === "map" && (
-        <View
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: colors.background,
-          }}
-        >
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              paddingHorizontal: 16,
-              paddingTop: insets.top + 12,
-              paddingBottom: 12,
-              borderBottomWidth: 1,
-              borderBottomColor: colors.border,
-              backgroundColor: colors.background,
-            }}
-          >
-            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
-              Your check-ins ({ownMapPosts.length})
-            </Text>
-            <Pressable
-              onPress={() => setPostsView("grid")}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Close map"
-            >
-              <Ionicons name="close" size={26} color={colors.text} />
-            </Pressable>
-          </View>
-          <PostsMap posts={ownMapPosts} fill emptyLabel="No check-ins with a location yet" />
-        </View>
-      )}
     </View>
   );
 }
