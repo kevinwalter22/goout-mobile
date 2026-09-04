@@ -1,17 +1,20 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  InteractionManager,
   Pressable,
   RefreshControl,
   Text,
   View,
   Image,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePosts, type PostWithDetails } from "../../src/hooks/usePosts";
+import { PostsMap } from "../../src/components/PostsMap";
+import { postsToMapPosts } from "../../src/lib/mapPosts";
 import { PostImage } from "../../src/components/PostImage";
 import { DualCameraPost } from "../../src/components/DualCameraPost";
 import { ZoomableImage } from "../../src/components/ZoomableImage";
@@ -210,8 +213,37 @@ export default function Feed() {
   const flatListRef = useRef<FlatList>(null);
   const { colors } = useTheme();
 
+  // Feed list ↔ map. The map plots you + friends' check-ins from the last 30 days (same posts
+  // usePosts already returns — friends+self — just geolocated, approved, block-filtered, windowed).
+  const [feedView, setFeedView] = useState<"list" | "map">("list");
+  const [mapSelId, setMapSelId] = useState<string | null>(null);
+  const mapReturnRef = useRef<string | null>(null);
+
   // Filter out posts from blocked users
   const visiblePosts = posts.filter((p) => !blockedIds.has(p.user_id));
+
+  const feedMapPosts = useMemo(() => {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    return postsToMapPosts(
+      posts.filter((p) => !blockedIds.has(p.user_id) && new Date(p.created_at).getTime() >= cutoff),
+    );
+  }, [posts, blockedIds]);
+
+  // Returning from a post opened OUT of the feed map restores the map + that place's sheet;
+  // any other refocus (tab switch, cold start) shows the list.
+  useFocusEffect(
+    useCallback(() => {
+      if (mapReturnRef.current) {
+        const placeId = mapReturnRef.current;
+        mapReturnRef.current = null;
+        setFeedView("map");
+        InteractionManager.runAfterInteractions(() => setMapSelId(placeId));
+      } else {
+        setFeedView("list");
+        setMapSelId(null);
+      }
+    }, []),
+  );
 
   // Stable callbacks for memoized FeedItem
   const handleComment = useCallback((postId: string) => {
@@ -255,6 +287,9 @@ export default function Feed() {
   // Listen for scroll-to-top events
   useEffect(() => {
     const handleScrollToTop = () => {
+      mapReturnRef.current = null;
+      setFeedView("list");
+      setMapSelId(null);
       flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
     };
 
@@ -331,6 +366,9 @@ export default function Feed() {
           borderBottomWidth: 1,
           borderBottomColor: colors.border,
           backgroundColor: colors.background,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
         }}
       >
         <Image
@@ -338,28 +376,64 @@ export default function Feed() {
           style={{ width: 120, height: 48, marginLeft: -8 }}
           resizeMode="contain"
         />
+        {/* List ↔ map toggle, top-right (opposite the euda logo). Map = you + friends, last 30 days. */}
+        <View style={{ flexDirection: "row", backgroundColor: colors.border, borderRadius: 8, padding: 2 }}>
+          {(["list", "map"] as const).map((v) => (
+            <Pressable
+              key={v}
+              onPress={() => setFeedView(v)}
+              accessibilityRole="button"
+              accessibilityLabel={v === "list" ? "List view" : "Map view"}
+              style={{
+                paddingVertical: 6,
+                paddingHorizontal: 14,
+                borderRadius: 6,
+                backgroundColor: feedView === v ? colors.background : "transparent",
+              }}
+            >
+              <Ionicons
+                name={v === "list" ? "list" : "map"}
+                size={18}
+                color={feedView === v ? Colors.primary : colors.textSecondary}
+              />
+            </Pressable>
+          ))}
+        </View>
       </View>
 
-      <FlatList
-        ref={flatListRef}
-        data={visiblePosts}
-        keyExtractor={(item) => item.id}
-        refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={refresh} />
-        }
-        ItemSeparatorComponent={() => <FeedSep colors={colors} />}
-        renderItem={({ item }) => (
-          <FeedItem
-            item={item}
-            onComment={handleComment}
-            onToast={handleToast}
-            onReport={handleReport}
-            onBlockUser={handleBlockUser}
-            onDeletePost={item.user_id === user?.id ? handleDeletePost : undefined}
-            colors={colors}
-          />
-        )}
-      />
+      {feedView === "map" ? (
+        <PostsMap
+          posts={feedMapPosts}
+          fill
+          emptyLabel="No check-ins with a location in the last 30 days"
+          selectedPlaceId={mapSelId}
+          onSelectedPlaceIdChange={setMapSelId}
+          onDrillToPost={(placeId) => {
+            mapReturnRef.current = placeId;
+          }}
+        />
+      ) : (
+        <FlatList
+          ref={flatListRef}
+          data={visiblePosts}
+          keyExtractor={(item) => item.id}
+          refreshControl={
+            <RefreshControl refreshing={loading} onRefresh={refresh} />
+          }
+          ItemSeparatorComponent={() => <FeedSep colors={colors} />}
+          renderItem={({ item }) => (
+            <FeedItem
+              item={item}
+              onComment={handleComment}
+              onToast={handleToast}
+              onReport={handleReport}
+              onBlockUser={handleBlockUser}
+              onDeletePost={item.user_id === user?.id ? handleDeletePost : undefined}
+              colors={colors}
+            />
+          )}
+        />
+      )}
 
       {/* Comment Sheet Modal */}
       {selectedPostId && (

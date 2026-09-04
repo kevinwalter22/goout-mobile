@@ -48,8 +48,10 @@ export function postsToMapPosts(rows: any[], opts?: { fallbackUsername?: string 
     .map((p) => ({
       id: p.id,
       userId: p.user_id,
-      username: p.username ?? p.author?.username ?? opts?.fallbackUsername ?? null,
-      avatarUrl: p.avatar_url ?? p.author?.avatar_url ?? null,
+      // Feed rows (usePosts) carry a joined `profile`; own/friend-profile rows (useUserPosts) are
+      // bare and rely on fallbackUsername (all one person's posts). Cover both shapes.
+      username: p.username ?? p.profile?.username ?? p.author?.username ?? opts?.fallbackUsername ?? null,
+      avatarUrl: p.avatar_url ?? p.profile?.avatar_url ?? p.author?.avatar_url ?? null,
       caption: p.caption ?? null,
       pinImageUrl: p.pin_image_url ?? null,
       lat: Number(p.verified_lat),
