@@ -1,4 +1,4 @@
-import { aggregatePostsToPlaces, type MapPost } from "../mapPosts";
+import { aggregatePostsToPlaces, postsToMapPosts, type MapPost } from "../mapPosts";
 
 const post = (o: Partial<MapPost>): MapPost => ({
   id: "p", userId: "u", username: "u", avatarUrl: null, caption: null,
@@ -30,5 +30,32 @@ describe("aggregatePostsToPlaces (social map)", () => {
       post({ id: "b", lat: 43.66, lng: -70.25 }),
     ]);
     expect(out).toHaveLength(2);
+  });
+});
+
+describe("postsToMapPosts (row shapes + filtering)", () => {
+  const row = (o: any) => ({
+    id: "p", user_id: "u", verified_lat: 41.25, verified_lng: -74.36,
+    moderation_status: "approved", created_at: "2026-09-01T00:00:00Z", ...o,
+  });
+
+  it("reads the joined feed profile (usePosts shape)", () => {
+    const [m] = postsToMapPosts([row({ profile: { username: "alice", avatar_url: "a.png" } })]);
+    expect(m.username).toBe("alice");
+    expect(m.avatarUrl).toBe("a.png");
+  });
+
+  it("falls back to fallbackUsername for bare profile rows (useUserPosts shape)", () => {
+    const [m] = postsToMapPosts([row({})], { fallbackUsername: "You" });
+    expect(m.username).toBe("You");
+  });
+
+  it("drops non-approved and non-geolocated rows", () => {
+    const out = postsToMapPosts([
+      row({ id: "ok" }),
+      row({ id: "pending", moderation_status: "quarantined" }),
+      row({ id: "nogeo", verified_lat: null, verified_lng: null }),
+    ]);
+    expect(out.map((m) => m.id)).toEqual(["ok"]);
   });
 });
