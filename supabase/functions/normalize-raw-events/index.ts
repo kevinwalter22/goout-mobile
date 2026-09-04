@@ -458,6 +458,37 @@ Deno.serve(async (req) => {
           delete upsertPayload.lng;
         }
 
+        // ── Protect curated enrichment from re-ingest (source-agnostic) ──────────────
+        // Adapters emit hook_line/description as null and tags as generic type-tags on
+        // EVERY re-ingest (Google Places, Ticketmaster, web-collector all do this). A blind
+        // upsert would therefore null a curated hook_line and clobber enriched tags every time
+        // a source's payload drifts — the root cause of the card-ready regression. So look up
+        // the existing row and strip these keys from the payload when they'd downgrade it.
+        // Stripping a key means it's omitted from the ON CONFLICT SET (existing value kept) and
+        // defaults on a fresh INSERT — so first-ingest still enriches normally.
+        const { data: existingRow } = await supabase
+          .from("explore_items")
+          .select("hook_line, description, tags, llm_enriched_at")
+          .eq("source_id", rawData.source_id)
+          .eq("external_id", rawData.external_id)
+          .maybeSingle();
+
+        // hook_line / description: never let an empty incoming value null an existing one.
+        if (upsertPayload.hook_line == null || String(upsertPayload.hook_line).trim() === "") {
+          delete upsertPayload.hook_line;
+        }
+        if (upsertPayload.description == null || String(upsertPayload.description).trim() === "") {
+          delete upsertPayload.description;
+        }
+        // tags: once an item is enriched, don't replace its curated tags with generic ones.
+        if (
+          existingRow?.llm_enriched_at &&
+          Array.isArray(existingRow.tags) &&
+          existingRow.tags.length > 0
+        ) {
+          delete upsertPayload.tags;
+        }
+
         // Upsert into explore_items
         const { data: upserted, error: upsertError } = await supabase
           .from("explore_items")
@@ -500,8 +531,14 @@ Deno.serve(async (req) => {
           .update({ status: "normalized", last_error: null })
           .eq("id", rawData.id);
 
-        // Queue for LLM enrichment if hook_line is empty
-        if (!normalized.hook_line && upserted) {
+        // Queue for LLM enrichment only if the RESULTING ROW genuinely lacks a hook_line —
+        // i.e. the incoming payload has none AND we didn't preserve an existing curated one.
+        // (Previously keyed on `normalized.hook_line`, which adapters always emit as null, so it
+        // re-queued on every single re-ingest — wasteful, and it relied on the queue dead-end to
+        // avoid re-enriching. Now it targets real gaps, which lets migration 190 safely re-queue
+        // 'done' rows.)
+        const finalHook = upsertPayload.hook_line ?? existingRow?.hook_line ?? null;
+        if (!finalHook && upserted) {
           await supabase.rpc("queue_for_enrichment", {
             p_explore_item_id: upserted.id,
             p_priority: normalized.is_anchor ? 80 : 50,
