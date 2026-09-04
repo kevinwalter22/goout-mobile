@@ -34,6 +34,7 @@ import { supabase } from "../../src/lib/supabase";
 import { useToast } from "../../src/context/ToastContext";
 import { useFocusEffect } from "expo-router";
 import { scrollToTopEmitter } from "../../src/utils/scrollToTop";
+import { appEvents } from "../../src/utils/appEvents";
 import { useUpcomingPlans } from "../../src/hooks/useUpcomingPlans";
 import { Colors } from "../../src/config/theme";
 import { useTheme } from "../../src/contexts/ThemeContext";
@@ -135,6 +136,13 @@ export default function Profile() {
     return () => {
       scrollToTopEmitter.off("scrollToTop:profile", handleScrollToTop);
     };
+  }, []);
+
+  // Deep-link: a friend_request notification tap routes here and asks us to open the requests view.
+  useEffect(() => {
+    const openRequests = () => setShowFriendRequests(true);
+    appEvents.on("notification:openFriendRequests", openRequests);
+    return () => appEvents.off("notification:openFriendRequests", openRequests);
   }, []);
 
 

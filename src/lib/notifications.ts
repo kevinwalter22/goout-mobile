@@ -211,28 +211,40 @@ export function handleNotificationResponse(response: any): void {
 
   emitDataEventForNotification(data);
 
-  switch (data.type) {
+  routeForNotification(data.type, data.reference_id);
+}
+
+/**
+ * Single source of truth for where a notification deep-links — used by BOTH a push tap
+ * (handleNotificationResponse) and a tap on a row in the in-app notification center, so every
+ * notification (old and new) lands on the right screen consistently.
+ */
+export function routeForNotification(type: string, referenceId?: string): void {
+  switch (type) {
     case "friend_request":
-      // Navigate to profile tab (shows friend requests badge)
+      // Profile tab, then open the friend-requests view (profile listens for this event).
       router.push("/(tabs)/profile");
+      appEvents.emit("notification:openFriendRequests", {});
       break;
     case "friend_accepted":
-      // Navigate to the user who accepted
-      if (data.reference_id) {
-        router.push(`/user/${data.reference_id}` as any);
-      }
+      if (referenceId) router.push(`/user/${referenceId}` as any);
+      else router.push("/(tabs)/profile");
       break;
     case "event_reminder":
-      // Navigate to the event
-      if (data.reference_id) {
-        router.push(`/event/${data.reference_id}` as any);
-      }
+      if (referenceId) router.push(`/event/${referenceId}` as any);
       break;
     case "post_reaction":
     case "post_comment":
-      // Navigate to the feed where the post is visible
-      router.push("/(tabs)/feed");
+      // The specific post (reference_id = post_id), not just the feed tab.
+      if (referenceId) router.push(`/post/${referenceId}` as any);
+      else router.push("/(tabs)/feed");
       break;
+    case "friend_activity":
+      // Bundled friend-activity → open the center (itemized: each friend's post).
+      router.push("/notifications" as any);
+      break;
+    default:
+      router.push("/notifications" as any);
   }
 }
 

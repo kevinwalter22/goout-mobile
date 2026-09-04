@@ -23,6 +23,7 @@ export default function NotificationSettings() {
   const [friendRequests, setFriendRequests] = useState(true);
   const [postReactions, setPostReactions] = useState(true);
   const [postComments, setPostComments] = useState(true);
+  const [friendActivity, setFriendActivity] = useState(true);
   const [saving, setSaving] = useState(false);
   const [osPermission, setOsPermission] = useState<string | null>(null);
   type TestStatus =
@@ -39,6 +40,7 @@ export default function NotificationSettings() {
       setFriendRequests(profile.notify_friend_requests);
       setPostReactions(profile.notify_post_reactions ?? true);
       setPostComments(profile.notify_post_comments ?? true);
+      setFriendActivity(profile.notify_friend_activity ?? true);
     }
   }, [profile]);
 
@@ -57,7 +59,7 @@ export default function NotificationSettings() {
   }, []);
 
   async function updatePreference(
-    key: "event_reminders" | "friend_requests" | "post_reactions" | "post_comments",
+    key: "event_reminders" | "friend_requests" | "post_reactions" | "post_comments" | "friend_activity",
     value: boolean
   ) {
     if (!profile) return;
@@ -66,12 +68,14 @@ export default function NotificationSettings() {
     const newFriendRequests = key === "friend_requests" ? value : friendRequests;
     const newPostReactions  = key === "post_reactions"  ? value : postReactions;
     const newPostComments   = key === "post_comments"   ? value : postComments;
+    const newFriendActivity = key === "friend_activity" ? value : friendActivity;
 
     // Optimistic update
     if (key === "event_reminders") setEventReminders(value);
     else if (key === "friend_requests") setFriendRequests(value);
     else if (key === "post_reactions") setPostReactions(value);
-    else setPostComments(value);
+    else if (key === "post_comments") setPostComments(value);
+    else setFriendActivity(value);
 
     setSaving(true);
     try {
@@ -81,6 +85,7 @@ export default function NotificationSettings() {
         p_friend_requests: newFriendRequests,
         p_post_reactions: newPostReactions,
         p_post_comments: newPostComments,
+        p_friend_activity: newFriendActivity,
       });
 
       if (error) throw error;
@@ -90,7 +95,8 @@ export default function NotificationSettings() {
       if (key === "event_reminders") setEventReminders(!value);
       else if (key === "friend_requests") setFriendRequests(!value);
       else if (key === "post_reactions") setPostReactions(!value);
-      else setPostComments(!value);
+      else if (key === "post_comments") setPostComments(!value);
+      else setFriendActivity(!value);
     } finally {
       setSaving(false);
     }
@@ -317,6 +323,25 @@ export default function NotificationSettings() {
               <Switch
                 value={postComments}
                 onValueChange={(v) => updatePreference("post_comments", v)}
+                trackColor={{ false: colors.border, true: Colors.primary }}
+                disabled={saving}
+              />
+            </View>
+
+            <View style={{ height: 1, backgroundColor: colors.separator }} />
+
+            {/* Friend Activity Toggle */}
+            <View style={{ flexDirection: "row", alignItems: "center", padding: 16, gap: 12 }}>
+              <Ionicons name="people-circle-outline" size={20} color={colors.textSecondary} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, color: colors.text }}>Friend Activity</Text>
+                <Text style={{ fontSize: 12, color: colors.textTertiary }}>
+                  When friends post or check in near you
+                </Text>
+              </View>
+              <Switch
+                value={friendActivity}
+                onValueChange={(v) => updatePreference("friend_activity", v)}
                 trackColor={{ false: colors.border, true: Colors.primary }}
                 disabled={saving}
               />

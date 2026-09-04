@@ -20,6 +20,7 @@ export type Profile = PublicProfile & {
   notify_friend_requests: boolean;
   notify_post_reactions: boolean;
   notify_post_comments: boolean;
+  notify_friend_activity: boolean;
 };
 
 export type Event = {
