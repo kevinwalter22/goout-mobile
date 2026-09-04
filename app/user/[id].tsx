@@ -1,17 +1,21 @@
-import { useState, useEffect, useRef } from "react";
-import { useLocalSearchParams, router } from "expo-router";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useLocalSearchParams, router, useFocusEffect } from "expo-router";
 import {
   View,
   Text,
   Alert,
+  InteractionManager,
   ScrollView,
   ActivityIndicator,
   Pressable,
   Image,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { ScrollView as GHScrollView } from "react-native-gesture-handler";
 import { useProfile } from "../../src/hooks/useProfile";
 import { useUserPosts } from "../../src/hooks/useUserPosts";
+import { PostsMap } from "../../src/components/PostsMap";
+import { postsToMapPosts } from "../../src/lib/mapPosts";
 import { useFriendCount } from "../../src/hooks/useFriendCount";
 import { useFriendship } from "../../src/hooks/useFriendship";
 import { useBlockUser } from "../../src/hooks/useBlockUser";
@@ -49,9 +53,39 @@ export default function UserProfile() {
   const [showReport, setShowReport] = useState(false);
   const { blockUser } = useBlockUser();
 
+  // Their check-ins as a map — same grid↔map toggle as your own profile. Reuses useUserPosts(id)
+  // (the exact query + gate the grid uses), so it adds NO data access: the map only ever shows
+  // what the grid already shows to this viewer.
+  const [postsView, setPostsView] = useState<"grid" | "map">("grid");
+  const [mapSelId, setMapSelId] = useState<string | null>(null);
+  const mapReturnRef = useRef<string | null>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+
   const isOwnProfile = user?.id === id;
   const isFriends = status === "accepted";
   const canSeeContent = isOwnProfile || isFriends;
+
+  const friendMapPosts = useMemo(
+    () => postsToMapPosts(posts, { fallbackUsername: profile?.username ?? undefined }),
+    [posts, profile?.username],
+  );
+
+  // Back-nav behavior mirrors your own profile: returning from a post opened OUT of the map
+  // restores the map + that place's sheet (map view + scroll are preserved, so no re-scroll);
+  // any other refocus resets to the grid.
+  useFocusEffect(
+    useCallback(() => {
+      if (mapReturnRef.current) {
+        const placeId = mapReturnRef.current;
+        mapReturnRef.current = null;
+        setPostsView("map");
+        InteractionManager.runAfterInteractions(() => setMapSelId(placeId));
+      } else {
+        setPostsView("grid");
+        setMapSelId(null);
+      }
+    }, []),
+  );
 
   // Auto-refresh profile + friend count when friendship is accepted
   const prevStatusRef = useRef(status);
@@ -113,7 +147,8 @@ export default function UserProfile() {
           />
         ) : undefined}
       />
-      <ScrollView style={{ flex: 1 }}>
+      {/* Scroll locks in map view so pan/zoom go to the map, not the page (matches own profile). */}
+      <ScrollView ref={scrollViewRef} style={{ flex: 1 }} scrollEnabled={postsView !== "map"}>
 
       {/* Profile header */}
       <View style={{ padding: 24, gap: 24 }}>
@@ -332,19 +367,68 @@ export default function UserProfile() {
         </View>
       )}
 
-      {/* Posts grid — friends and own profile only */}
+      {/* Posts — grid gallery ↔ inline check-in map (friends and own profile only) */}
       {canSeeContent && (
         <View style={{ padding: 16 }}>
-          <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 16, color: colors.text }}>
-            Posts ({posts.length})
-          </Text>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 16,
+            }}
+          >
+            <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
+              Posts ({posts.length})
+            </Text>
+            {posts.length > 0 && (
+              <View style={{ flexDirection: "row", backgroundColor: colors.border, borderRadius: 8, padding: 2 }}>
+                {(["grid", "map"] as const).map((v) => (
+                  <Pressable
+                    key={v}
+                    onPress={() => {
+                      setPostsView(v);
+                      if (v === "map") {
+                        setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 60);
+                      }
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={v === "grid" ? "Grid view" : "Map view"}
+                    style={{
+                      paddingVertical: 6,
+                      paddingHorizontal: 14,
+                      borderRadius: 6,
+                      backgroundColor: postsView === v ? colors.background : "transparent",
+                    }}
+                  >
+                    <Ionicons
+                      name={v === "grid" ? "grid" : "map"}
+                      size={16}
+                      color={postsView === v ? Colors.primary : colors.textSecondary}
+                    />
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </View>
 
-          {postsLoading ? (
+          {postsLoading && posts.length === 0 ? (
             <ActivityIndicator color={Colors.primary} />
           ) : posts.length === 0 ? (
             <Text style={{ textAlign: "center", color: colors.textSecondary, paddingVertical: 32 }}>
               No posts yet
             </Text>
+          ) : postsView === "map" ? (
+            <PostsMap
+              posts={friendMapPosts}
+              height={440}
+              emptyLabel="No check-ins with a location yet"
+              selectedPlaceId={mapSelId}
+              onSelectedPlaceIdChange={setMapSelId}
+              onDrillToPost={(placeId) => {
+                mapReturnRef.current = placeId;
+              }}
+            />
           ) : (
             <View
               style={{

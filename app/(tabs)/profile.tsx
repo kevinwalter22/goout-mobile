@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
   Alert,
+  InteractionManager,
   Pressable,
   Text,
   View,
@@ -18,6 +19,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../src/hooks/useAuth";
 import { useFriendsList } from "../../src/hooks/useFriendsList";
 import { useUserPosts } from "../../src/hooks/useUserPosts";
+import { PostsMap } from "../../src/components/PostsMap";
+import { postsToMapPosts } from "../../src/lib/mapPosts";
 import { UserSearchSheet } from "../../src/components/UserSearchSheet";
 import { FriendsSheet } from "../../src/components/FriendsSheet";
 import { FriendRequestsSheet } from "../../src/components/FriendRequestsSheet";
@@ -47,6 +50,15 @@ export default function Profile() {
   const { recommendations, loading: recsLoading, sendRequest, refresh: refreshRecs } = useFriendRecommendations(5);
   const { syncing: contactSyncing, needsSync, lastSyncedAt, contactsSyncEnabled, syncNow } = useContactSync();
   const { posts, loading: postsLoading, removePost, refresh: refreshPosts } = useUserPosts(user?.id || null);
+  // Social map: your check-in history as a map (grid ↔ map toggle). All-time — a life-log
+  // of everywhere you've genuinely been. Same posts as the grid, just plotted.
+  const [postsView, setPostsView] = useState<"grid" | "map">("grid");
+  // Controlled who's-been-here selection so we can re-open the exact place on back-nav.
+  const [mapSelId, setMapSelId] = useState<string | null>(null);
+  // When the user drills from the map into a post, we stash the place id here so the next
+  // profile-focus restores map + that place's sheet (instead of the default reset-to-grid).
+  const mapReturnRef = useRef<string | null>(null);
+  const ownMapPosts = useMemo(() => postsToMapPosts(posts, { fallbackUsername: "You" }), [posts]);
   const { plans, loading: plansLoading, refresh: refreshPlans } = useUpcomingPlans(user?.id);
   const { showToast } = useToast();
   const { colors } = useTheme();
@@ -84,9 +96,37 @@ export default function Profile() {
     }, [lastSyncedAt, needsSync, contactsSyncEnabled])
   );
 
+  // Back-navigation behavior on the posts section:
+  //  - Returning from a post the user OPENED from the map pull-up → pop back to exactly that
+  //    view: map + the same place's check-ins re-overlaid (mapReturnRef carries the place id).
+  //  - Any other refocus (Settings, Explore tab, cold focus) → land on the gallery. This is the
+  //    simple "no locked-map trap" guarantee — a returning user never lands stuck in the map.
+  useFocusEffect(
+    useCallback(() => {
+      if (mapReturnRef.current) {
+        // Coming back from a post opened out of the map. The map view AND the scroll position are
+        // already preserved — the tab stayed mounted and the list no longer collapses on refresh —
+        // so the map is still framed exactly where the toggle left it. We deliberately DON'T
+        // re-scroll (that racing scrollToEnd was the source of the inconsistent, glitchy framing).
+        // All we do is re-open that place's sheet, and only after the pop transition settles, so
+        // it's a single clean slide-up with nothing competing against it.
+        const placeId = mapReturnRef.current;
+        mapReturnRef.current = null;
+        setPostsView("map");
+        InteractionManager.runAfterInteractions(() => setMapSelId(placeId));
+      } else {
+        setPostsView("grid");
+        setMapSelId(null);
+      }
+    }, [])
+  );
+
   // Listen for scroll-to-top events
   useEffect(() => {
     const handleScrollToTop = () => {
+      mapReturnRef.current = null;
+      setPostsView("grid");
+      setMapSelId(null);
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     };
 
@@ -224,6 +264,51 @@ export default function Profile() {
     );
   }
 
+  // "Your Posts (N)" + gallery↔map toggle — shared by the gallery ScrollView and the map body.
+  const renderPostsHeader = () => (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 16,
+      }}
+    >
+      <Text style={{ fontSize: 18, fontWeight: "700", color: colors.text }}>
+        Your Posts ({posts.length})
+      </Text>
+      <View style={{ flexDirection: "row", backgroundColor: colors.border, borderRadius: 8, padding: 2 }}>
+        {(["grid", "map"] as const).map((v) => (
+          <Pressable
+            key={v}
+            onPress={() => {
+              setPostsView(v);
+              // Frame the inline map in the viewport before the scroll locks, so panning
+              // starts on a full map (not a sliver). setTimeout lets the map lay out first.
+              if (v === "map") {
+                setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 60);
+              }
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={v === "grid" ? "Grid view" : "Map view"}
+            style={{
+              paddingVertical: 6,
+              paddingHorizontal: 14,
+              borderRadius: 6,
+              backgroundColor: postsView === v ? colors.background : "transparent",
+            }}
+          >
+            <Ionicons
+              name={v === "grid" ? "grid" : "map"}
+              size={16}
+              color={postsView === v ? Colors.primary : colors.textSecondary}
+            />
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Header with logo and settings */}
@@ -249,7 +334,9 @@ export default function Profile() {
         </Pressable>
       </View>
 
-      <ScrollView ref={scrollViewRef} style={{ flex: 1 }}>
+      {/* Scroll locks in map view so pan/zoom gestures go to the map (not the page). The
+          reset-on-focus above handles the return trip — back always lands on the gallery. */}
+      <ScrollView ref={scrollViewRef} style={{ flex: 1 }} scrollEnabled={postsView !== "map"}>
         <View style={{ padding: 24 }}>
         <View style={{ gap: 24 }}>
           {/* Avatar with upload button */}
@@ -600,18 +687,33 @@ export default function Profile() {
           </View>
         )}
 
-        {/* Posts grid */}
+        {/* Posts — gallery ↔ inline map toggle (Option B: the map lives inline in this scroll). */}
         <View style={{ marginTop: 32 }}>
-          <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 16, color: colors.text }}>
-            Your Posts ({posts.length})
-          </Text>
+          {renderPostsHeader()}
 
-          {postsLoading ? (
+          {/* Loader ONLY on the first load. On a refresh (posts already present) we keep the
+              grid/map mounted — otherwise the content collapses to a spinner and the scroll
+              snaps to the top, which is exactly what broke the back-from-map framing. */}
+          {postsLoading && posts.length === 0 ? (
             <ActivityIndicator />
           ) : posts.length === 0 ? (
             <Text style={{ textAlign: "center", color: colors.textSecondary, paddingVertical: 32 }}>
               No posts yet. Check in at an event to create your first post!
             </Text>
+          ) : postsView === "map" ? (
+            /* Inline map — lives in the scroll (the toggle frames it via scrollToEnd; the scroll
+               locks while it's shown so pan/zoom go to the map). Back from a drilled post restores
+               THIS view (map + sheet) via the focus effect above; other refocuses reset to grid. */
+            <PostsMap
+              posts={ownMapPosts}
+              height={440}
+              emptyLabel="No check-ins with a location yet"
+              selectedPlaceId={mapSelId}
+              onSelectedPlaceIdChange={setMapSelId}
+              onDrillToPost={(placeId) => {
+                mapReturnRef.current = placeId;
+              }}
+            />
           ) : (
             <View
               style={{
@@ -645,6 +747,7 @@ export default function Profile() {
           )}
         </View>
       </View>
+      </ScrollView>
 
       {/* Modals */}
       <UserSearchSheet
@@ -737,7 +840,6 @@ export default function Profile() {
           </View>
         </View>
       </Modal>
-      </ScrollView>
     </View>
   );
 }
