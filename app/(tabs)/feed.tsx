@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePosts, type PostWithDetails } from "../../src/hooks/usePosts";
 import { PostsMap } from "../../src/components/PostsMap";
 import { postsToMapPosts } from "../../src/lib/mapPosts";
+import { useUnreadNotificationCount } from "../../src/hooks/useNotifications";
 import { PostImage } from "../../src/components/PostImage";
 import { DualCameraPost } from "../../src/components/DualCameraPost";
 import { ZoomableImage } from "../../src/components/ZoomableImage";
@@ -218,6 +219,7 @@ export default function Feed() {
   const [feedView, setFeedView] = useState<"list" | "map">("list");
   const [mapSelId, setMapSelId] = useState<string | null>(null);
   const mapReturnRef = useRef<string | null>(null);
+  const { count: unreadCount, refresh: refreshUnread } = useUnreadNotificationCount();
 
   // Filter out posts from blocked users
   const visiblePosts = posts.filter((p) => !blockedIds.has(p.user_id));
@@ -233,6 +235,7 @@ export default function Feed() {
   // any other refocus (tab switch, cold start) shows the list.
   useFocusEffect(
     useCallback(() => {
+      refreshUnread(); // keep the bell badge current when returning to the feed
       if (mapReturnRef.current) {
         const placeId = mapReturnRef.current;
         mapReturnRef.current = null;
@@ -242,7 +245,7 @@ export default function Feed() {
         setFeedView("list");
         setMapSelId(null);
       }
-    }, []),
+    }, [refreshUnread]),
   );
 
   // Stable callbacks for memoized FeedItem
@@ -376,7 +379,36 @@ export default function Feed() {
           style={{ width: 120, height: 48, marginLeft: -8 }}
           resizeMode="contain"
         />
-        {/* List ↔ map toggle, top-right (opposite the euda logo). Map = you + friends, last 30 days. */}
+        {/* Right cluster: notification bell (with unread badge) + list/map toggle. */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+          <Pressable
+            onPress={() => router.push("/notifications" as any)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          >
+            <Ionicons name="notifications-outline" size={24} color={colors.text} />
+            {unreadCount > 0 && (
+              <View
+                style={{
+                  position: "absolute",
+                  top: -5,
+                  right: -6,
+                  minWidth: 17,
+                  height: 17,
+                  borderRadius: 9,
+                  paddingHorizontal: 4,
+                  backgroundColor: Colors.error,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text style={{ color: Colors.white, fontSize: 10, fontWeight: "700" }}>
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </Text>
+              </View>
+            )}
+          </Pressable>
         <View style={{ flexDirection: "row", backgroundColor: colors.border, borderRadius: 8, padding: 2 }}>
           {(["list", "map"] as const).map((v) => (
             <Pressable
@@ -398,6 +430,7 @@ export default function Feed() {
               />
             </Pressable>
           ))}
+        </View>
         </View>
       </View>
 

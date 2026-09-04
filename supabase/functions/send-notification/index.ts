@@ -119,6 +119,31 @@ async function sendExpoPush(
   return messages.length;
 }
 
+// Write the in-app notification-center row (mig 191) alongside the push, so the center is a real
+// record and the row carries the deep-link target. Non-fatal — a center-write failure must not
+// break push delivery.
+async function writeCenterRow(
+  supabase: ReturnType<typeof createClient>,
+  recipientId: string,
+  type: NotificationType,
+  actorName: string,
+  targetRoute: string | null,
+  referenceId: string | null,
+  actorId: string | null,
+): Promise<void> {
+  const msg = NOTIFICATION_MESSAGES[type];
+  const { error } = await supabase.rpc("create_notification", {
+    p_user_id: recipientId,
+    p_type: type,
+    p_title: msg.title,
+    p_body: msg.body(actorName),
+    p_target_route: targetRoute,
+    p_reference_id: referenceId,
+    p_actor_id: actorId,
+  });
+  if (error) console.error("create_notification failed (non-fatal):", error.message);
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -231,6 +256,17 @@ async function handleFriendNotification(
     .single();
   const actorName = senderProfile?.username || "Someone";
 
+  // 3.5 Record the center row (even if the recipient has no push token, so it still shows in-app).
+  await writeCenterRow(
+    supabase,
+    recipient_id,
+    type,
+    actorName,
+    type === "friend_accepted" ? `/user/${user.id}` : "/(tabs)/profile",
+    type === "friend_accepted" ? user.id : null,
+    user.id,
+  );
+
   // 4. Get recipient push tokens
   const { data: tokens } = await supabase
     .from("push_tokens")
@@ -238,6 +274,12 @@ async function handleFriendNotification(
     .eq("user_id", recipient_id);
 
   if (!tokens || tokens.length === 0) {
+    // Center row already written above; dedup entry so we don't re-record on retry.
+    await supabase.from("notifications_sent").insert({
+      user_id: recipient_id,
+      notification_type: type,
+      reference_id: dedupRefId,
+    });
     return new Response(
       JSON.stringify({ skipped: "no_tokens" }),
       { status: 200, headers }
@@ -359,6 +401,9 @@ async function handlePostNotification(
     .single();
   const actorName = actorProfile?.username || "Someone";
 
+  // 5.5 Record the center row (deep-links to the specific post), even if no push token exists.
+  await writeCenterRow(supabase, recipient_id, type, actorName, `/post/${post_id}`, post_id, actor_id);
+
   // 6. Get recipient push tokens
   const { data: tokens } = await supabase
     .from("push_tokens")
@@ -366,6 +411,11 @@ async function handlePostNotification(
     .eq("user_id", recipient_id);
 
   if (!tokens || tokens.length === 0) {
+    await supabase.from("notifications_sent").insert({
+      user_id: recipient_id,
+      notification_type: type,
+      reference_id: dedupRefId,
+    });
     return new Response(
       JSON.stringify({ skipped: "no_tokens" }),
       { status: 200, headers }

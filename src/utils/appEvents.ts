@@ -7,7 +7,8 @@
 
 type EventName =
   | "notification:friendRequest"
-  | "notification:friendAccepted";
+  | "notification:friendAccepted"
+  | "notification:openFriendRequests";
 
 type Payload = {
   // friend_request: the sender is not currently included in the push payload
@@ -17,6 +18,9 @@ type Payload = {
   // friend_accepted: accepterId is the user who accepted (taken from the push
   // data.reference_id, which the edge function sets to the actor's id).
   "notification:friendAccepted": { accepterId?: string };
+  // Deep-link asked the Profile tab to open the friend-requests view (from a
+  // friend_request notification tap). Profile listens and opens the sheet.
+  "notification:openFriendRequests": Record<string, never>;
 };
 
 type Listener<E extends EventName> = (payload: Payload[E]) => void;
