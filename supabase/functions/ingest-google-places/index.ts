@@ -567,7 +567,14 @@ Deno.serve(async (req) => {
         }
 
         try {
-          const rawHash = await hashJson(place);
+          // Change-detection hash EXCLUDES volatile fields (rating, userRatingCount) — these
+          // drift constantly on popular venues and would otherwise re-trigger a full normalize
+          // of a stable place on nearly every weekly crawl (needless churn + cost). We only want
+          // to re-ingest when something substantive changes (name, address, hours, type, website).
+          const stableForHash: Record<string, unknown> = { ...place };
+          delete stableForHash.rating;
+          delete stableForHash.userRatingCount;
+          const rawHash = await hashJson(stableForHash);
           const existingHash = existingHashes.get(externalId);
 
           if (existingHash === rawHash) {
